@@ -17,3 +17,7 @@ version = "0.0.0"
 [[package]]
 name = "mutest-mutations"
 version = "0.0.0"
+
+[[package]]
+name = "mutest-runtime"
+version = "0.0.0"
