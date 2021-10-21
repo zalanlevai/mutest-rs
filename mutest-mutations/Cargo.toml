@@ -5,4 +5,7 @@ name = "mutest-mutations"
 version = "0.0.0"
 edition = "2021"
 
+[package.metadata.rust-analyzer]
+rustc_private = true
+
 [dependencies]
