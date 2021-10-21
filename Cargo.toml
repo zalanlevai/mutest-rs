@@ -4,5 +4,6 @@ members = [
     "mutest-bridge",
     "mutest-driver",
     "mutest-emit",
+    "mutest-mutations",
     "mutest-runtime",
 ]
