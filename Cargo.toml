@@ -3,4 +3,5 @@ members = [
     "mutest",
     "mutest-core",
     "mutest-driver",
+    "mutest-mutations",
 ]
