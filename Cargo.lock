@@ -5,3 +5,7 @@ version = 3
 [[package]]
 name = "mutest"
 version = "0.0.0"
+
+[[package]]
+name = "mutest-core"
+version = "0.0.0"
