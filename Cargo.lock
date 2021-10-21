@@ -15,5 +15,9 @@ name = "mutest-emit"
 version = "0.0.0"
 
 [[package]]
+name = "mutest-operators"
+version = "0.0.0"
+
+[[package]]
 name = "mutest-runtime"
 version = "0.0.0"
