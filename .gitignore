@@ -1,0 +1,45 @@
+# Environment Configuration
+
+## Environment variables files
+.env
+.env.development
+.env.test
+
+# Build Tools
+
+## Build output
+target
+
+# Logs
+
+logs
+*.log
+
+# OS / Filesystem Metadata
+
+## macOS
+
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+![iI]con[_a-zA-Z0-9]
+
+### Thumbnails
+._*
+
+### Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+### Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
