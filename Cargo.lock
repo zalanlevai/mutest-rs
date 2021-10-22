@@ -5,6 +5,9 @@ version = 3
 [[package]]
 name = "mutest"
 version = "0.0.0"
+dependencies = [
+ "mutest-driver",
+]
 
 [[package]]
 name = "mutest-core"

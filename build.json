@@ -1,0 +1,342 @@
+{
+    "invocations": [
+        {
+            "package_name": "mutest-driver",
+            "package_version": "0.0.0",
+            "target_kind": [
+                "lib"
+            ],
+            "kind": null,
+            "compile_mode": "build",
+            "deps": [],
+            "outputs": [
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_driver-39a6c68f9264c9ca.rlib",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_driver-39a6c68f9264c9ca.rmeta"
+            ],
+            "links": {
+                "/Users/zalanlevai/Developer/mutest/target/debug/libmutest_driver.rlib": "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_driver-39a6c68f9264c9ca.rlib"
+            },
+            "program": "rustc",
+            "args": [
+                "--crate-name",
+                "mutest_driver",
+                "--edition=2021",
+                "mutest-driver/src/lib.rs",
+                "--error-format=json",
+                "--json=diagnostic-rendered-ansi",
+                "--crate-type",
+                "lib",
+                "--emit=dep-info,metadata,link",
+                "-C",
+                "embed-bitcode=no",
+                "-C",
+                "split-debuginfo=unpacked",
+                "-C",
+                "debuginfo=2",
+                "-C",
+                "metadata=39a6c68f9264c9ca",
+                "-C",
+                "extra-filename=-39a6c68f9264c9ca",
+                "--out-dir",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps",
+                "-C",
+                "incremental=/Users/zalanlevai/Developer/mutest/target/debug/incremental",
+                "-L",
+                "dependency=/Users/zalanlevai/Developer/mutest/target/debug/deps"
+            ],
+            "env": {
+                "CARGO": "/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/bin/cargo",
+                "CARGO_CRATE_NAME": "mutest_driver",
+                "CARGO_MANIFEST_DIR": "/Users/zalanlevai/Developer/mutest/mutest-driver",
+                "CARGO_PKG_AUTHORS": "",
+                "CARGO_PKG_DESCRIPTION": "",
+                "CARGO_PKG_HOMEPAGE": "",
+                "CARGO_PKG_LICENSE": "",
+                "CARGO_PKG_LICENSE_FILE": "",
+                "CARGO_PKG_NAME": "mutest-driver",
+                "CARGO_PKG_REPOSITORY": "",
+                "CARGO_PKG_VERSION": "0.0.0",
+                "CARGO_PKG_VERSION_MAJOR": "0",
+                "CARGO_PKG_VERSION_MINOR": "0",
+                "CARGO_PKG_VERSION_PATCH": "0",
+                "CARGO_PKG_VERSION_PRE": "",
+                "CARGO_PRIMARY_PACKAGE": "1",
+                "DYLD_FALLBACK_LIBRARY_PATH": "/Users/zalanlevai/Developer/mutest/target/debug/deps:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/lib:/usr/local/lib:/usr/lib"
+            },
+            "cwd": "/Users/zalanlevai/Developer/mutest"
+        },
+        {
+            "package_name": "mutest",
+            "package_version": "0.0.0",
+            "target_kind": [
+                "bin"
+            ],
+            "kind": null,
+            "compile_mode": "build",
+            "deps": [
+                0
+            ],
+            "outputs": [
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/mutest-cba21e5ce2a0b0ea",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/mutest-cba21e5ce2a0b0ea.dSYM"
+            ],
+            "links": {
+                "/Users/zalanlevai/Developer/mutest/target/debug/mutest": "/Users/zalanlevai/Developer/mutest/target/debug/deps/mutest-cba21e5ce2a0b0ea",
+                "/Users/zalanlevai/Developer/mutest/target/debug/mutest.dSYM": "/Users/zalanlevai/Developer/mutest/target/debug/deps/mutest-cba21e5ce2a0b0ea.dSYM"
+            },
+            "program": "rustc",
+            "args": [
+                "--crate-name",
+                "mutest",
+                "--edition=2021",
+                "mutest/src/main.rs",
+                "--error-format=json",
+                "--json=diagnostic-rendered-ansi",
+                "--crate-type",
+                "bin",
+                "--emit=dep-info,link",
+                "-C",
+                "embed-bitcode=no",
+                "-C",
+                "split-debuginfo=unpacked",
+                "-C",
+                "debuginfo=2",
+                "-C",
+                "metadata=cba21e5ce2a0b0ea",
+                "-C",
+                "extra-filename=-cba21e5ce2a0b0ea",
+                "--out-dir",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps",
+                "-C",
+                "incremental=/Users/zalanlevai/Developer/mutest/target/debug/incremental",
+                "-L",
+                "dependency=/Users/zalanlevai/Developer/mutest/target/debug/deps",
+                "--extern",
+                "mutest_driver=/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_driver-39a6c68f9264c9ca.rlib"
+            ],
+            "env": {
+                "CARGO": "/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/bin/cargo",
+                "CARGO_BIN_NAME": "mutest",
+                "CARGO_CRATE_NAME": "mutest",
+                "CARGO_MANIFEST_DIR": "/Users/zalanlevai/Developer/mutest/mutest",
+                "CARGO_PKG_AUTHORS": "",
+                "CARGO_PKG_DESCRIPTION": "",
+                "CARGO_PKG_HOMEPAGE": "",
+                "CARGO_PKG_LICENSE": "",
+                "CARGO_PKG_LICENSE_FILE": "",
+                "CARGO_PKG_NAME": "mutest",
+                "CARGO_PKG_REPOSITORY": "",
+                "CARGO_PKG_VERSION": "0.0.0",
+                "CARGO_PKG_VERSION_MAJOR": "0",
+                "CARGO_PKG_VERSION_MINOR": "0",
+                "CARGO_PKG_VERSION_PATCH": "0",
+                "CARGO_PKG_VERSION_PRE": "",
+                "CARGO_PRIMARY_PACKAGE": "1",
+                "DYLD_FALLBACK_LIBRARY_PATH": "/Users/zalanlevai/Developer/mutest/target/debug/deps:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/lib:/usr/local/lib:/usr/lib"
+            },
+            "cwd": "/Users/zalanlevai/Developer/mutest"
+        },
+        {
+            "package_name": "mutest-core",
+            "package_version": "0.0.0",
+            "target_kind": [
+                "lib"
+            ],
+            "kind": null,
+            "compile_mode": "build",
+            "deps": [],
+            "outputs": [
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_core-cf32efb71c88d8bf.rlib",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_core-cf32efb71c88d8bf.rmeta"
+            ],
+            "links": {
+                "/Users/zalanlevai/Developer/mutest/target/debug/libmutest_core.rlib": "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_core-cf32efb71c88d8bf.rlib"
+            },
+            "program": "rustc",
+            "args": [
+                "--crate-name",
+                "mutest_core",
+                "--edition=2021",
+                "mutest-core/src/lib.rs",
+                "--error-format=json",
+                "--json=diagnostic-rendered-ansi",
+                "--crate-type",
+                "lib",
+                "--emit=dep-info,metadata,link",
+                "-C",
+                "embed-bitcode=no",
+                "-C",
+                "split-debuginfo=unpacked",
+                "-C",
+                "debuginfo=2",
+                "-C",
+                "metadata=cf32efb71c88d8bf",
+                "-C",
+                "extra-filename=-cf32efb71c88d8bf",
+                "--out-dir",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps",
+                "-C",
+                "incremental=/Users/zalanlevai/Developer/mutest/target/debug/incremental",
+                "-L",
+                "dependency=/Users/zalanlevai/Developer/mutest/target/debug/deps"
+            ],
+            "env": {
+                "CARGO": "/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/bin/cargo",
+                "CARGO_CRATE_NAME": "mutest_core",
+                "CARGO_MANIFEST_DIR": "/Users/zalanlevai/Developer/mutest/mutest-core",
+                "CARGO_PKG_AUTHORS": "",
+                "CARGO_PKG_DESCRIPTION": "",
+                "CARGO_PKG_HOMEPAGE": "",
+                "CARGO_PKG_LICENSE": "",
+                "CARGO_PKG_LICENSE_FILE": "",
+                "CARGO_PKG_NAME": "mutest-core",
+                "CARGO_PKG_REPOSITORY": "",
+                "CARGO_PKG_VERSION": "0.0.0",
+                "CARGO_PKG_VERSION_MAJOR": "0",
+                "CARGO_PKG_VERSION_MINOR": "0",
+                "CARGO_PKG_VERSION_PATCH": "0",
+                "CARGO_PKG_VERSION_PRE": "",
+                "CARGO_PRIMARY_PACKAGE": "1",
+                "DYLD_FALLBACK_LIBRARY_PATH": "/Users/zalanlevai/Developer/mutest/target/debug/deps:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/lib:/usr/local/lib:/usr/lib"
+            },
+            "cwd": "/Users/zalanlevai/Developer/mutest"
+        },
+        {
+            "package_name": "mutest-mutations",
+            "package_version": "0.0.0",
+            "target_kind": [
+                "lib"
+            ],
+            "kind": null,
+            "compile_mode": "build",
+            "deps": [],
+            "outputs": [
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_mutations-d2cd60c1f6cefdd3.rlib",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_mutations-d2cd60c1f6cefdd3.rmeta"
+            ],
+            "links": {
+                "/Users/zalanlevai/Developer/mutest/target/debug/libmutest_mutations.rlib": "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_mutations-d2cd60c1f6cefdd3.rlib"
+            },
+            "program": "rustc",
+            "args": [
+                "--crate-name",
+                "mutest_mutations",
+                "--edition=2021",
+                "mutest-mutations/src/lib.rs",
+                "--error-format=json",
+                "--json=diagnostic-rendered-ansi",
+                "--crate-type",
+                "lib",
+                "--emit=dep-info,metadata,link",
+                "-C",
+                "embed-bitcode=no",
+                "-C",
+                "split-debuginfo=unpacked",
+                "-C",
+                "debuginfo=2",
+                "-C",
+                "metadata=d2cd60c1f6cefdd3",
+                "-C",
+                "extra-filename=-d2cd60c1f6cefdd3",
+                "--out-dir",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps",
+                "-C",
+                "incremental=/Users/zalanlevai/Developer/mutest/target/debug/incremental",
+                "-L",
+                "dependency=/Users/zalanlevai/Developer/mutest/target/debug/deps"
+            ],
+            "env": {
+                "CARGO": "/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/bin/cargo",
+                "CARGO_CRATE_NAME": "mutest_mutations",
+                "CARGO_MANIFEST_DIR": "/Users/zalanlevai/Developer/mutest/mutest-mutations",
+                "CARGO_PKG_AUTHORS": "",
+                "CARGO_PKG_DESCRIPTION": "",
+                "CARGO_PKG_HOMEPAGE": "",
+                "CARGO_PKG_LICENSE": "",
+                "CARGO_PKG_LICENSE_FILE": "",
+                "CARGO_PKG_NAME": "mutest-mutations",
+                "CARGO_PKG_REPOSITORY": "",
+                "CARGO_PKG_VERSION": "0.0.0",
+                "CARGO_PKG_VERSION_MAJOR": "0",
+                "CARGO_PKG_VERSION_MINOR": "0",
+                "CARGO_PKG_VERSION_PATCH": "0",
+                "CARGO_PKG_VERSION_PRE": "",
+                "CARGO_PRIMARY_PACKAGE": "1",
+                "DYLD_FALLBACK_LIBRARY_PATH": "/Users/zalanlevai/Developer/mutest/target/debug/deps:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/lib:/usr/local/lib:/usr/lib"
+            },
+            "cwd": "/Users/zalanlevai/Developer/mutest"
+        },
+        {
+            "package_name": "mutest-runtime",
+            "package_version": "0.0.0",
+            "target_kind": [
+                "lib"
+            ],
+            "kind": null,
+            "compile_mode": "build",
+            "deps": [],
+            "outputs": [
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_runtime-9cb4d3ff04b9229d.rlib",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_runtime-9cb4d3ff04b9229d.rmeta"
+            ],
+            "links": {
+                "/Users/zalanlevai/Developer/mutest/target/debug/libmutest_runtime.rlib": "/Users/zalanlevai/Developer/mutest/target/debug/deps/libmutest_runtime-9cb4d3ff04b9229d.rlib"
+            },
+            "program": "rustc",
+            "args": [
+                "--crate-name",
+                "mutest_runtime",
+                "--edition=2021",
+                "mutest-runtime/src/lib.rs",
+                "--error-format=json",
+                "--json=diagnostic-rendered-ansi",
+                "--crate-type",
+                "lib",
+                "--emit=dep-info,metadata,link",
+                "-C",
+                "embed-bitcode=no",
+                "-C",
+                "split-debuginfo=unpacked",
+                "-C",
+                "debuginfo=2",
+                "-C",
+                "metadata=9cb4d3ff04b9229d",
+                "-C",
+                "extra-filename=-9cb4d3ff04b9229d",
+                "--out-dir",
+                "/Users/zalanlevai/Developer/mutest/target/debug/deps",
+                "-C",
+                "incremental=/Users/zalanlevai/Developer/mutest/target/debug/incremental",
+                "-L",
+                "dependency=/Users/zalanlevai/Developer/mutest/target/debug/deps"
+            ],
+            "env": {
+                "CARGO": "/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/bin/cargo",
+                "CARGO_CRATE_NAME": "mutest_runtime",
+                "CARGO_MANIFEST_DIR": "/Users/zalanlevai/Developer/mutest/mutest-runtime",
+                "CARGO_PKG_AUTHORS": "",
+                "CARGO_PKG_DESCRIPTION": "",
+                "CARGO_PKG_HOMEPAGE": "",
+                "CARGO_PKG_LICENSE": "",
+                "CARGO_PKG_LICENSE_FILE": "",
+                "CARGO_PKG_NAME": "mutest-runtime",
+                "CARGO_PKG_REPOSITORY": "",
+                "CARGO_PKG_VERSION": "0.0.0",
+                "CARGO_PKG_VERSION_MAJOR": "0",
+                "CARGO_PKG_VERSION_MINOR": "0",
+                "CARGO_PKG_VERSION_PATCH": "0",
+                "CARGO_PKG_VERSION_PRE": "",
+                "CARGO_PRIMARY_PACKAGE": "1",
+                "DYLD_FALLBACK_LIBRARY_PATH": "/Users/zalanlevai/Developer/mutest/target/debug/deps:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/.rustup/toolchains/nightly-2021-10-20-aarch64-apple-darwin/lib:/Users/zalanlevai/lib:/usr/local/lib:/usr/lib"
+            },
+            "cwd": "/Users/zalanlevai/Developer/mutest"
+        }
+    ],
+    "inputs": [
+        "/Users/zalanlevai/Developer/mutest/mutest/Cargo.toml",
+        "/Users/zalanlevai/Developer/mutest/mutest-core/Cargo.toml",
+        "/Users/zalanlevai/Developer/mutest/mutest-driver/Cargo.toml",
+        "/Users/zalanlevai/Developer/mutest/mutest-mutations/Cargo.toml",
+        "/Users/zalanlevai/Developer/mutest/mutest-runtime/Cargo.toml"
+    ]
+}

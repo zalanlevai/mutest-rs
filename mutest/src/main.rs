@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    mutest_driver::main()
 }
