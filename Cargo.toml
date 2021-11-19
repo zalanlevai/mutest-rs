@@ -1,0 +1,10 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "mutest-test"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+mutest-mutations = { path = "../mutest/mutest-mutations" }
+mutest-runtime = { path = "../mutest/mutest-runtime" }

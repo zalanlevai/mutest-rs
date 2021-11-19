@@ -1,0 +1,9 @@
+mutations:
+    - id: ug7SqB
+      kind: REPLACE_ARG_WITH_DEFAULT
+      data:
+        ident: n
+    - id: zq3jEr
+      kind: SAFE_REPLACE_EXPR_WITH_VALUE
+      data:
+        value: true
