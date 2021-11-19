@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "mutest",
+    "mutest-bridge",
     "mutest-driver",
     "mutest-emit",
     "mutest-runtime",
