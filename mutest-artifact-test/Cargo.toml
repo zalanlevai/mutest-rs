@@ -1,9 +1,11 @@
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "mutest-mutations"
+name = "mutest-artifact-test"
 version = "0.0.0"
 edition = "2021"
 
 [dependencies]
 mutest-bridge = { path = "../mutest-bridge" }
+mutest-runtime = { path = "../mutest-runtime" }
+mutest-mutations = { path = "../mutest-mutations" }

@@ -3,8 +3,26 @@
 version = 3
 
 [[package]]
+name = "base64"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
+
+[[package]]
 name = "mutest"
 version = "0.0.0"
+dependencies = [
+ "mutest-driver",
+]
+
+[[package]]
+name = "mutest-artifact-test"
+version = "0.0.0"
+dependencies = [
+ "mutest-bridge",
+ "mutest-mutations",
+ "mutest-runtime",
+]
 
 [[package]]
 name = "mutest-bridge"
@@ -13,19 +31,38 @@ version = "0.0.0"
 [[package]]
 name = "mutest-driver"
 version = "0.0.0"
+dependencies = [
+ "mutest-emit",
+ "mutest-mutators",
+]
 
 [[package]]
 name = "mutest-emit"
 version = "0.0.0"
+dependencies = [
+ "base64",
+ "mutest-bridge",
+]
 
 [[package]]
 name = "mutest-mutations"
 version = "0.0.0"
+dependencies = [
+ "mutest-bridge",
+]
 
 [[package]]
 name = "mutest-mutators"
 version = "0.0.0"
+dependencies = [
+ "mutest-bridge",
+ "mutest-emit",
+ "mutest-mutations",
+]
 
 [[package]]
 name = "mutest-runtime"
 version = "0.0.0"
+dependencies = [
+ "mutest-bridge",
+]

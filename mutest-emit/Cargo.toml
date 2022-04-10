@@ -9,3 +9,6 @@ edition = "2021"
 rustc_private = true
 
 [dependencies]
+mutest-bridge = { path = "../mutest-bridge" }
+
+base64 = "0.13"
