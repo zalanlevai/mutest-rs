@@ -5,10 +5,17 @@ version = 3
 [[package]]
 name = "mutest"
 version = "0.0.0"
+dependencies = [
+ "mutest-driver",
+]
 
 [[package]]
 name = "mutest-driver"
 version = "0.0.0"
+dependencies = [
+ "mutest-emit",
+ "mutest-operators",
+]
 
 [[package]]
 name = "mutest-emit"
@@ -17,6 +24,9 @@ version = "0.0.0"
 [[package]]
 name = "mutest-operators"
 version = "0.0.0"
+dependencies = [
+ "mutest-emit",
+]
 
 [[package]]
 name = "mutest-runtime"

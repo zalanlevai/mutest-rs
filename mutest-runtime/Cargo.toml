@@ -5,4 +5,14 @@ name = "mutest-runtime"
 version = "0.0.0"
 edition = "2021"
 
+# FIXME: rustc requires libraries in the search path to be in rlib format. Once proper dependency
+#        resolution in generated code is implemented, cargo might be able to inject the crate for us.
+[lib]
+crate-type = ["rlib"]
+
+# FIXME: Switch to using `paring_lot` from crates.io once proper dependency resolution in generated
+#        code is implemented. Currently we conflict with the version used internally by rustc.
+[package.metadata.rust-analyzer]
+rustc_private = true
+
 [dependencies]
