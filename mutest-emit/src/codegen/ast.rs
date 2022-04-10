@@ -499,7 +499,7 @@ pub mod mk {
     }
 
     pub fn item_mod(sp: Span, vis: ast::Visibility, ident: Ident, items: Vec<P<ast::Item>>) -> P<ast::Item> {
-        let mod_kind = ast::ModKind::Loaded(items, ast::Inline::Yes, sp);
+        let mod_kind = ast::ModKind::Loaded(items, ast::Inline::Yes, ast::ModSpans { inner_span: sp, inject_use_span: sp });
         self::item(sp, vec![], vis, ident, ast::ItemKind::Mod(ast::Unsafe::No, mod_kind))
     }
 
@@ -613,7 +613,7 @@ pub mod mk {
     }
 
     pub fn ts_path(sp: Span, mut path: ast::Path) -> Vec<ast::tokenstream::TreeAndSpacing> {
-        assert!(path.segments.last().is_some_with(|s| s.args.is_none()));
+        assert!(path.segments.last().is_some_and(|s| s.args.is_none()));
 
         let path_sep_token = |sp: Span| self::ts_token(sp, ast::tokenstream::Spacing::Joint, ast::token::TokenKind::ModSep);
         let segment_token = |sp: Span, segment: ast::PathSegment| self::ts_token(sp, ast::tokenstream::Spacing::Joint, ast::token::TokenKind::Ident(segment.ident.name, false));

@@ -14,7 +14,7 @@ use crate::codegen::symbols::hygiene::AstPass;
 
 fn is_cfg_test_attr(attr: &ast::Attribute) -> bool {
     // `#[cfg(test)]`
-    attr.has_name(sym::cfg) && attr.meta_item_list().is_some_with(|list| list.iter().any(|item| item.has_name(sym::test)))
+    attr.has_name(sym::cfg) && attr.meta_item_list().is_some_and(|list| list.iter().any(|item| item.has_name(sym::test)))
 }
 
 fn unambiguous_test_item_ident(ident: &Ident) -> Ident {
@@ -126,7 +126,7 @@ fn entry_point_type(item: &ast::Item, depth: usize) -> EntryPointType {
 
 fn is_allow_dead_code_attr(attr: &ast::Attribute) -> bool {
     // `#[allow(dead_code)]`
-    attr.has_name(sym::allow) && attr.meta_item_list().is_some_with(|list| list.iter().any(|item| item.has_name(sym::dead_code)))
+    attr.has_name(sym::allow) && attr.meta_item_list().is_some_and(|list| list.iter().any(|item| item.has_name(sym::dead_code)))
 }
 
 struct EntryPointCleaner {
