@@ -1,7 +1,8 @@
 use std::iter;
 
-use rustc_expand::base::ExtCtxt;
+use rustc_expand::base::ResolverExpand;
 use rustc_hash::FxHashSet;
+use rustc_resolve::Resolver;
 
 use crate::codegen::ast;
 use crate::codegen::ast::P;
@@ -206,8 +207,8 @@ impl<'op> ast::mut_visit::MutVisitor for HarnessGenerator<'op> {
     }
 }
 
-pub fn generate_harness(ecx: &mut ExtCtxt<'_>, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
-    let expn_id = ecx.resolver.expansion_for_ast_pass(
+pub fn generate_harness(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
+    let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
         &[sym::test, sym::rustc_attrs],

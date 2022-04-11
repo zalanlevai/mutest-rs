@@ -7,6 +7,7 @@
 extern crate rustc_ast;
 extern crate rustc_expand;
 extern crate rustc_hash;
+extern crate rustc_resolve;
 extern crate rustc_session;
 extern crate rustc_span;
 

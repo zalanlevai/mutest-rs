@@ -1,7 +1,8 @@
 use std::iter;
 
 use itertools::Itertools;
-use rustc_expand::base::ExtCtxt;
+use rustc_expand::base::ResolverExpand;
+use rustc_resolve::Resolver;
 use smallvec::{SmallVec, smallvec};
 
 use crate::analysis::tests::Test;
@@ -175,8 +176,8 @@ pub fn clean_entry_points(krate: &mut ast::Crate) {
     cleaner.visit_crate(krate);
 }
 
-pub fn generate_dummy_main(ecx: &mut ExtCtxt<'_>, krate: &mut ast::Crate) {
-    let expn_id = ecx.resolver.expansion_for_ast_pass(
+pub fn generate_dummy_main(resolver: &mut Resolver, krate: &mut ast::Crate) {
+    let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
         &[sym::test, sym::rustc_attrs],

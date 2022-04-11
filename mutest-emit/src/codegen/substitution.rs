@@ -1,5 +1,6 @@
-use rustc_expand::base::ExtCtxt;
+use rustc_expand::base::ResolverExpand;
 use rustc_hash::FxHashMap;
+use rustc_resolve::Resolver;
 
 use crate::codegen::ast;
 use crate::codegen::ast::P;
@@ -163,7 +164,7 @@ impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
     }
 }
 
-pub fn write_substitutions(ecx: &mut ExtCtxt<'_>, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
+pub fn write_substitutions(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
     let mut substitutions: FxHashMap<SubstLoc, Vec<(MutId, &Subst)>> = Default::default();
     for mutant in mutants {
         for mutation in &mutant.mutations {
@@ -177,7 +178,7 @@ pub fn write_substitutions(ecx: &mut ExtCtxt<'_>, mutants: &Vec<Mutant>, krate: 
         }
     }
 
-    let expn_id = ecx.resolver.expansion_for_ast_pass(
+    let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
         &[sym::rustc_attrs],

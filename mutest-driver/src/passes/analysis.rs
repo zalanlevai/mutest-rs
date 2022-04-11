@@ -35,24 +35,23 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
             //       to macro hygiene.
             let mut generated_crate_ast = (*expanded_crate_ast).clone();
 
-            resolver.borrow_mut().access(|resolver| {
-                let mut ecx = mutest_emit::codegen::expansion::init_ecx(sess, "mutest".to_owned(), resolver, None);
-
-                let ops: mutest_emit::codegen::mutation::Operators = vec![];
-                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(&mut ecx, ops, &generated_crate_ast);
-                let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations);
-                mutest_emit::codegen::substitution::write_substitutions(&mut ecx, &mutants, &mut generated_crate_ast);
-
-                // Clean up the generated test harness's invalid AST.
-                mutest_emit::codegen::tests::clean_up_test_cases(&tests, &mut generated_crate_ast);
-                mutest_emit::codegen::tests::clean_entry_points(&mut generated_crate_ast);
-                mutest_emit::codegen::tests::generate_dummy_main(&mut ecx, &mut generated_crate_ast);
-
-                mutest_emit::codegen::harness::generate_harness(&mut ecx, &mutants, &mut generated_crate_ast);
-            });
-
             queries.global_ctxt()?.peek_mut().enter(|tcx| {
                 tcx.analysis(())?;
+
+                resolver.borrow_mut().access(|resolver| {
+                    let ops: mutest_emit::codegen::mutation::Operators = vec![];
+                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, ops, &generated_crate_ast);
+                    let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations);
+                    mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
+
+                    // Clean up the generated test harness's invalid AST.
+                    mutest_emit::codegen::tests::clean_up_test_cases(&tests, &mut generated_crate_ast);
+                    mutest_emit::codegen::tests::clean_entry_points(&mut generated_crate_ast);
+                    mutest_emit::codegen::tests::generate_dummy_main(resolver, &mut generated_crate_ast);
+
+                    mutest_emit::codegen::harness::generate_harness(resolver, &mutants, &mut generated_crate_ast);
+                });
+
                 Ok(())
             })?;
 

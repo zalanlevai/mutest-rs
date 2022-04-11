@@ -1,15 +1,3 @@
-use rustc_expand::base::{ExtCtxt, ResolverExpand, LintStoreExpand};
-use rustc_expand::expand::ExpansionConfig;
-use rustc_session::Session;
-
-type LintStoreExpandDyn<'a> = Option<&'a (dyn LintStoreExpand + 'a)>;
-
-pub fn init_ecx<'a>(sess: &'a Session, crate_name: String, resolver: &'a mut dyn ResolverExpand, lint_store: LintStoreExpandDyn<'a>) -> ExtCtxt<'a> {
-    let config = ExpansionConfig::default(crate_name);
-
-    ExtCtxt::new(sess, config, resolver, lint_store)
-}
-
 pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![allow(unused_features)]
 #![allow(unused_imports)]

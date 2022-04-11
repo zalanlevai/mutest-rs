@@ -1,6 +1,8 @@
 use std::hash::{Hash, Hasher};
 
-use rustc_expand::base::ExtCtxt;
+use rustc_expand::base::ResolverExpand;
+use rustc_middle::ty::TyCtxt;
+use rustc_resolve::Resolver;
 use smallvec::SmallVec;
 
 use crate::codegen::ast;
@@ -192,8 +194,8 @@ impl<'a, 'op, 'm> ast::visit::Visitor<'a> for MutationCollector<'a, 'op, 'm> {
     }
 }
 
-pub fn apply_mutation_operators<'m>(ecx: &mut ExtCtxt<'_>, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m>> {
-    let expn_id = ecx.resolver.expansion_for_ast_pass(
+pub fn apply_mutation_operators<'m>(tcx: TyCtxt, resolver: &mut Resolver, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m>> {
+    let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
         &[sym::rustc_attrs],
