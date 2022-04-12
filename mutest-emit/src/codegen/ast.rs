@@ -4,6 +4,24 @@ pub use rustc_ast::ptr::P;
 pub use rustc_ast::token::TokenKind;
 pub use rustc_ast::tokenstream::*;
 
+pub use inlined::*;
+mod inlined {
+    use rustc_ast as ast;
+    use rustc_span::Span;
+    use rustc_span::symbol::Ident;
+
+    // TODO: Add documentation referencing `rustc_ast::visit::Fn`.
+    pub struct InlinedFn<'a> {
+        pub id: ast::NodeId,
+        pub span: Span,
+        pub ctx: ast::visit::FnCtxt,
+        pub ident: Ident,
+        pub sig: &'a ast::FnSig,
+        pub vis: &'a ast::Visibility,
+        pub body: Option<&'a ast::Block>,
+    }
+}
+
 pub mod mk {
     use rustc_ast as ast;
     use rustc_ast::ptr::P;
