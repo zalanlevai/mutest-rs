@@ -32,7 +32,7 @@ impl SubstLocId {
     }
 }
 
-pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P<ast::Expr>>, substs: &Vec<(MutId, &Subst)>) -> P<ast::Expr> {
+fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Expr>>, substs: Vec<(MutId, P<ast::Expr>)>) -> P<ast::Expr> {
     let mut arms = substs.into_iter()
         .map(|(mut_id, subst)| {
             // Some(subst) if ptr::eq(subst.mutation, &crate::mutest_generated::mutations::$mut_id) => $subst,
@@ -42,10 +42,7 @@ pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P
                 ast::mk::expr_field(sp, ast::mk::expr_ident(sp, subst_ident), Ident::new(*sym::mutation, sp)),
                 ast::mk::expr_ref(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)]))),
             ]);
-            ast::mk::arm(sp, pat_some_subst, Some(guard), match subst {
-                Subst::AstExpr(expr) => P(expr.clone()),
-                Subst::AstStmt(stmt) => ast::mk::expr_block(ast::mk::block(sp, vec![stmt.clone()])),
-            })
+            ast::mk::arm(sp, pat_some_subst, Some(guard), subst)
         })
         .collect::<Vec<_>>();
 
@@ -69,9 +66,9 @@ pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P
     let pat_some_wild = ast::mk::pat_tuple_struct(sp, path::Some(sp), vec![ast::mk::pat_wild(sp)]);
     arms.push(ast::mk::arm(sp, pat_some_wild, None, unreachable));
 
-    // None => $expr
+    // None => $default
     let pat_none = ast::mk::pat_path(sp, path::None(sp));
-    arms.push(ast::mk::arm(sp, pat_none, None, match original {
+    arms.push(ast::mk::arm(sp, pat_none, None, match default {
         Some(expr) => expr,
         None => ast::mk::expr_noop(sp),
     }));
@@ -102,9 +99,54 @@ pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P
     ast::mk::expr_match(sp, subst_lookup_expr, arms)
 }
 
-pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, original: Option<ast::Stmt>, substs: &Vec<(MutId, &Subst)>) -> ast::Stmt {
-    let original_expr = original.map(|v| ast::mk::expr_block(ast::mk::block(sp, vec![v])));
-    ast::mk::stmt_expr(expand_subst_match_expr(sp, subst_loc, original_expr, substs))
+pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P<ast::Expr>>, substs: Vec<(MutId, &Subst)>) -> P<ast::Expr> {
+    let subst_exprs = substs.into_iter()
+        .map(|(mut_id, subst)| {
+            let subst_expr = match subst {
+                Subst::AstExpr(expr) => P(expr.clone()),
+                Subst::AstStmt(stmt) => ast::mk::expr_block(ast::mk::block(sp, vec![stmt.clone()])),
+                Subst::AstLocal(..) => panic!("invalid substitution: local substitutions cannot be made in expression positions"),
+            };
+
+            (mut_id, subst_expr)
+        })
+        .collect::<Vec<_>>();
+
+    mk_subst_match_expr(sp, subst_loc, original, subst_exprs)
+}
+
+pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, original: Option<ast::Stmt>, substs: Vec<(MutId, &Subst)>) -> Vec<ast::Stmt> {
+    let mut binding_substs: Vec<(MutId, (Ident, ast::Mutability, Option<P<ast::Ty>>, P<ast::Expr>, Option<P<ast::Expr>>))> = vec![];
+    let mut non_binding_substs: Vec<(MutId, &Subst)> = vec![];
+
+    for (mut_id, subst) in substs {
+        match subst {
+            Subst::AstLocal(ident, mutbl, ty, expr, default_expr) => {
+                binding_substs.push((mut_id, (*ident, *mutbl, ty.clone(), expr.clone(), default_expr.clone())));
+            }
+            _ => non_binding_substs.push((mut_id, subst)),
+        }
+    }
+
+    let mut stmts = Vec::with_capacity(binding_substs.len() + !non_binding_substs.is_empty() as usize);
+
+    for (mut_id, (ident, mutbl, ty, expr, default_expr)) in binding_substs {
+        // By default, a shadowing substitution is assumed, which can be reduced to identity by
+        // assigning the value of the previous binding with the same identifier to the new binding
+        // (and copying all of the properties of the original binding): `let $ident = $ident`.
+        let default_expr = default_expr.unwrap_or_else(|| ast::mk::expr_ident(sp, ident));
+        let subst_match_expr = mk_subst_match_expr(sp, subst_loc, Some(default_expr), vec![(mut_id, expr)]);
+
+        let mutbl = matches!(mutbl, ast::Mutability::Mut);
+        stmts.push(ast::mk::stmt_let(sp, mutbl, ident, ty, subst_match_expr));
+    }
+
+    if !non_binding_substs.is_empty() {
+        let original_expr = original.map(|v| ast::mk::expr_block(ast::mk::block(sp, vec![v])));
+        stmts.push(ast::mk::stmt_expr(expand_subst_match_expr(sp, subst_loc, original_expr, non_binding_substs)));
+    }
+
+    stmts
 }
 
 struct SubstWriter<'op> {
@@ -121,21 +163,32 @@ impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
             let stmt_id = block.stmts[i].id;
 
             let insert_before_loc = SubstLoc::InsertBefore(stmt_id);
-            if let Some(before) = self.substitutions.get(&insert_before_loc) {
-                block.stmts.insert(i, expand_subst_match_stmt(self.def_site, insert_before_loc, None, before));
-                i += 1;
+            if let Some(insertions_before) = self.substitutions.remove(&insert_before_loc) {
+                let replacement_stmts = expand_subst_match_stmt(self.def_site, insert_before_loc, None, insertions_before);
+                let replacement_stmts_count = replacement_stmts.len();
+
+                block.stmts.splice(i..i, replacement_stmts);
+
+                i += replacement_stmts_count;
             }
 
             let replacement_loc = SubstLoc::Replace(stmt_id);
-            if let Some(replacements) = self.substitutions.get(&replacement_loc) {
-                let stmt = &mut block.stmts[i];
-                *stmt = expand_subst_match_stmt(stmt.span, replacement_loc, Some(stmt.clone()), replacements);
+            if let Some(replacements) = self.substitutions.remove(&replacement_loc) {
+                let replacement_stmts = expand_subst_match_stmt(self.def_site, insert_before_loc, None, replacements);
+                let replacement_stmts_count = replacement_stmts.len();
+
+                block.stmts.splice(i..i, replacement_stmts);
+
+                i += replacement_stmts_count - 1;
             }
 
             let insert_after_loc = SubstLoc::InsertAfter(stmt_id);
-            if let Some(after) = self.substitutions.get(&insert_after_loc) {
-                i += 1;
-                block.stmts.insert(i, expand_subst_match_stmt(self.def_site, insert_after_loc, None, after));
+            if let Some(insertions_after) = self.substitutions.remove(&insert_after_loc) {
+                let replacement_stmts = expand_subst_match_stmt(self.def_site, insert_after_loc, None, insertions_after);
+                let replacement_stmts_count = replacement_stmts.len();
+                i += replacement_stmts_count;
+
+                block.stmts.splice(i..i, replacement_stmts);
             }
 
             i += 1;
@@ -145,20 +198,18 @@ impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
     fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
         ast::mut_visit::noop_visit_expr(expr, self);
 
-        let insert_before_loc = SubstLoc::InsertBefore(expr.id);
-        if let Some(_before) = self.substitutions.get(&insert_before_loc) {
-            // TODO: Expand into a block expression, making place for insertions before and after.
+        let expr_id = expr.id;
+
+        if let Some(_insertions_before) = self.substitutions.remove(&SubstLoc::InsertBefore(expr_id)) {
             panic!("invalid substitution: substitutions cannot be inserted before expressions");
         }
 
-        let replacement_loc = SubstLoc::Replace(expr.id);
-        if let Some(replacements) = self.substitutions.get(&replacement_loc) {
+        let replacement_loc = SubstLoc::Replace(expr_id);
+        if let Some(replacements) = self.substitutions.remove(&replacement_loc) {
             *expr = expand_subst_match_expr(expr.span, replacement_loc, Some(expr.clone()), replacements);
         }
 
-        let insert_after_loc = SubstLoc::InsertAfter(expr.id);
-        if let Some(_after) = self.substitutions.get(&insert_after_loc) {
-            // TODO: Expand into a block expression, making place for insertions before and after.
+        if let Some(_insertions_after) = self.substitutions.remove(&SubstLoc::InsertAfter(expr_id)) {
             panic!("invalid substitution: substitutions cannot be inserted after expressions");
         }
     }

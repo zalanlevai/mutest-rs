@@ -10,8 +10,9 @@ use smallvec::SmallVec;
 use crate::analysis::hir;
 use crate::analysis::ast_lowering;
 use crate::codegen::ast;
+use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
-use crate::codegen::symbols::{DUMMY_SP, Span, Symbol, sym};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 pub struct Lowered<A, H> {
@@ -49,6 +50,7 @@ pub enum SubstLoc {
 pub enum Subst {
     AstExpr(ast::Expr),
     AstStmt(ast::Stmt),
+    AstLocal(Ident, ast::Mutability, Option<P<ast::Ty>>, P<ast::Expr>, Option<P<ast::Expr>>),
 }
 
 pub struct SubstDef {
