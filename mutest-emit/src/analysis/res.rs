@@ -1,6 +1,7 @@
 use crate::analysis::hir;
+use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
-use crate::analysis::ty::TyCtxt;
+use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::symbols::Symbol;
 
 pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
@@ -55,6 +56,67 @@ pub fn trait_def_id<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Option<hir::Def
         Res::Def(DefKind::Trait | DefKind::TraitAlias, trait_id) => Some(trait_id),
         _ => None,
     }
+}
+
+pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hir::HirId, hir::Node)> {
+    let def_hir_id = tcx.hir().local_def_id_to_hir_id(def_id);
+
+    let mut path = tcx.hir().parent_iter(def_hir_id).collect::<Vec<_>>();
+    path.reverse();
+
+    let def_node = tcx.hir().get(def_hir_id);
+    path.push((def_hir_id, def_node));
+
+    path
+}
+
+pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::QPath<'tcx>, id: hir::HirId) -> Res {
+    match qpath {
+        hir::QPath::Resolved(_, path) => path.res,
+        hir::QPath::TypeRelative(..) | hir::QPath::LangItem(..) => {
+            typeck.type_dependent_def(id)
+                .map_or(Res::Err, |(kind, def_id)| Res::Def(kind, def_id))
+        }
+    }
+}
+
+struct CalleeCollector<'tcx> {
+    typeck: &'tcx ty::TypeckResults<'tcx>,
+    callees: Vec<hir::DefId>,
+}
+
+impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
+    fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
+        match expr.kind {
+            hir::ExprKind::Call(expr, _) => {
+                if let hir::ExprKind::Path(qpath) = &expr.kind
+                    && let Some(def_id) = qpath_res(self.typeck, qpath, expr.hir_id).opt_def_id()
+                {
+                    self.callees.push(def_id);
+                }
+            }
+            hir::ExprKind::MethodCall(_, _, _) => {
+                if let Some(def_id) = self.typeck.type_dependent_def_id(expr.hir_id) {
+                    self.callees.push(def_id);
+                }
+            }
+            _ => {}
+        }
+
+        hir::intravisit::walk_expr(self, expr);
+    }
+}
+
+pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<hir::DefId> {
+    let typeck = tcx.typeck_body(body.id());
+
+    let mut collector = CalleeCollector {
+        typeck,
+        callees: vec![],
+    };
+    collector.visit_body(body);
+
+    collector.callees
 }
 
 macro interned {

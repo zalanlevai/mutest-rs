@@ -40,7 +40,7 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
 
                 resolver.borrow_mut().access(|resolver| {
                     let ops: mutest_emit::codegen::mutation::Operators = vec![];
-                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, ops, &generated_crate_ast);
+                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &tests, ops, &generated_crate_ast);
                     let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations);
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 

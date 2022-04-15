@@ -2,13 +2,16 @@ use std::hash::{Hash, Hasher};
 
 use rustc_ast_lowering::ResolverAstLowering;
 use rustc_expand::base::ResolverExpand;
+use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::hir::nested_filter::OnlyBodies;
 use rustc_middle::ty::TyCtxt;
 use rustc_resolve::Resolver;
 use smallvec::SmallVec;
 
-use crate::analysis::hir;
 use crate::analysis::ast_lowering;
+use crate::analysis::hir;
+use crate::analysis::res;
+use crate::analysis::tests::Test;
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
@@ -255,7 +258,9 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
     }
 }
 
-pub fn apply_mutation_operators<'m>(tcx: TyCtxt, resolver: &mut Resolver, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m>> {
+const MUTATION_DEPTH: usize = 3;
+
+pub fn apply_mutation_operators<'m>(tcx: TyCtxt, resolver: &mut Resolver, tests: &Vec<Test>, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m>> {
     let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
@@ -273,7 +278,51 @@ pub fn apply_mutation_operators<'m>(tcx: TyCtxt, resolver: &mut Resolver, ops: O
         next_mut_index: 1,
         mutations: vec![],
     };
-    collector.visit_crate(krate);
+
+    let mut previously_found_callees: FxHashSet<hir::DefId> = Default::default();
+
+    for test in tests {
+        let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
+        let body = tcx.hir().body(tcx.hir().get_by_def_id(def_id).body_id().unwrap());
+
+        let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
+
+        previously_found_callees.extend(callees.drain());
+    }
+
+    let mut targets: FxHashMap<hir::DefId, (ast_lowering::DefItem, usize)> = Default::default();
+
+    for distance in 0..MUTATION_DEPTH {
+        let mut newly_found_callees: FxHashSet<hir::DefId> = Default::default();
+
+        for callee_def_id in previously_found_callees.drain() {
+            let Some(local_def_id) = callee_def_id.as_local() else { continue; };
+            let body = tcx.hir().body(tcx.hir().get_by_def_id(local_def_id).body_id().unwrap());
+
+            let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) else { continue };
+
+            targets.insert(callee_def_id, (callee_def_item, distance));
+
+            if distance < MUTATION_DEPTH {
+                let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
+                callees.retain(|callee| !targets.contains_key(callee));
+
+                newly_found_callees.extend(callees);
+            }
+        }
+
+        previously_found_callees.extend(newly_found_callees.drain());
+    }
+
+    for (_, (target, distance)) in targets {
+        println!("tests -({distance})-> {:#?} @ {:#?}", target.ident(), target.span());
+
+        match target {
+            ast_lowering::DefItem::Item(item) => collector.visit_item(item),
+            ast_lowering::DefItem::ForeignItem(item) => collector.visit_foreign_item(item),
+            ast_lowering::DefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
+        }
+    }
 
     collector.mutations
 }

@@ -1,3 +1,12 @@
+use std::collections::VecDeque;
+
+use crate::analysis::hir;
+use crate::analysis::ty::TyCtxt;
+use crate::analysis::res;
+use crate::codegen::ast;
+use crate::codegen::ast::visit::Visitor;
+use crate::codegen::symbols::{Ident, Span};
+
 pub mod visit {
     use std::iter;
 
@@ -300,4 +309,193 @@ pub mod visit {
             _ => unreachable!(),
         }
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum DefItem<'ast> {
+    Item(&'ast ast::Item),
+    ForeignItem(&'ast ast::ForeignItem),
+    AssocItem(&'ast ast::AssocItem, ast::visit::AssocCtxt),
+}
+
+impl<'ast> DefItem<'ast> {
+    pub fn ident(&self) -> Ident {
+        match self {
+            Self::Item(item) => item.ident,
+            Self::ForeignItem(item) => item.ident,
+            Self::AssocItem(item, _) => item.ident,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Item(item) => item.span,
+            Self::ForeignItem(item) => item.span,
+            Self::AssocItem(item, _) => item.span,
+        }
+    }
+
+    pub fn kind(&self) -> ast::ItemKind {
+        match self {
+            Self::Item(item) => item.kind.clone(),
+            Self::ForeignItem(item) => item.kind.clone().into(),
+            Self::AssocItem(item, _) => item.kind.clone().into(),
+        }
+    }
+}
+
+struct AstDefFinder<'ast, 'hir> {
+    path_stack: VecDeque<hir::Node<'hir>>,
+    result: Option<DefItem<'ast>>,
+}
+
+fn is_matching_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::ItemKind, item_kind_hir: &'hir hir::ItemKind) -> bool {
+    match (item_kind_hir, item_kind_ast) {
+        (hir::ItemKind::ExternCrate(symbol_hir), ast::ItemKind::ExternCrate(symbol_ast)) => {
+            symbol_ast == symbol_hir
+        }
+        (hir::ItemKind::Use(_, _), _) => false,
+        (hir::ItemKind::Static(_, _, _), ast::ItemKind::Static(_, _, _)) => true,
+        (hir::ItemKind::Const(_, _), ast::ItemKind::Const(_, _, _)) => true,
+        (hir::ItemKind::Fn(_, _, _), ast::ItemKind::Fn(_)) => true,
+        (hir::ItemKind::Macro(def_hir, _), ast::ItemKind::MacroDef(def_ast)) => {
+            std::ptr::eq(def_hir, def_ast)
+        }
+        (hir::ItemKind::Mod(_), ast::ItemKind::Mod(_, _)) => true,
+        (hir::ItemKind::ForeignMod { abi: _, items: _ }, ast::ItemKind::ForeignMod(_)) => true,
+        (hir::ItemKind::GlobalAsm(_), ast::ItemKind::GlobalAsm(_)) => true,
+        (hir::ItemKind::TyAlias(_, _), ast::ItemKind::TyAlias(_)) => true,
+        (hir::ItemKind::OpaqueTy(_), _) => false,
+        (hir::ItemKind::Enum(_, _), ast::ItemKind::Enum(_, _)) => true,
+        (hir::ItemKind::Struct(_, _), ast::ItemKind::Struct(_, _)) => true,
+        (hir::ItemKind::Union(_, _), ast::ItemKind::Union(_, _)) => true,
+        (hir::ItemKind::Trait(_, _, _, _, _), ast::ItemKind::Trait(_)) => true,
+        (hir::ItemKind::TraitAlias(_, _), ast::ItemKind::TraitAlias(_, _)) => true,
+        (hir::ItemKind::Impl(_), ast::ItemKind::Impl(_)) => true,
+
+        _ => false,
+    }
+}
+
+fn is_matching_foreign_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::ForeignItemKind, item_kind_hir: &'hir hir::ForeignItemKind) -> bool {
+    match (item_kind_hir, item_kind_ast) {
+        (hir::ForeignItemKind::Fn(_, _, _), ast::ForeignItemKind::Fn(_)) => true,
+        (hir::ForeignItemKind::Static(_, _), ast::ForeignItemKind::Static(_, _, _)) => true,
+        (hir::ForeignItemKind::Type, ast::ForeignItemKind::TyAlias(_)) => true,
+
+        _ => false,
+    }
+}
+
+fn is_matching_trait_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::AssocItemKind, item_kind_hir: &'hir hir::TraitItemKind) -> bool {
+    match (item_kind_hir, item_kind_ast) {
+        (hir::TraitItemKind::Const(_, _), ast::AssocItemKind::Const(_, _, _)) => true,
+        (hir::TraitItemKind::Fn(_, _), ast::AssocItemKind::Fn(_)) => true,
+        (hir::TraitItemKind::Type(_, _), ast::AssocItemKind::TyAlias(_)) => true,
+
+        _ => false,
+    }
+}
+
+fn is_matching_impl_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::AssocItemKind, item_kind_hir: &'hir hir::ImplItemKind) -> bool {
+    match (item_kind_hir, item_kind_ast) {
+        (hir::ImplItemKind::Const(_, _), ast::AssocItemKind::Const(_, _, _)) => true,
+        (hir::ImplItemKind::Fn(_, _), ast::AssocItemKind::Fn(_)) => true,
+        (hir::ImplItemKind::TyAlias(_), ast::AssocItemKind::TyAlias(_)) => true,
+
+        _ => false,
+    }
+}
+
+impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
+    fn visit_crate(&mut self, krate: &'ast ast::Crate) {
+        let Some(&path_segment) = self.path_stack.front() else { return; };
+
+        if let hir::Node::Crate(_) = path_segment {
+            self.path_stack.pop_front();
+        }
+
+        ast::visit::walk_crate(self, krate);
+    }
+
+    fn visit_item(&mut self, item: &'ast ast::Item) {
+        let Some(path_segment) = self.path_stack.front() else { return; };
+
+        match path_segment {
+            hir::Node::Item(item_hir) => {
+                if item.ident.name != item_hir.ident.name { return; }
+                if !is_matching_item_kind(&item.kind, &item_hir.kind) { return; }
+                self.path_stack.pop_front();
+            }
+
+            _ => { return; }
+        }
+
+        if self.path_stack.is_empty() {
+            self.result = Some(DefItem::Item(item));
+            return;
+        }
+
+        ast::visit::walk_item(self, item);
+    }
+
+    fn visit_foreign_item(&mut self, item: &'ast ast::ForeignItem) {
+        let Some(path_segment) = self.path_stack.front() else { return; };
+
+        match path_segment {
+            hir::Node::ForeignItem(item_hir) => {
+                if item.ident.name != item_hir.ident.name { return; }
+                if !is_matching_foreign_item_kind(&item.kind, &item_hir.kind) { return; }
+                self.path_stack.pop_front();
+            }
+
+            _ => { return; }
+        }
+
+        if self.path_stack.is_empty() {
+            self.result = Some(DefItem::ForeignItem(item));
+            return;
+        }
+
+        ast::visit::walk_foreign_item(self, item);
+    }
+
+    fn visit_assoc_item(&mut self, item: &'ast ast::AssocItem, ctx: ast::visit::AssocCtxt) {
+        let Some(path_segment) = self.path_stack.front() else { return; };
+
+        match (path_segment, ctx) {
+            (hir::Node::TraitItem(item_hir), ast::visit::AssocCtxt::Trait) => {
+                if item.ident.name != item_hir.ident.name { return; }
+                if !is_matching_trait_item_kind(&item.kind, &item_hir.kind) { return; }
+                self.path_stack.pop_front();
+            }
+            (hir::Node::ImplItem(item_hir), ast::visit::AssocCtxt::Impl) => {
+                if item.ident.name != item_hir.ident.name { return; }
+                if !is_matching_impl_item_kind(&item.kind, &item_hir.kind) { return; }
+                self.path_stack.pop_front();
+            }
+
+            _ => { return; }
+        }
+
+        if self.path_stack.is_empty() {
+            self.result = Some(DefItem::AssocItem(item, ctx));
+            return;
+        }
+
+        ast::visit::walk_assoc_item(self, item, ctx);
+    }
+}
+
+pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<DefItem<'ast>> {
+    let def_hir_path = res::def_hir_path(tcx, def_id);
+    let def_hir_node_path = def_hir_path.into_iter().map(|(_, node)| node).collect::<VecDeque<_>>();
+
+    let mut finder = AstDefFinder {
+        path_stack: def_hir_node_path,
+        result: None,
+    };
+    finder.visit_crate(krate);
+
+    finder.result
 }
