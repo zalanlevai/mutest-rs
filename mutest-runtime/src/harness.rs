@@ -54,14 +54,22 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
         None => return,
     };
 
-    let mut any_test_run_failed = false;
+    let mut all_test_runs_failed_successfully = true;
 
     for mutant in mutants {
-        active_mutant_handle.replace(Some(&mutant));
+        active_mutant_handle.replace(Some(mutant));
+
+        println!("applying mutant with the following mutations:");
+        for mutation in mutant.mutations {
+            println!("- {} at {}", mutation.display_name, mutation.display_location);
+        }
 
         match test::run_tests_console(&opts, clone_tests(&tests)) {
-            Ok(true) => {}
-            Ok(false) => any_test_run_failed = true,
+            Ok(true) => {
+                all_test_runs_failed_successfully = false;
+                print!("{}", mutant.undetected_diagnostic);
+            }
+            Ok(false) => {}
             Err(err) => {
                 eprintln!("error: io error: {:?}", err);
                 process::exit(ERROR_EXIT_CODE);
@@ -69,7 +77,7 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
         }
     }
 
-    if any_test_run_failed {
+    if !all_test_runs_failed_successfully {
         process::exit(ERROR_EXIT_CODE);
     }
 }

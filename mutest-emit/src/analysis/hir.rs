@@ -7,6 +7,7 @@ mod inlined {
     use rustc_span::Span;
     use rustc_span::symbol::Ident;
 
+    #[derive(Clone, Copy)]
     pub struct InlinedFn<'hir> {
         pub def_id: hir::def_id::LocalDefId,
         pub span: Span,

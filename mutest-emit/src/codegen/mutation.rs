@@ -6,9 +6,12 @@ use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::hir::nested_filter::OnlyBodies;
 use rustc_middle::ty::TyCtxt;
 use rustc_resolve::Resolver;
+use rustc_session::Session;
 use smallvec::SmallVec;
 
 use crate::analysis::ast_lowering;
+use crate::analysis::diagnostic;
+use crate::analysis::diagnostic::SessionRcSourceMap;
 use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::tests::Test;
@@ -18,29 +21,79 @@ use crate::codegen::ast::visit::Visitor;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
+#[derive(Clone)]
 pub struct Lowered<A, H> {
     pub ast: A,
     pub hir: H,
 }
 
 pub type LoweredFn<'ast, 'hir> = Lowered<ast::InlinedFn<'ast>, hir::InlinedFn<'hir>>;
+pub type OwnedLoweredFn<'hir> = Lowered<ast::OwnedInlinedFn, hir::InlinedFn<'hir>>;
 pub type LoweredParam<'ast, 'hir> = Lowered<&'ast ast::Param, &'hir hir::Param<'hir>>;
-pub type LoweredBlock<'ast, 'hir> = Lowered<&'ast ast::Block, &'hir hir::Block<'hir>>;
+pub type OwnedLoweredParam<'hir> = Lowered<ast::Param, &'hir hir::Param<'hir>>;
 pub type LoweredStmt<'ast, 'hir> = Lowered<&'ast ast::Stmt, &'hir hir::Stmt<'hir>>;
+pub type OwnedLoweredStmt<'hir> = Lowered<ast::Stmt, &'hir hir::Stmt<'hir>>;
 pub type LoweredExpr<'ast, 'hir> = Lowered<&'ast ast::Expr, &'hir hir::Expr<'hir>>;
+pub type OwnedLoweredExpr<'hir> = Lowered<ast::Expr, &'hir hir::Expr<'hir>>;
 
 pub enum MutLoc<'ast, 'hir> {
-    Fn(&'ast LoweredFn<'ast, 'hir>),
-    FnParam(&'ast LoweredParam<'ast, 'hir>, &'ast LoweredFn<'ast, 'hir>),
-    FnBodyStmt(&'ast LoweredStmt<'ast, 'hir>, &'ast LoweredFn<'ast, 'hir>),
-    FnBodyExpr(&'ast LoweredExpr<'ast, 'hir>, &'ast LoweredFn<'ast, 'hir>),
+    Fn(LoweredFn<'ast, 'hir>),
+    FnParam(LoweredParam<'ast, 'hir>, LoweredFn<'ast, 'hir>),
+    FnBodyStmt(LoweredStmt<'ast, 'hir>, LoweredFn<'ast, 'hir>),
+    FnBodyExpr(LoweredExpr<'ast, 'hir>, LoweredFn<'ast, 'hir>),
 }
 
-pub struct MutCtxt<'a, 'tcx, 'r> {
+pub enum OwnedMutLoc<'hir> {
+    Fn(OwnedLoweredFn<'hir>),
+    FnParam(OwnedLoweredParam<'hir>, OwnedLoweredFn<'hir>),
+    FnBodyStmt(OwnedLoweredStmt<'hir>, OwnedLoweredFn<'hir>),
+    FnBodyExpr(OwnedLoweredExpr<'hir>, OwnedLoweredFn<'hir>),
+}
+
+impl<'ast, 'hir> MutLoc<'ast, 'hir> {
+    pub fn into_owned(&self) -> OwnedMutLoc<'hir> {
+        match self {
+            Self::Fn(Lowered { ast: fn_ast, hir: fn_hir }) => {
+                OwnedMutLoc::Fn(Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
+            }
+            Self::FnParam(Lowered { ast: param_ast, hir: param_hir }, Lowered { ast: fn_ast, hir: fn_hir }) => {
+                OwnedMutLoc::FnParam(Lowered { ast: (*param_ast).clone(), hir: param_hir }, Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
+            }
+            Self::FnBodyStmt(Lowered { ast: stmt_ast, hir: stmt_hir }, Lowered { ast: fn_ast, hir: fn_hir }) => {
+                OwnedMutLoc::FnBodyStmt(Lowered { ast: (*stmt_ast).clone(), hir: stmt_hir }, Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
+            }
+            Self::FnBodyExpr(Lowered { ast: expr_ast, hir: expr_hir }, Lowered { ast: fn_ast, hir: fn_hir }) => {
+                OwnedMutLoc::FnBodyExpr(Lowered { ast: (*expr_ast).clone(), hir: expr_hir }, Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
+            }
+        }
+    }
+}
+
+impl<'hir> OwnedMutLoc<'hir> {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Fn(lowered_fn) => lowered_fn.ast.span,
+            Self::FnParam(lowered_param, _) => lowered_param.ast.span,
+            Self::FnBodyStmt(lowered_stmt, _) => lowered_stmt.ast.span,
+            Self::FnBodyExpr(lowered_expr, _) => lowered_expr.ast.span,
+        }
+    }
+
+    pub fn containing_fn(&self) -> Option<&OwnedLoweredFn> {
+        match self {
+            Self::Fn(lowered_fn) => Some(lowered_fn),
+            Self::FnParam(_, lowered_fn) => Some(lowered_fn),
+            Self::FnBodyStmt(_, lowered_fn) => Some(lowered_fn),
+            Self::FnBodyExpr(_, lowered_fn) => Some(lowered_fn),
+        }
+    }
+}
+
+pub struct MutCtxt<'op, 'ast, 'tcx, 'r> {
     pub tcx: TyCtxt<'tcx>,
-    pub resolver: &'a Resolver<'r>,
+    pub resolver: &'op Resolver<'r>,
     pub def_site: Span,
-    pub location: MutLoc<'a, 'tcx>,
+    pub location: MutLoc<'ast, 'tcx>,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -67,7 +120,9 @@ impl SubstDef {
     }
 }
 
-pub trait Mutation {}
+pub trait Mutation {
+    fn display_name(&self) -> String;
+}
 
 pub trait Operator<'a> {
     type Mutation: Mutation + 'a;
@@ -108,33 +163,44 @@ impl MutId {
     }
 }
 
-pub struct Mut<'m> {
+pub struct Mut<'m, 'hir> {
     pub id: MutId,
+    pub location: OwnedMutLoc<'hir>,
     pub mutation: BoxedMutation<'m>,
     pub substs: SmallVec<[SubstDef; 1]>,
 }
 
-impl<'m> Eq for Mut<'m> {}
-impl<'m> PartialEq for Mut<'m> {
+impl<'m, 'hir> Mut<'m, 'hir> {
+    pub fn display_name(&self) -> String {
+        self.mutation.display_name()
+    }
+
+    pub fn display_location(&self, sess: &Session) -> String {
+        sess.source_map().span_to_embeddable_string(self.location.span())
+    }
+}
+
+impl<'m, 'hir> Eq for Mut<'m, 'hir> {}
+impl<'m, 'hir> PartialEq for Mut<'m, 'hir> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<'m> Hash for Mut<'m> {
+impl<'m, 'hir> Hash for Mut<'m, 'hir> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-struct MutationCollector<'a, 'tcx, 'r, 'op, 'm> {
+struct MutationCollector<'ast, 'tcx, 'r, 'op, 'm> {
     pub operators: Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
     pub resolver: &'op Resolver<'r>,
     pub def_site: Span,
-    pub current_fn: Option<LoweredFn<'a, 'tcx>>,
+    pub current_fn: Option<LoweredFn<'ast, 'tcx>>,
     pub next_mut_index: u32,
-    pub mutations: Vec<Mut<'m>>,
+    pub mutations: Vec<Mut<'m, 'tcx>>,
 }
 
 /// Macro used during mutation collection to apply every mutation operator using the given mutation
@@ -150,6 +216,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
             if let Some((mutation, substs)) = operator.try_apply_boxed(&mcx) {
                 $self.mutations.push(Mut {
                     id: MutId($self.next_mut_index),
+                    location: mcx.location.into_owned(),
                     mutation,
                     substs,
                 });
@@ -160,8 +227,8 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     }
 }
 
-impl<'a, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'a> for MutationCollector<'a, 'tcx, 'r, 'op, 'm> {
-    fn visit_fn(&mut self, kind: ast::visit::FnKind<'a>, span: Span, id: ast::NodeId) {
+impl<'ast, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'r, 'op, 'm> {
+    fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
         let ast::visit::FnKind::Fn(ref ctx, ref ident, sig, vis, body) = kind else { return; };
 
         let fn_ast = ast::InlinedFn { id, span, ctx: *ctx, ident: *ident, sig, vis, body };
@@ -188,7 +255,7 @@ impl<'a, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'a> for MutationCollector<'a, 't
             tcx: self.tcx,
             resolver: self.resolver,
             def_site: self.def_site,
-            location: MutLoc::Fn(&lowered_fn),
+            location: MutLoc::Fn(lowered_fn.clone()),
         });
 
         let kind_ast = kind;
@@ -200,7 +267,7 @@ impl<'a, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'a> for MutationCollector<'a, 't
         let span_hir = lowered_fn.hir.span;
         let id_hir = self.tcx.hir().local_def_id_to_hir_id(lowered_fn.hir.def_id);
         self.current_fn = Some(lowered_fn);
-        <Self as ast_lowering::visit::AstHirVisitor>::visit_fn(self, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
+        ast_lowering::visit::AstHirVisitor::visit_fn(self, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
         self.current_fn = None;
     }
 }
@@ -220,7 +287,7 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
                 tcx: self.tcx,
                 resolver: self.resolver,
                 def_site: self.def_site,
-                location: MutLoc::FnParam(&lowered_param, lowered_fn),
+                location: MutLoc::FnParam(lowered_param, lowered_fn.clone()),
             });
         }
 
@@ -235,7 +302,7 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
                 tcx: self.tcx,
                 resolver: self.resolver,
                 def_site: self.def_site,
-                location: MutLoc::FnBodyStmt(&lowered_stmt, lowered_fn),
+                location: MutLoc::FnBodyStmt(lowered_stmt, lowered_fn.clone()),
             });
         }
 
@@ -250,7 +317,7 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
                 tcx: self.tcx,
                 resolver: self.resolver,
                 def_site: self.def_site,
-                location: MutLoc::FnBodyExpr(&lowered_expr, lowered_fn),
+                location: MutLoc::FnBodyExpr(lowered_expr, lowered_fn.clone()),
             });
         }
 
@@ -260,7 +327,7 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
 
 const MUTATION_DEPTH: usize = 3;
 
-pub fn apply_mutation_operators<'m>(tcx: TyCtxt, resolver: &mut Resolver, tests: &Vec<Test>, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m>> {
+pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, tests: &Vec<Test>, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m, 'tcx>> {
     let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
@@ -327,11 +394,11 @@ pub fn apply_mutation_operators<'m>(tcx: TyCtxt, resolver: &mut Resolver, tests:
     collector.mutations
 }
 
-pub struct Mutant<'m> {
-    pub mutations: Vec<Mut<'m>>,
+pub struct Mutant<'m, 'tcx> {
+    pub mutations: Vec<Mut<'m, 'tcx>>,
 }
 
-impl<'m> Mutant<'m> {
+impl<'m, 'tcx> Mutant<'m, 'tcx> {
     pub fn iter_mutations(&self) -> impl Iterator<Item = &BoxedMutation<'m>> {
         self.mutations.iter().map(|m| &m.mutation)
     }
@@ -339,12 +406,20 @@ impl<'m> Mutant<'m> {
     pub fn iter_substitutions(&self) -> impl Iterator<Item = &SubstDef> {
         self.mutations.iter().flat_map(|m| &m.substs)
     }
+
+    pub fn undetected_diagnostic(&self, sess: &Session) -> String {
+        let mut diagnostic = sess.struct_warn("the following mutations were not detected");
+        for mutation in &self.mutations {
+            diagnostic.span_note(mutation.location.span(), &mutation.display_name());
+        }
+        diagnostic::emit_str(diagnostic, sess.rc_source_map())
+    }
 }
 
 const MUTANT_MAX_MUTATIONS_COUNT: usize = 1;
 
-pub fn batch_mutations<'m>(mutations: Vec<Mut<'m>>) -> Vec<Mutant<'m>> {
-    let mut mutants: Vec<Mutant<'m>> = vec![];
+pub fn batch_mutations<'m, 'tcx>(mutations: Vec<Mut<'m, 'tcx>>) -> Vec<Mutant<'m, 'tcx>> {
+    let mut mutants: Vec<Mutant<'m, 'tcx>> = vec![];
 
     'mutation: for mutation in mutations {
         'mutant: for mutant in &mut mutants {

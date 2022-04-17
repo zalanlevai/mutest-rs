@@ -3,6 +3,7 @@ use std::iter;
 use rustc_expand::base::ResolverExpand;
 use rustc_hash::FxHashSet;
 use rustc_resolve::Resolver;
+use rustc_session::Session;
 
 use crate::codegen::ast;
 use crate::codegen::ast::P;
@@ -10,6 +11,28 @@ use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::mutation::{Mut, Mutant, SubstLoc};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, kw, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
+
+pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
+    ast::mk::expr_struct(sp, ast::mk::path_local(path::MutationMeta(sp)), vec![
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::display_name, sp), {
+            ast::mk::expr_str(sp, &mutation.display_name())
+        }),
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::display_location, sp), {
+            ast::mk::expr_str(sp, &mutation.display_location(sess))
+        }),
+    ])
+}
+
+pub fn bake_mutant(mutant: &Mutant, sp: Span, sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
+    ast::mk::expr_struct(sp, ast::mk::path_local(path::MutantMeta(sp)), vec![
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::mutations, sp), mutations_expr),
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::substitutions, sp), subst_map_expr),
+
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::undetected_diagnostic, sp), {
+            ast::mk::expr_str(sp, &mutant.undetected_diagnostic(sess))
+        }),
+    ])
+}
 
 fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
     let fields = subst_locs.iter()
@@ -32,14 +55,14 @@ fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
     ast::mk::item_struct(sp, vis, ident, None, fields)
 }
 
-fn mk_mutations_mod(sp: Span, mutations: &Vec<&Mut>) -> P<ast::Item> {
+fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>) -> P<ast::Item> {
     let items = iter::once(ast::mk::item_extern_crate(sp, *sym::mutest_runtime, None))
         .chain(mutations.iter().map(|mutation| {
-            // pub const $mut_id: MutationMeta = MutationMeta {};
+            // pub const $mut_id: MutationMeta = MutationMeta { ... };
             let vis = ast::mk::vis_pub(sp);
             let ident = Ident::new(mutation.id.into_symbol(), sp);
             let ty = ast::mk::ty_path(None, ast::mk::path_local(path::MutationMeta(sp)));
-            let expr = ast::mk::expr_struct(sp, ast::mk::path_local(path::MutationMeta(sp)), vec![]);
+            let expr = bake_mutation(mutation, sp, sess);
             ast::mk::item_const(sp, vis, ident, ty, expr)
         }))
         .collect::<Vec<_>>();
@@ -50,7 +73,7 @@ fn mk_mutations_mod(sp: Span, mutations: &Vec<&Mut>) -> P<ast::Item> {
     ast::mk::item_mod(sp, vis, ident, items)
 }
 
-fn mk_mutants_slice_const(sp: Span, mutants: &Vec<Mutant>, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
+fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &Vec<Mutant>, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
     let elements = mutants.iter()
         .map(|mutant| {
             // &[...]
@@ -93,10 +116,7 @@ fn mk_mutants_slice_const(sp: Span, mutants: &Vec<Mutant>, subst_locs: &Vec<Subs
             let subst_map_expr = ast::mk::expr_struct(sp, path::SubstMap(sp), subst_map_fields);
 
             // MutantMeta { ... }
-            ast::mk::expr_struct(sp, ast::mk::path_local(path::MutantMeta(sp)), vec![
-                ast::mk::expr_struct_field(sp, Ident::new(*sym::mutations, sp), mutations_expr),
-                ast::mk::expr_struct_field(sp, Ident::new(*sym::substitutions, sp), subst_map_expr),
-            ])
+            bake_mutant(mutant, sp, sess, mutations_expr, subst_map_expr)
         })
         .collect::<Vec<_>>();
 
@@ -149,12 +169,13 @@ fn mk_harness_fn(sp: Span) -> P<ast::Item> {
     ast::mk::item_fn(sp, vis, ident, None, None, inputs, None, Some(body))
 }
 
-struct HarnessGenerator<'op> {
-    mutants: &'op Vec<Mutant<'op>>,
+struct HarnessGenerator<'op, 'tcx> {
+    sess: &'op Session,
+    mutants: &'op Vec<Mutant<'op, 'tcx>>,
     def_site: Span,
 }
 
-impl<'op> ast::mut_visit::MutVisitor for HarnessGenerator<'op> {
+impl<'op, 'tcx> ast::mut_visit::MutVisitor for HarnessGenerator<'op, 'tcx> {
     fn visit_crate(&mut self, c: &mut ast::Crate) {
         ast::mut_visit::noop_visit_crate(c, self);
 
@@ -196,8 +217,8 @@ impl<'op> ast::mut_visit::MutVisitor for HarnessGenerator<'op> {
                 extern_crate_test,
                 extern_crate_mutest_runtime,
                 mk_subst_map_struct(def, &subst_locs),
-                mk_mutations_mod(def, &mutations),
-                mk_mutants_slice_const(def, self.mutants, &subst_locs),
+                mk_mutations_mod(def, self.sess, &mutations),
+                mk_mutants_slice_const(def, self.sess, self.mutants, &subst_locs),
                 mk_active_mutant_handle_static(def),
                 mk_harness_fn(def),
             ],
@@ -207,7 +228,7 @@ impl<'op> ast::mut_visit::MutVisitor for HarnessGenerator<'op> {
     }
 }
 
-pub fn generate_harness(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
+pub fn generate_harness(sess: &Session, resolver: &mut Resolver, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
     let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
@@ -216,6 +237,6 @@ pub fn generate_harness(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate: &
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut generator = HarnessGenerator { mutants, def_site };
+    let mut generator = HarnessGenerator { sess, mutants, def_site };
     generator.visit_crate(krate);
 }

@@ -11,14 +11,40 @@ mod inlined {
     use rustc_span::symbol::Ident;
 
     // TODO: Add documentation referencing `rustc_ast::visit::Fn`.
-    pub struct InlinedFn<'a> {
+    #[derive(Clone, Copy)]
+    pub struct InlinedFn<'ast> {
         pub id: ast::NodeId,
         pub span: Span,
         pub ctx: ast::visit::FnCtxt,
         pub ident: Ident,
-        pub sig: &'a ast::FnSig,
-        pub vis: &'a ast::Visibility,
-        pub body: Option<&'a ast::Block>,
+        pub sig: &'ast ast::FnSig,
+        pub vis: &'ast ast::Visibility,
+        pub body: Option<&'ast ast::Block>,
+    }
+
+    #[derive(Clone)]
+    pub struct OwnedInlinedFn {
+        pub id: ast::NodeId,
+        pub span: Span,
+        pub ctx: ast::visit::FnCtxt,
+        pub ident: Ident,
+        pub sig: ast::FnSig,
+        pub vis: ast::Visibility,
+        pub body: Option<ast::Block>,
+    }
+
+    impl<'ast> InlinedFn<'ast> {
+        pub fn into_owned(&self) -> OwnedInlinedFn {
+            OwnedInlinedFn {
+                id: self.id,
+                span: self.span,
+                ctx: self.ctx,
+                ident: self.ident,
+                sig: self.sig.clone(),
+                vis: self.vis.clone(),
+                body: self.body.cloned(),
+            }
+        }
     }
 }
 

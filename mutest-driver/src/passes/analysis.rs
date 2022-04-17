@@ -49,7 +49,7 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
                     mutest_emit::codegen::tests::clean_entry_points(&mut generated_crate_ast);
                     mutest_emit::codegen::tests::generate_dummy_main(resolver, &mut generated_crate_ast);
 
-                    mutest_emit::codegen::harness::generate_harness(resolver, &mutants, &mut generated_crate_ast);
+                    mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
                 });
 
                 Ok(())

@@ -25,6 +25,8 @@ pub mod sym {
 
         ACTIVE_MUTANT_HANDLE,
         ActiveMutantHandle,
+        display_location,
+        display_name,
         harness,
         Mutant,
         mutant,
@@ -41,6 +43,7 @@ pub mod sym {
         SubstMap,
         SubstMeta,
         tests,
+        undetected_diagnostic,
     }
 }
 
