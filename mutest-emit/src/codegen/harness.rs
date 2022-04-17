@@ -67,10 +67,16 @@ fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>) -> P<ast::I
         }))
         .collect::<Vec<_>>();
 
+    // #[allow(non_upper_case_globals)]
+    let allow_non_upper_case_globals_attr = ast::attr::mk_attr_outer(ast::attr::mk_list_item(
+        Ident::new(sym::allow, sp),
+        vec![ast::attr::mk_nested_word_item(Ident::new(*sym::non_upper_case_globals, sp))],
+    ));
+
     // pub(crate) mod mutations { ... }
     let vis = ast::mk::vis_pub_crate(sp);
     let ident = Ident::new(*sym::mutations, sp);
-    ast::mk::item_mod(sp, vis, ident, items)
+    ast::mk::item_mod(sp, vis, ident, items).map(|mut m| { m.attrs = vec![allow_non_upper_case_globals_attr]; m })
 }
 
 fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &Vec<Mutant>, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {

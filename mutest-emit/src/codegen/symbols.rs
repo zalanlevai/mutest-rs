@@ -21,6 +21,7 @@ pub mod sym {
         as_ref,
         borrow,
         default,
+        non_upper_case_globals,
         println,
 
         ACTIVE_MUTANT_HANDLE,
