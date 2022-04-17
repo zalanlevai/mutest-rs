@@ -46,29 +46,8 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
         })
         .collect::<Vec<_>>();
 
-    // Some(_) => { unreachable!() }
-    let unreachable = ast::mk::expr_block(ast::mk::block(sp, vec![
-        ast::mk::stmt(sp, ast::StmtKind::MacCall(P(ast::MacCallStmt {
-            attrs: ast::AttrVec::new(),
-            mac: ast::MacCall {
-                path: ast::mk::path_ident(sp, Ident::new(sym::unreachable, sp)),
-                args: P(ast::MacArgs::Delimited(
-                    ast::DelimSpan::from_single(sp),
-                    ast::MacDelimiter::Parenthesis,
-                    ast::mk::token_stream(vec![]),
-                )),
-                prior_type_ascription: None,
-            },
-            style: ast::MacStmtStyle::Semicolon,
-            tokens: None,
-        }))),
-    ]));
-    let pat_some_wild = ast::mk::pat_tuple_struct(sp, path::Some(sp), vec![ast::mk::pat_wild(sp)]);
-    arms.push(ast::mk::arm(sp, pat_some_wild, None, unreachable));
-
-    // None => $default
-    let pat_none = ast::mk::pat_path(sp, path::None(sp));
-    arms.push(ast::mk::arm(sp, pat_none, None, match default {
+    // _ => $default
+    arms.push(ast::mk::arm(sp, ast::mk::pat_wild(sp), None, match default {
         Some(expr) => expr,
         None => ast::mk::expr_noop(sp),
     }));
@@ -237,6 +216,7 @@ pub fn write_substitutions(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
+    // TODO: Warn if any substitutions have not been written to the AST. (e.g. they were defined for nodes which are not substitutable)
     let mut subst_writer = SubstWriter { substitutions, def_site };
     subst_writer.visit_crate(krate);
 }
