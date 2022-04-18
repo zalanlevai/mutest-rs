@@ -2,8 +2,12 @@
 
 [package]
 name = "mutest"
+description = "Mutation testing tools for Rust."
 version = "0.0.0"
 edition = "2021"
 
 [dependencies]
 mutest-driver = { path = "../mutest-driver" }
+mutest-operators = { path = "../mutest-operators" }
+
+clap = { version = "3", features = ["cargo"] }

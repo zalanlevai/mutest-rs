@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+use std::ops::{ControlFlow, FromResidual, Residual, Try};
 use std::path::PathBuf;
 use std::process;
 use std::str;
@@ -10,6 +12,62 @@ use rustc_span::edition::Edition;
 use rustc_span::source_map::RealFileLoader;
 
 use crate::config::Config;
+
+pub enum Flow<T, E> {
+    Continue(T),
+    Break,
+    Err(E),
+}
+
+impl<T, E> Try for Flow<T, E> {
+    type Output = T;
+    type Residual = Flow<Infallible, E>;
+
+    fn from_output(output: Self::Output) -> Self {
+        Self::Continue(output)
+    }
+
+    fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
+        match self {
+            Self::Continue(value) => ControlFlow::Continue(value),
+            Self::Break => ControlFlow::Break(Flow::Break),
+            Self::Err(error) => ControlFlow::Break(Flow::Err(error)),
+        }
+    }
+}
+
+impl<T, E> Residual<T> for Flow<Infallible, E> {
+    type TryType = Flow<T, E>;
+}
+
+impl<T, E, F: From<E>> FromResidual<Flow<Infallible, E>> for Flow<T, F> {
+    fn from_residual(residual: Flow<Infallible, E>) -> Self {
+        match residual {
+            Flow::Continue(_) => unreachable!(),
+            Flow::Break => Flow::Break,
+            Flow::Err(error) => Flow::Err(From::from(error)),
+        }
+    }
+}
+
+impl<T, E, F: From<E>> FromResidual<Result<Infallible, E>> for Flow<T, F> {
+    fn from_residual(residual: Result<Infallible, E>) -> Self {
+        match residual {
+            Ok(_) => unreachable!(),
+            Err(error) => Flow::Err(From::from(error)),
+        }
+    }
+}
+
+impl<T, E, F: From<E>> From<Flow<T, E>> for Result<Option<T>, F> {
+    fn from(flow: Flow<T, E>) -> Self {
+        match flow {
+            Flow::Continue(value) => Ok(Some(value)),
+            Flow::Break => Ok(None),
+            Flow::Err(error) => Err(From::from(error)),
+        }
+    }
+}
 
 pub fn get_sysroot() -> PathBuf {
     let sysroot_out = process::Command::new("rustc")

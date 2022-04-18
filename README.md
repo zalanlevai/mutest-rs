@@ -20,8 +20,12 @@ cargo build -p mutest
 
 ## Usage
 
-Run the `mutest` bin against a standard Cargo package directory containing your crate.
+> Run the `mutest` binary from source using `cargo run -p mutest -- <args>...`.
+
+Run the `mutest` binary against a standard Cargo package directory containing your crate.
 
 ```sh
-cargo run -p mutest -- <package_dir>
+cargo run -p mutest -- <package_dir> run
 ```
+
+See `--help` for more options and subcommands.

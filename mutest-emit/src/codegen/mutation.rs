@@ -124,13 +124,13 @@ pub trait Mutation {
     fn display_name(&self) -> String;
 }
 
-pub trait Operator<'a> {
+pub trait Operator<'a>: Send + Sync {
     type Mutation: Mutation + 'a;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)>;
 }
 
-pub trait OperatorBoxed<'a> {
+pub trait OperatorBoxed<'a>: Send + Sync {
     type Mutation: Mutation + ?Sized + 'a;
 
     fn try_apply_boxed(&self, mcx: &MutCtxt) -> Option<(Box<Self::Mutation>, SmallVec<[SubstDef; 1]>)>;
@@ -147,7 +147,7 @@ impl<'a, T: Operator<'a>> OperatorBoxed<'a> for T {
     }
 }
 
-pub type Operators<'op, 'm> = Vec<&'op dyn OperatorBoxed<'m, Mutation = dyn Mutation + 'm>>;
+pub type Operators<'op, 'm> = &'op [&'op dyn OperatorBoxed<'m, Mutation = dyn Mutation + 'm>];
 pub type BoxedMutation<'m> = Box<dyn Mutation + 'm>;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -194,7 +194,7 @@ impl<'m, 'hir> Hash for Mut<'m, 'hir> {
 }
 
 struct MutationCollector<'ast, 'tcx, 'r, 'op, 'm> {
-    pub operators: Operators<'op, 'm>,
+    pub operators: &'op Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
     pub resolver: &'op Resolver<'r>,
     pub def_site: Span,
@@ -212,7 +212,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     {
         let mcx = $($mcx)+;
 
-        for operator in &$self.operators {
+        for operator in *$self.operators {
             if let Some((mutation, substs)) = operator.try_apply_boxed(&mcx) {
                 $self.mutations.push(Mut {
                     id: MutId($self.next_mut_index),
@@ -325,9 +325,52 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
     }
 }
 
-const MUTATION_DEPTH: usize = 3;
+pub struct Target<'ast> {
+    pub def_id: hir::DefId,
+    pub item: ast_lowering::DefItem<'ast>,
+    pub distance: usize,
+}
 
-pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, tests: &Vec<Test>, ops: Operators<'_, 'm>, krate: &ast::Crate) -> Vec<Mut<'m, 'tcx>> {
+pub fn reachable_fns<'tcx, 'ast>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &Vec<Test>, depth: usize) -> Vec<Target<'ast>> {
+    let mut previously_found_callees: FxHashSet<hir::DefId> = Default::default();
+
+    for test in tests {
+        let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
+        let body = tcx.hir().body(tcx.hir().get_by_def_id(def_id).body_id().unwrap());
+
+        let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
+
+        previously_found_callees.extend(callees.drain());
+    }
+
+    let mut targets: FxHashMap<hir::DefId, (ast_lowering::DefItem, usize)> = Default::default();
+
+    for distance in 0..depth {
+        let mut newly_found_callees: FxHashSet<hir::DefId> = Default::default();
+
+        for callee_def_id in previously_found_callees.drain() {
+            let Some(local_def_id) = callee_def_id.as_local() else { continue; };
+            let body = tcx.hir().body(tcx.hir().get_by_def_id(local_def_id).body_id().unwrap());
+
+            let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) else { continue };
+
+            targets.insert(callee_def_id, (callee_def_item, distance));
+
+            if distance < depth {
+                let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
+                callees.retain(|callee| !targets.contains_key(callee));
+
+                newly_found_callees.extend(callees);
+            }
+        }
+
+        previously_found_callees.extend(newly_found_callees.drain());
+    }
+
+    targets.drain().map(|(def_id, (def_item, distance))| Target { def_id, item: def_item, distance }).collect()
+}
+
+pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, targets: &[Target], ops: &Operators<'_, 'm>) -> Vec<Mut<'m, 'tcx>> {
     let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
@@ -346,45 +389,8 @@ pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Reso
         mutations: vec![],
     };
 
-    let mut previously_found_callees: FxHashSet<hir::DefId> = Default::default();
-
-    for test in tests {
-        let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
-        let body = tcx.hir().body(tcx.hir().get_by_def_id(def_id).body_id().unwrap());
-
-        let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
-
-        previously_found_callees.extend(callees.drain());
-    }
-
-    let mut targets: FxHashMap<hir::DefId, (ast_lowering::DefItem, usize)> = Default::default();
-
-    for distance in 0..MUTATION_DEPTH {
-        let mut newly_found_callees: FxHashSet<hir::DefId> = Default::default();
-
-        for callee_def_id in previously_found_callees.drain() {
-            let Some(local_def_id) = callee_def_id.as_local() else { continue; };
-            let body = tcx.hir().body(tcx.hir().get_by_def_id(local_def_id).body_id().unwrap());
-
-            let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) else { continue };
-
-            targets.insert(callee_def_id, (callee_def_item, distance));
-
-            if distance < MUTATION_DEPTH {
-                let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
-                callees.retain(|callee| !targets.contains_key(callee));
-
-                newly_found_callees.extend(callees);
-            }
-        }
-
-        previously_found_callees.extend(newly_found_callees.drain());
-    }
-
-    for (_, (target, distance)) in targets {
-        println!("tests -({distance})-> {:#?} @ {:#?}", target.ident(), target.span());
-
-        match target {
+    for target in targets {
+        match target.item {
             ast_lowering::DefItem::Item(item) => collector.visit_item(item),
             ast_lowering::DefItem::ForeignItem(item) => collector.visit_foreign_item(item),
             ast_lowering::DefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
@@ -416,9 +422,7 @@ impl<'m, 'tcx> Mutant<'m, 'tcx> {
     }
 }
 
-const MUTANT_MAX_MUTATIONS_COUNT: usize = 1;
-
-pub fn batch_mutations<'m, 'tcx>(mutations: Vec<Mut<'m, 'tcx>>) -> Vec<Mutant<'m, 'tcx>> {
+pub fn batch_mutations<'m, 'tcx>(mutations: Vec<Mut<'m, 'tcx>>, mutant_max_mutations_count: usize) -> Vec<Mutant<'m, 'tcx>> {
     let mut mutants: Vec<Mutant<'m, 'tcx>> = vec![];
 
     'mutation: for mutation in mutations {
@@ -429,8 +433,7 @@ pub fn batch_mutations<'m, 'tcx>(mutations: Vec<Mut<'m, 'tcx>>) -> Vec<Mutant<'m
                 }
             }
 
-            // HACK: Only "batch" a single mutation into a mutant for testing.
-            if mutant.mutations.len() >= MUTANT_MAX_MUTATIONS_COUNT { break 'mutant; }
+            if mutant.mutations.len() >= mutant_max_mutations_count { break 'mutant; }
 
             mutant.mutations.push(mutation);
             continue 'mutation;

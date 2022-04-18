@@ -6,22 +6,22 @@ use rustc_session::config::Input;
 use rustc_span::{FileName, RealFileName};
 use rustc_span::edition::Edition;
 
-use crate::config::Config;
-use crate::passes::common_compiler_config;
+use crate::config::{self, Config};
+use crate::passes::{Flow, common_compiler_config};
 
 pub struct AnalysisPassResult {
     pub generated_crate_code: String,
 }
 
-pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResult> {
-    let main_path = config.package_directory_path.join("src/main.rs");
+pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisPassResult>> {
+    let crate_root_path = config.crate_root_path();
 
-    let mut compiler_config = common_compiler_config(config, sysroot, Input::File(main_path.to_owned()));
+    let mut compiler_config = common_compiler_config(config, sysroot, Input::File(crate_root_path.to_owned()));
 
     // Compile the crate in test-mode to access tests defined behind `#[cfg(test)]`.
     compiler_config.opts.test = true;
 
-    let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<AnalysisPassResult> {
+    let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
             let sess = compiler.session();
 
@@ -39,9 +39,21 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
                 tcx.analysis(())?;
 
                 resolver.borrow_mut().access(|resolver| {
-                    let ops: mutest_emit::codegen::mutation::Operators = vec![];
-                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &tests, ops, &generated_crate_ast);
-                    let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations);
+                    let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, config.opts.mutation_depth);
+                    if let config::Mode::PrintMutationTargets = config.opts.mode {
+                        for target in &targets {
+                            println!("tests -({distance})-> {ident:#?} @ {span:#?}",
+                                distance = target.distance,
+                                ident = target.item.ident(),
+                                span = target.item.span(),
+                            );
+                        }
+
+                        return Flow::Break;
+                    }
+
+                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &targets, &config.opts.operators);
+                    let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, config.opts.mutant_max_mutations_count);
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
                     // Clean up the generated test harness's invalid AST.
@@ -50,9 +62,11 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
                     mutest_emit::codegen::tests::generate_dummy_main(resolver, &mut generated_crate_ast);
 
                     mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
-                });
 
-                Ok(())
+                    Flow::Continue(())
+                })?;
+
+                Flow::Continue(())
             })?;
 
             let generated_crate_code = format!("{prelude}\n{code}",
@@ -60,7 +74,7 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
                 code = rustc_ast_pretty::pprust::print_crate(
                     sess.source_map(),
                     &generated_crate_ast,
-                    FileName::Real(RealFileName::LocalPath(main_path.to_owned())),
+                    FileName::Real(RealFileName::LocalPath(crate_root_path.to_owned())),
                     "".to_owned(),
                     &rustc_ast_pretty::pprust::state::NoAnn,
                     true,
@@ -68,12 +82,12 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<AnalysisPassResu
                 ),
             );
 
-            Ok(AnalysisPassResult {
+            Flow::Continue(AnalysisPassResult {
                 generated_crate_code,
             })
-        })?;
+        });
 
-        Ok(result)
+        result.into()
     })?;
 
     Ok(analysis_pass)

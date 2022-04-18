@@ -16,10 +16,10 @@ pub struct CompilationPassResult {
 }
 
 pub fn run(config: &Config, sysroot: PathBuf, analysis_pass: &AnalysisPassResult) -> CompilerResult<CompilationPassResult> {
-    let main_path = config.package_directory_path.join("src/main.rs");
+    let crate_root_path = config.crate_root_path();
 
     let mut compiler_config = common_compiler_config(config, sysroot, Input::Str {
-        name: FileName::Real(RealFileName::LocalPath(main_path)),
+        name: FileName::Real(RealFileName::LocalPath(crate_root_path)),
         input: analysis_pass.generated_crate_code.to_owned(),
     });
 
@@ -37,9 +37,10 @@ pub fn run(config: &Config, sysroot: PathBuf, analysis_pass: &AnalysisPassResult
     let mutest_search_path = format!("{}/target/debug", std::env::current_dir().unwrap().display());
     compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&format!("crate={mutest_search_path}"), Default::default()));
 
-    let out_path = config.package_directory_path.join("mutest_target");
+    let out_path = config.package_directory_path.join("target/mutest/out");
+    compiler_config.output_dir = Some(out_path.clone());
     compiler_config.opts.output_types = OutputTypes::new(&[
-        (OutputType::Exe, Some(out_path.join("mutest_bin"))),
+        (OutputType::Exe, Some(out_path.join("bin"))),
     ]);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
