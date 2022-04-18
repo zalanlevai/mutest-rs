@@ -68,7 +68,7 @@ pub mod visit {
         }
     }
 
-    pub fn walk_fn<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, kind_ast: ast::visit::FnKind<'ast>, span_ast: Span, id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, decl_hir: &'hir hir::FnDecl<'hir>, body_hir: hir::BodyId, span_hir: Span, id_hir: hir::HirId) {
+    pub fn walk_fn<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, kind_ast: ast::visit::FnKind<'ast>, _span_ast: Span, _id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, _decl_hir: &'hir hir::FnDecl<'hir>, body_hir: hir::BodyId, _span_hir: Span, _id_hir: hir::HirId) {
         match (kind_ast, kind_hir) {
             | (ast::visit::FnKind::Fn(_, _, sig_ast, _, body_ast), hir::intravisit::FnKind::ItemFn(_, _, _, _))
             | (ast::visit::FnKind::Fn(_, _, sig_ast, _, body_ast), hir::intravisit::FnKind::Method(_, _, _)) => {
@@ -96,7 +96,7 @@ pub mod visit {
         }
     }
 
-    pub fn walk_param<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {}
+    pub fn walk_param<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(_visitor: &mut T, _param_ast: &'ast ast::Param, _param_hir: &'hir hir::Param<'hir>) {}
 
     pub fn visit_block_expr<'ast, 'hir, T:AstHirVisitor<'ast, 'hir>>(visitor: &mut T, block_ast: &'ast ast::Block, expr_hir: &'hir hir::Expr<'hir>) {
         if let hir::ExprKind::Block(expr_hir_block, _) = expr_hir.kind {
@@ -105,14 +105,14 @@ pub mod visit {
     }
 
     pub fn walk_block<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
-        let block_ast_stmts = || block_ast.stmts.iter()
+        let block_ast_stmts = block_ast.stmts.iter()
             .filter(|stmt| !matches!(stmt.kind, ast::StmtKind::Empty | ast::StmtKind::MacCall(_)));
 
-        for (stmt_ast, stmt_hir) in iter::zip(block_ast_stmts(), block_hir.stmts) {
+        for (stmt_ast, stmt_hir) in iter::zip(block_ast_stmts.clone(), block_hir.stmts) {
             visitor.visit_stmt(stmt_ast, stmt_hir);
         }
 
-        if let Some(block_hir_expr) = block_hir.expr && let Some(block_ast_stmt) = block_ast_stmts().last() {
+        if let Some(block_hir_expr) = block_hir.expr && let Some(block_ast_stmt) = block_ast_stmts.last() {
             let ast::StmtKind::Expr(block_ast_stmt_expr) = &block_ast_stmt.kind else { unreachable!() };
             visit_matching_expr(visitor, block_ast_stmt_expr, block_hir_expr);
         }
@@ -137,7 +137,7 @@ pub mod visit {
                 }
             }
 
-            (ast::StmtKind::Item(item_ast), hir::StmtKind::Item(item_hir)) => {
+            (ast::StmtKind::Item(_item_ast), hir::StmtKind::Item(_item_hir)) => {
                 // TODO
             }
 
@@ -164,6 +164,9 @@ pub mod visit {
             (_, hir::ExprKind::DropTemps(expr_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
             }
+            (ast::ExprKind::Paren(expr_ast), _) => {
+                visit_matching_expr(visitor, expr_ast, expr_hir);
+            }
 
             (ast::ExprKind::Box(expr_ast), hir::ExprKind::Box(expr_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
@@ -173,8 +176,8 @@ pub mod visit {
                     visit_matching_expr(visitor, expr_ast, expr_hir);
                 }
             }
-            (ast::ExprKind::ConstBlock(anon_const_ast), hir::ExprKind::ConstBlock(anon_const_hir)) => {
-                // TODO
+            (ast::ExprKind::ConstBlock(_anon_const_ast), hir::ExprKind::ConstBlock(_anon_const_hir)) => {
+                // TODO: Visit anonymous const
             }
             (ast::ExprKind::Call(expr_ast, args_ast), hir::ExprKind::Call(expr_hir, args_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
@@ -218,21 +221,52 @@ pub mod visit {
                     visit_matching_expr(visitor, els_ast, els_hir);
                 }
             }
-            (ast::ExprKind::While(_, _, _), hir::ExprKind::Loop(_, _, hir::LoopSource::While, _)) => {
-                // TODO
+            (ast::ExprKind::While(expr_ast, block_ast, _label_ast), hir::ExprKind::Loop(block_hir, _label_hir, hir::LoopSource::While, _)) => {
+                // TODO: Visit label
+                if let [block_stmt_hir] = block_hir.stmts
+                    && let hir::StmtKind::Expr(block_expr_hir) = block_stmt_hir.kind
+                    && let hir::ExprKind::If(cond_hir, then_hir, _) = block_expr_hir.kind
+                {
+                    visit_matching_expr(visitor, expr_ast, cond_hir);
+                    if let hir::ExprKind::Block(block_hir, _) = then_hir.kind {
+                        visitor.visit_block(block_ast, block_hir);
+                    }
+                }
             }
-            (ast::ExprKind::ForLoop(_, _, _, _), hir::ExprKind::Loop(_, _, hir::LoopSource::ForLoop, _)) => {
-                // TODO
+            (ast::ExprKind::ForLoop(_pat_ast, cond_ast, block_ast, _label_ast), hir::ExprKind::Match(expr_hir, [arm_hir], hir::MatchSource::ForLoopDesugar)) => {
+                if let hir::ExprKind::Loop(block_hir, _label_hir, hir::LoopSource::ForLoop, _) = arm_hir.body.kind {
+                    // TODO: Visit label
+                    if let [block_stmt_hir] = block_hir.stmts
+                        && let hir::StmtKind::Expr(block_expr_hir) = block_stmt_hir.kind
+                        && let hir::ExprKind::Match(_, [_, some_arm_hir], hir::MatchSource::ForLoopDesugar) = block_expr_hir.kind
+                    {
+                        if let hir::PatKind::TupleStruct(_, [_pat_hir], _) = some_arm_hir.pat.kind {
+                            // TODO: Visit pattern
+                        }
+                        if let hir::ExprKind::Call(_, [cond_hir]) = expr_hir.kind {
+                            visit_matching_expr(visitor, cond_ast, cond_hir);
+                        }
+                        visit_block_expr(visitor, block_ast, some_arm_hir.body);
+                    }
+                }
             }
             (ast::ExprKind::Loop(block_ast, _), hir::ExprKind::Loop(block_hir, _, hir::LoopSource::Loop, _)) => {
                 visitor.visit_block(block_ast, block_hir);
             }
-            (ast::ExprKind::Match(expr_ast, _), hir::ExprKind::Match(expr_hir, _, hir::MatchSource::Normal)) => {
+            (ast::ExprKind::Match(expr_ast, arms_ast), hir::ExprKind::Match(expr_hir, arms_hir, hir::MatchSource::Normal)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
-                // TODO: Visit match arms.
+                for (arm_ast, arm_hir) in iter::zip(arms_ast, *arms_hir) {
+                    // TODO: Visit pattern
+                    visit_matching_expr(visitor, &arm_ast.body, arm_hir.body);
+                }
             }
-            (ast::ExprKind::Closure(_, _, _, _, _, _), hir::ExprKind::Closure(_, _, _, _, _)) => {
-                // TODO
+            (ast::ExprKind::Closure(_, _, _, decl_ast, expr_ast, _), hir::ExprKind::Closure(_, _, body_hir, _, _)) => {
+                if let Some(body_hir) = visitor.nested_body(*body_hir) {
+                    for (param_ast, param_hir) in iter::zip(&decl_ast.inputs, body_hir.params) {
+                        visitor.visit_param(param_ast, param_hir);
+                    }
+                    visit_matching_expr(visitor, expr_ast, &body_hir.value);
+                }
             }
             (ast::ExprKind::Block(block_ast, _), hir::ExprKind::Block(block_hir, _)) => {
                 visitor.visit_block(block_ast, block_hir);
@@ -261,7 +295,10 @@ pub mod visit {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
                 visit_matching_expr(visitor, index_ast, index_hir);
             }
-            (ast::ExprKind::Range(_, _, _), _) => {
+            (ast::ExprKind::Range(_, _, ast::RangeLimits::Closed), _) => {
+                // TODO
+            }
+            (ast::ExprKind::Range(_, _, ast::RangeLimits::HalfOpen), _) => {
                 // TODO
             }
             (ast::ExprKind::Underscore, _) => {}
@@ -271,8 +308,10 @@ pub mod visit {
             (ast::ExprKind::AddrOf(_, _, expr_ast), hir::ExprKind::AddrOf(_, _, expr_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
             }
-            (ast::ExprKind::Break(_, _), hir::ExprKind::Break(_, _)) => {
-                // TODO
+            (ast::ExprKind::Break(_, expr_ast), hir::ExprKind::Break(_, expr_hir)) => {
+                if let Some(expr_ast) = expr_ast && let Some(expr_hir) = expr_hir {
+                    visit_matching_expr(visitor, expr_ast, expr_hir);
+                }
             }
             (ast::ExprKind::Continue(_), hir::ExprKind::Continue(_)) => {
                 // TODO
@@ -286,15 +325,19 @@ pub mod visit {
                 // TODO
             }
             (ast::ExprKind::MacCall(_), _) => {}
-            (ast::ExprKind::Struct(_), hir::ExprKind::Struct(_, _, _)) => {
+            (ast::ExprKind::Struct(struct_ast), hir::ExprKind::Struct(_, fields_hir, base_hir)) => {
                 // TODO
+                for (field_ast, field_hir) in iter::zip(&struct_ast.fields, *fields_hir) {
+                    // TODO
+                    visit_matching_expr(visitor, &field_ast.expr, field_hir.expr);
+                }
+                if let ast::StructRest::Base(base_ast) = &struct_ast.rest && let Some(base_hir) = base_hir {
+                    visit_matching_expr(visitor, base_ast, base_hir);
+                }
             }
-            (ast::ExprKind::Repeat(expr_ast, anon_const_ast), hir::ExprKind::Repeat(expr_hir, anon_const_hir)) => {
+            (ast::ExprKind::Repeat(expr_ast, _anon_const_ast), hir::ExprKind::Repeat(expr_hir, _anon_const_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
-                // TODO
-            }
-            (ast::ExprKind::Paren(expr_ast), _) => {
-                visit_matching_expr(visitor, expr_ast, expr_hir);
+                // TODO: Visit anonymous const
             }
             (ast::ExprKind::Try(expr_ast), hir::ExprKind::Match(expr_hir, _, hir::MatchSource::TryDesugar)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
