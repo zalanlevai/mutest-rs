@@ -223,8 +223,7 @@ pub mod visit {
             }
             (ast::ExprKind::While(expr_ast, block_ast, _label_ast), hir::ExprKind::Loop(block_hir, _label_hir, hir::LoopSource::While, _)) => {
                 // TODO: Visit label
-                if let [block_stmt_hir] = block_hir.stmts
-                    && let hir::StmtKind::Expr(block_expr_hir) = block_stmt_hir.kind
+                if let Some(block_expr_hir) = block_hir.expr
                     && let hir::ExprKind::If(cond_hir, then_hir, _) = block_expr_hir.kind
                 {
                     visit_matching_expr(visitor, expr_ast, cond_hir);
@@ -295,11 +294,33 @@ pub mod visit {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
                 visit_matching_expr(visitor, index_ast, index_hir);
             }
-            (ast::ExprKind::Range(_, _, ast::RangeLimits::Closed), _) => {
-                // TODO
+            (ast::ExprKind::Range(Some(start_ast), Some(end_ast), ast::RangeLimits::Closed), hir::ExprKind::Call(path_expr_hir, [start_hir, end_hir])) => {
+                if let hir::ExprKind::Path(qpath_hir) = &path_expr_hir.kind
+                    && let hir::QPath::LangItem(hir::LangItem::RangeInclusiveNew, _, _) = qpath_hir
+                {
+                    visit_matching_expr(visitor, start_ast, start_hir);
+                    visit_matching_expr(visitor, end_ast, end_hir);
+                }
             }
-            (ast::ExprKind::Range(_, _, ast::RangeLimits::HalfOpen), _) => {
-                // TODO
+            (ast::ExprKind::Range(start_ast, end_ast, limits), hir::ExprKind::Struct(qpath_hir, fields_hir, _)) => {
+                let expected_lang_item = match (start_ast, end_ast, limits) {
+                    (None, None, ast::RangeLimits::HalfOpen) => hir::LangItem::RangeFull,
+                    (Some(_), None, ast::RangeLimits::HalfOpen) => hir::LangItem::RangeFrom,
+                    (None, Some(_), ast::RangeLimits::HalfOpen) => hir::LangItem::RangeTo,
+                    (Some(_), Some(_), ast::RangeLimits::HalfOpen) => hir::LangItem::Range,
+                    (None, Some(_), ast::RangeLimits::Closed) => hir::LangItem::RangeToInclusive,
+                    _ => unreachable!(),
+                };
+
+                if let hir::QPath::LangItem(lang_item_hir, _, _) = qpath_hir && *lang_item_hir == expected_lang_item {
+                    let mut fields_hir_iter = fields_hir.iter();
+                    if let Some(start_ast) = start_ast && let Some(start_field_hir) = fields_hir_iter.next() {
+                        visit_matching_expr(visitor, start_ast, start_field_hir.expr);
+                    }
+                    if let Some(end_ast) = end_ast && let Some(end_field_hir) = fields_hir_iter.next() {
+                        visit_matching_expr(visitor, end_ast, end_field_hir.expr);
+                    }
+                }
             }
             (ast::ExprKind::Underscore, _) => {}
             (ast::ExprKind::Path(_, _), hir::ExprKind::Path(_)) => {
