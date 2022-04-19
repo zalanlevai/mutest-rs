@@ -72,7 +72,9 @@ fn main() {
         crate_root_path: Some(crate_root_path),
         opts: config::Options {
             mode,
-            operators: &[],
+            operators: &[
+                &mutest_operators::ArgDefaultShadow,
+            ],
             mutation_depth,
             mutant_max_mutations_count,
         },
