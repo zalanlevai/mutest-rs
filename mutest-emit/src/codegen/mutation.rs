@@ -154,6 +154,10 @@ pub type BoxedMutation<'m> = Box<dyn Mutation + 'm>;
 pub struct MutId(u32);
 
 impl MutId {
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+
     pub fn into_symbol_name(&self) -> String {
         format!("mut_{}", self.0)
     }

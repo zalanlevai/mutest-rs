@@ -14,6 +14,10 @@ use crate::codegen::symbols::hygiene::AstPass;
 
 pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutationMeta(sp)), vec![
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::id, sp), {
+            ast::mk::expr_u32(sp, mutation.id.index())
+        }),
+
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_name, sp), {
             ast::mk::expr_str(sp, &mutation.display_name())
         }),
@@ -121,12 +125,12 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &Vec<Mutant>, subst
                 .collect::<Vec<_>>();
             let subst_map_expr = ast::mk::expr_struct(sp, path::SubstMap(sp), subst_map_fields);
 
-            // MutantMeta { ... }
-            bake_mutant(mutant, sp, sess, mutations_expr, subst_map_expr)
+            // &MutantMeta { ... }
+            ast::mk::expr_ref(sp, bake_mutant(mutant, sp, sess, mutations_expr, subst_map_expr))
         })
         .collect::<Vec<_>>();
 
-    // const MUTANTS: : &[mutest_runtime::MutantMeta<SubstMap>] = &[ ... ];
+    // const MUTANTS: : &[&mutest_runtime::MutantMeta<SubstMap>] = &[ ... ];
     let vis = ast::mk::vis_default(sp);
     let ident = Ident::new(*sym::MUTANTS, sp);
     let mutant_meta_ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp,
@@ -134,7 +138,7 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &Vec<Mutant>, subst
         vec![],
         vec![ast::GenericArg::Type(ast::mk::ty_path(None, path::SubstMap(sp)))],
     ));
-    let ty = ast::mk::ty_ref(sp, ast::mk::ty_slice(sp, mutant_meta_ty), None);
+    let ty = ast::mk::ty_ref(sp, ast::mk::ty_slice(sp, ast::mk::ty_ref(sp, mutant_meta_ty, None)), None);
     let expr = ast::mk::expr_slice(sp, elements);
     ast::mk::item_const(sp, vis, ident, ty, expr)
 }

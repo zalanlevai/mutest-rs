@@ -29,6 +29,7 @@ pub mod sym {
         display_location,
         display_name,
         harness,
+        id,
         Mutant,
         mutant,
         MutantMeta,
@@ -87,7 +88,6 @@ pub mod path {
         default (::core::default::Default::default),
         None (::core::option::Option::None),
         Option (::core::option::Option),
-        ptr_eq (::core::ptr::eq),
         Some (::core::option::Option::Some),
         TestDescAndFn (::test::TestDescAndFn),
 

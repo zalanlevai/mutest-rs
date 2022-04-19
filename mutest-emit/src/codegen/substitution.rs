@@ -35,13 +35,13 @@ impl SubstLocId {
 fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Expr>>, substs: Vec<(MutId, P<ast::Expr>)>) -> P<ast::Expr> {
     let mut arms = substs.into_iter()
         .map(|(mut_id, subst)| {
-            // Some(subst) if ptr::eq(subst.mutation, &crate::mutest_generated::mutations::$mut_id) => $subst,
+            // Some(subst) if subst.mutation.id == crate::mutest_generated::mutations::$mut_id.id => $subst,
             let subst_ident = Ident::new(Symbol::intern("subst"), sp);
             let pat_some_subst = ast::mk::pat_tuple_struct(sp, path::Some(sp), vec![ast::mk::pat_ident(sp, subst_ident)]);
-            let guard = ast::mk::expr_call_path(sp, path::ptr_eq(sp), vec![
-                ast::mk::expr_field(sp, ast::mk::expr_ident(sp, subst_ident), Ident::new(*sym::mutation, sp)),
-                ast::mk::expr_ref(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)]))),
-            ]);
+            let guard = ast::mk::expr_binary(sp, ast::BinOpKind::Eq,
+                ast::mk::expr_field_deep(sp, ast::mk::expr_ident(sp, subst_ident), vec![Ident::new(*sym::mutation, sp), Ident::new(*sym::id, sp)]),
+                ast::mk::expr_field(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)])), Ident::new(*sym::id, sp)),
+            );
             ast::mk::arm(sp, pat_some_subst, Some(guard), subst)
         })
         .collect::<Vec<_>>();

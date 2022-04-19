@@ -44,7 +44,7 @@ fn clone_tests(tests: &Vec<test::TestDescAndFn>) -> Vec<test::TestDescAndFn> {
     tests.iter().map(make_owned_test).collect()
 }
 
-pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'m [MutantMeta<'m, S>], active_mutant_handle: &ActiveMutantHandle<'m, S>) {
+pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'m [&'m MutantMeta<'m, S>], active_mutant_handle: &ActiveMutantHandle<'m, S>) {
     let opts = match test::parse_opts(args) {
         Some(Ok(o)) => o,
         Some(Err(msg)) => {
@@ -56,7 +56,7 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
 
     let mut all_test_runs_failed_successfully = true;
 
-    for mutant in mutants {
+    for &mutant in mutants {
         active_mutant_handle.replace(Some(mutant));
 
         println!("applying mutant with the following mutations:");
@@ -82,7 +82,7 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
     }
 }
 
-pub fn mutest_main_static<'m, S>(tests: &[&test::TestDescAndFn], mutants: &'m [MutantMeta<'m, S>], active_mutant_handle: &ActiveMutantHandle<'m, S>) {
+pub fn mutest_main_static<'m, S>(tests: &[&test::TestDescAndFn], mutants: &'m [&'m MutantMeta<'m, S>], active_mutant_handle: &ActiveMutantHandle<'m, S>) {
     let args = env::args().collect::<Vec<_>>();
     let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test(test)).collect();
 
