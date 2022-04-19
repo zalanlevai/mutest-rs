@@ -55,6 +55,10 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
     };
 
     let mut all_test_runs_failed_successfully = true;
+    let mut total_mutants_count = 0;
+    let mut undetected_mutants_count = 0;
+    let mut total_mutations_count = 0;
+    let mut undetected_mutations_count = 0;
 
     for &mutant in mutants {
         active_mutant_handle.replace(Some(mutant));
@@ -65,17 +69,37 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
         }
 
         match test::run_tests_console(&opts, clone_tests(&tests)) {
-            Ok(true) => {
-                all_test_runs_failed_successfully = false;
-                print!("{}", mutant.undetected_diagnostic);
+            Ok(all_tests_passed) => {
+                total_mutants_count += 1;
+                total_mutations_count += mutant.mutations.len();
+
+                if all_tests_passed {
+                    all_test_runs_failed_successfully = false;
+                    undetected_mutants_count += 1;
+                    undetected_mutations_count += mutant.mutations.len();
+
+                    print!("{}", mutant.undetected_diagnostic);
+                }
             }
-            Ok(false) => {}
             Err(err) => {
                 eprintln!("error: io error: {:?}", err);
                 process::exit(ERROR_EXIT_CODE);
             }
         }
     }
+
+    println!("mutants:   {score:.2}%. {detected} detected; {undetected} undetected; {total} total",
+        score = (total_mutants_count - undetected_mutants_count) as f64 / total_mutants_count as f64 * 100_f64,
+        detected = total_mutants_count - undetected_mutants_count,
+        undetected = undetected_mutants_count,
+        total = total_mutants_count,
+    );
+    println!("mutations: {score:.2}%. {detected} detected; {undetected} undetected; {total} total",
+        score = (total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64 * 100_f64,
+        detected = total_mutations_count - undetected_mutations_count,
+        undetected = undetected_mutations_count,
+        total = total_mutations_count,
+    );
 
     if !all_test_runs_failed_successfully {
         process::exit(ERROR_EXIT_CODE);
