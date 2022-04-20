@@ -102,5 +102,6 @@ pub mod path {
         mutest_main_static (::mutest_runtime::mutest_main_static),
         SubstMap (crate::mutest_generated::SubstMap),
         SubstMeta (::mutest_runtime::SubstMeta),
+        wrap (::mutest_runtime::wrap),
     }
 }

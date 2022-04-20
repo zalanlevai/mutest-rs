@@ -10,7 +10,7 @@ use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::entry::EntryPointType;
 use crate::codegen::ast::mut_visit::{ExpectOne, MutVisitor};
-use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 fn is_cfg_test_attr(attr: &ast::Attribute) -> bool {
@@ -23,9 +23,9 @@ fn unambiguous_test_item_ident(ident: &Ident) -> Ident {
     Ident::new(symbol, ident.span)
 }
 
-fn is_test_extern_crate_decl(item: &ast::Item) -> bool {
+fn is_extern_crate_decl(item: &ast::Item, sym: Symbol) -> bool {
     if let ast::ItemKind::ExternCrate(..) = item.kind {
-        if item.ident.name == sym::test {
+        if item.ident.name == sym {
             return true;
         }
     }
@@ -33,19 +33,26 @@ fn is_test_extern_crate_decl(item: &ast::Item) -> bool {
     false
 }
 
-fn dedupe_test_extern_crate_decls(items: &mut Vec<P<ast::Item>>) {
-    if let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| is_test_extern_crate_decl(item)) {
-        let mut i = first_extern_crate_index + 1;
+fn dedupe_extern_crate_decls(items: &mut Vec<P<ast::Item>>, sym: Symbol) -> Option<P<ast::Item>> {
+    let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| is_extern_crate_decl(item, sym)) else { return None; };
 
-        while let Some(item) = items.get(i) {
-            if !is_test_extern_crate_decl(item) {
-                i += 1;
-                continue;
-            }
-
-            items.remove(i);
+    let mut i = first_extern_crate_index + 1;
+    while let Some(item) = items.get(i) {
+        if !is_extern_crate_decl(item, sym) {
+            i += 1;
+            continue;
         }
+
+        items.remove(i);
     }
+
+    Some(items[first_extern_crate_index].clone())
+}
+
+fn ensure_test_scope(items: &mut Vec<P<ast::Item>>) {
+    let Some(first_test_extern_crate) = dedupe_extern_crate_decls(items, sym::test) else { return; };
+    let None = dedupe_extern_crate_decls(items, *sym::mutest_runtime) else { return; };
+    items.push(ast::mk::item_extern_crate(first_test_extern_crate.span, *sym::mutest_runtime, None));
 }
 
 struct TestCaseCleaner<'tst> {
@@ -56,7 +63,7 @@ impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
     fn visit_crate(&mut self, c: &mut ast::Crate) {
         ast::mut_visit::noop_visit_crate(c, self);
 
-        dedupe_test_extern_crate_decls(&mut c.items);
+        ensure_test_scope(&mut c.items);
     }
 
     fn flat_map_item(&mut self, i: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
@@ -66,7 +73,7 @@ impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
             ast::mut_visit::noop_visit_item_kind(&mut item.kind, self);
 
             if let ast::ItemKind::Mod(_, ast::ModKind::Loaded(ref mut items, _, _)) = item.kind {
-                dedupe_test_extern_crate_decls(items);
+                ensure_test_scope(items);
             }
         }
 
@@ -90,11 +97,14 @@ impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
                 && let Some(test_lib_call_lambda) = test_lib_call_args.first_mut()
                 && let ast::ExprKind::Closure(_, _, _, _, ref mut test_lib_call_body, _) = test_lib_call_lambda.kind
                 && let ast::ExprKind::Call(_, ref mut test_assert_call_args) = test_lib_call_body.kind
-                && let Some(test_fn_call) = test_assert_call_args.first_mut()
-                && let ast::ExprKind::Call(ref mut test_fn_path, _) = test_fn_call.kind
-                && let ast::ExprKind::Path(_, ref mut test_fn_path) = test_fn_path.kind
+                && let Some(test_assert_call_arg) = test_assert_call_args.first_mut()
+                && let ast::ExprKind::Call(ref test_fn_path, _) = test_assert_call_arg.kind
+                && let ast::ExprKind::Path(_, ref test_fn_path) = test_fn_path.kind
             {
-                *test_fn_path = ast::mk::path_ident(test_fn_path.span, unambiguous_test_item_ident(&test.descriptor.ident));
+                *test_assert_call_arg = ast::mk::expr_call_path(test_assert_call_arg.span,
+                    ast::mk::path_local(path::wrap(test_assert_call_arg.span)),
+                    vec![ast::mk::expr_ref(test_fn_path.span, ast::mk::expr_ident(test_fn_path.span, unambiguous_test_item_ident(&test.descriptor.ident)))],
+                );
             }
         }
 

@@ -1,5 +1,8 @@
 use std::env;
-use std::process;
+use std::process::{self, Termination};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use crate::metadata::MutantMeta;
 
@@ -28,6 +31,46 @@ impl <'a, S> ActiveMutantHandle<'a, S> {
     pub fn replace(&self, v: Option<&'a MutantMeta<'a, S>>) {
         *self.0.write() = v;
     }
+}
+
+fn execute_with_timeout<T, F>(test: F, timeout: Duration) -> T
+where
+    T: Termination + Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel();
+
+    let handle = thread::Builder::new()
+        .name(format!("{} <wrapped>", thread::current().name().unwrap()))
+        .spawn(move || {
+            match tx.send(test()) {
+                Ok(()) => {}
+                Err(_) => {}
+            }
+        })
+        .unwrap();
+
+    let termination = rx.recv_timeout(timeout);
+
+    if handle.is_finished() {
+        match handle.join() {
+            Ok(_) => {}
+            Err(_) => panic!("wrapped thread panicked"),
+        }
+    }
+
+    match termination {
+        Ok(t) => t,
+        Err(_) => panic!("test timed out after {timeout:?}"),
+    }
+}
+
+pub fn wrap<T, F>(test: F) -> T
+where
+    T: Termination + Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    execute_with_timeout(test, Duration::from_millis(2000))
 }
 
 const ERROR_EXIT_CODE: i32 = 101;
