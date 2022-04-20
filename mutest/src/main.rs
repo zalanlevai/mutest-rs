@@ -74,6 +74,7 @@ fn main() {
             mode,
             operators: &[
                 &mutest_operators::ArgDefaultShadow,
+                &mutest_operators::RelationalOpInvert,
             ],
             mutation_depth,
             mutant_max_mutations_count,
