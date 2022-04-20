@@ -6,5 +6,8 @@ extern crate smallvec;
 mod arg_default_shadow;
 pub use arg_default_shadow::*;
 
+mod relational_op_eq_swap;
+pub use relational_op_eq_swap::*;
+
 mod relational_op_invert;
 pub use relational_op_invert::*;

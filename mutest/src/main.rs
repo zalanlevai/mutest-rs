@@ -74,6 +74,7 @@ fn main() {
             mode,
             operators: &[
                 &mutest_operators::ArgDefaultShadow,
+                &mutest_operators::RelationalOpEqSwap,
                 &mutest_operators::RelationalOpInvert,
             ],
             mutation_depth,
