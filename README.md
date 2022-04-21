@@ -2,6 +2,8 @@
 
 Generate and analyze runtime-swappable code mutants of Rust programs using a dynamic set of abstract mutation operators.
 
+![Output of mutest](docs/res/output.png)
+
 ## Build
 
 > `mutest` relies on the nightly compiler toolchain. `rustup` is configured to automatically install and use the right nightly version.
