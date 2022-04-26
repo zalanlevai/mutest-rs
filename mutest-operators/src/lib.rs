@@ -7,6 +7,9 @@ extern crate smallvec;
 mod arg_default_shadow;
 pub use arg_default_shadow::*;
 
+mod bit_op_swap;
+pub use bit_op_swap::*;
+
 mod eq_op_invert;
 pub use eq_op_invert::*;
 

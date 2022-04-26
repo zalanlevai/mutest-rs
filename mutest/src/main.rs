@@ -74,6 +74,10 @@ fn main() {
             mode,
             operators: &[
                 &mutest_operators::ArgDefaultShadow,
+                &mutest_operators::BitOpOrAndSwap,
+                &mutest_operators::BitOpOrXorSwap,
+                &mutest_operators::BitOpShiftDirSwap,
+                &mutest_operators::BitOpXorAndSwap,
                 &mutest_operators::EqOpInvert,
                 &mutest_operators::MathOpAddMulSwap,
                 &mutest_operators::MathOpAddSubSwap,
