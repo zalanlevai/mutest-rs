@@ -69,8 +69,12 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisP
                 Flow::Continue(())
             })?;
 
-            let generated_crate_code = format!("{prelude}\n{code}",
+            // HACK: The generated code is currently based on the expanded AST and contains
+            //       references to the internals of macro expansions. These are patched over using a
+            //       static attribute prelude and a static set of crate references.
+            let generated_crate_code = format!("{prelude}\n{code}\n{crate_refs}",
                 prelude = mutest_emit::codegen::expansion::GENERATED_CODE_PRELUDE,
+                crate_refs = mutest_emit::codegen::expansion::GENERATED_CODE_CRATE_REFS,
                 code = rustc_ast_pretty::pprust::print_crate(
                     sess.source_map(),
                     &generated_crate_ast,

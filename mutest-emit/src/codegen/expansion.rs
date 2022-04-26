@@ -14,5 +14,10 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(thread_local_internals)]
 #![feature(libstd_thread_internals)]
 
+#![feature(box_syntax)]
 #![feature(core_panic)]
+"#;
+
+pub const GENERATED_CODE_CRATE_REFS: &str = r#"
+extern crate alloc;
 "#;
