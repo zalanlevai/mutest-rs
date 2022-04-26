@@ -49,6 +49,8 @@ mod inlined {
 }
 
 pub mod mk {
+    use std::iter;
+
     use rustc_ast as ast;
     use rustc_ast::ptr::P;
     use rustc_span::{Span, Symbol};
@@ -272,6 +274,14 @@ pub mod mk {
         self::expr(sp, ast::ExprKind::Binary(ast::BinOp { span: sp, node: op }, lhs, rhs))
     }
 
+    pub fn expr_assign(sp: Span, lhs: P<ast::Expr>, rhs: P<ast::Expr>) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::Assign(lhs, rhs, sp))
+    }
+
+    pub fn expr_assign_op(sp: Span, op: ast::BinOpKind, lhs: P<ast::Expr>, rhs: P<ast::Expr>) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::AssignOp(ast::BinOp { span: sp, node: op }, lhs, rhs))
+    }
+
     pub fn pat(sp: Span, kind: ast::PatKind) -> P<ast::Pat> {
         P(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind, tokens: None })
     }
@@ -341,7 +351,7 @@ pub mod mk {
     }
 
     pub fn expr_method_call(sp: Span, receiver: P<ast::Expr>, path: ast::PathSegment, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
-        let expr = std::iter::once(receiver).chain(args.into_iter()).collect::<Vec<_>>();
+        let expr = iter::once(receiver).chain(args.into_iter()).collect::<Vec<_>>();
         self::expr(sp, ast::ExprKind::MethodCall(path, expr, sp))
     }
 
