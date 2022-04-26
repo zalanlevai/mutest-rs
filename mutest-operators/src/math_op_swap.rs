@@ -10,13 +10,18 @@ macro define_math_op_swap_mutation(
     }
 ) {
     $vis struct $mutation {
+        pub is_assignment: bool,
         pub original_bin_op: ast::BinOpKind,
         pub replacement_bin_op: ast::BinOpKind,
     }
 
     impl Mutation for $mutation {
         fn display_name(&self) -> String {
-            format!("swap math operator `{original_bin_op}` for `{replacement_bin_op}`",
+            format!("swap math {expr_kind} `{original_bin_op}` for `{replacement_bin_op}`",
+                expr_kind = match self.is_assignment {
+                    true => "assignment operator",
+                    false => "operator",
+                },
                 original_bin_op = self.original_bin_op.to_string(),
                 replacement_bin_op = self.replacement_bin_op.to_string(),
             )
@@ -34,15 +39,25 @@ macro define_math_op_swap_mutation(
 
             let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
 
-            let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.ast.kind else { return None; };
+            let bin_op = match &expr.ast.kind {
+                ast::ExprKind::Binary(bin_op, _, _) => bin_op,
+                ast::ExprKind::AssignOp(bin_op, _, _) => bin_op,
+                _ => { return None; }
+            };
 
             let mapped_bin_op = match bin_op.node {
                 $($bin_op_from => $bin_op_to,)+
                 _ => { return None; },
             };
-            let mapped_bin_expr = ast::mk::expr_binary(def, mapped_bin_op, lhs.clone(), rhs.clone());
+
+            let mapped_bin_expr = match &expr.ast.kind {
+                ast::ExprKind::Binary(_, lhs, rhs) => ast::mk::expr_binary(def, mapped_bin_op, lhs.clone(), rhs.clone()),
+                ast::ExprKind::AssignOp(_, lhs, rhs) => ast::mk::expr_assign_op(def, mapped_bin_op, lhs.clone(), rhs.clone()),
+                _ => unreachable!(),
+            };
 
             let mutation = Self::Mutation {
+                is_assignment: matches!(&expr.ast.kind, ast::ExprKind::AssignOp(_, _, _)),
                 original_bin_op: bin_op.node,
                 replacement_bin_op: mapped_bin_op,
             };
