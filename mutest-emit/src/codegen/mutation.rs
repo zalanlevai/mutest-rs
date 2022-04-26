@@ -364,7 +364,7 @@ pub fn reachable_fns<'tcx, 'ast>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, kra
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
                 callees.retain(|callee| !targets.contains_key(callee));
 
-                newly_found_callees.extend(callees);
+                newly_found_callees.extend(callees.drain());
             }
         }
 
