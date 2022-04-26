@@ -282,6 +282,10 @@ pub mod mk {
         self::expr(sp, ast::ExprKind::AssignOp(ast::BinOp { span: sp, node: op }, lhs, rhs))
     }
 
+    pub fn expr_range(sp: Span, start: Option<P<ast::Expr>>, end: Option<P<ast::Expr>>, limits: ast::RangeLimits) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::Range(start, end, limits))
+    }
+
     pub fn pat(sp: Span, kind: ast::PatKind) -> P<ast::Pat> {
         P(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind, tokens: None })
     }
