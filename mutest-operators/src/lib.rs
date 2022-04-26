@@ -16,6 +16,9 @@ pub use eq_op_invert::*;
 mod math_op_swap;
 pub use math_op_swap::*;
 
+mod range_limit_swap;
+pub use range_limit_swap::*;
+
 mod relational_op_eq_swap;
 pub use relational_op_eq_swap::*;
 

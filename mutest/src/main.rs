@@ -83,6 +83,7 @@ fn main() {
                 &mutest_operators::MathOpAddSubSwap,
                 &mutest_operators::MathOpDivRemSwap,
                 &mutest_operators::MathOpMulDivSwap,
+                &mutest_operators::RangeLimitSwap,
                 &mutest_operators::RelationalOpEqSwap,
                 &mutest_operators::RelationalOpInvert,
             ],
