@@ -23,6 +23,7 @@ pub mod sym {
         default,
         non_upper_case_globals,
         println,
+        unused_parens,
 
         ACTIVE_MUTANT_HANDLE,
         ActiveMutantHandle,

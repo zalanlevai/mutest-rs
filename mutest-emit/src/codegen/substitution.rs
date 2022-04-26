@@ -75,7 +75,7 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
     );
 
     // match crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|m| m.substitutions.$subst.as_ref()) { ... }
-    ast::mk::expr_match(sp, subst_lookup_expr, arms)
+    ast::mk::expr_paren(sp, ast::mk::expr_match(sp, subst_lookup_expr, arms))
 }
 
 pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P<ast::Expr>>, substs: Vec<(MutId, &Subst)>) -> P<ast::Expr> {
@@ -134,6 +134,18 @@ struct SubstWriter<'op> {
 }
 
 impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
+    fn visit_crate(&mut self, krate: &mut ast::Crate) {
+        // #[allow(unused_parens)]
+        let allow_unused_parens_attr = ast::attr::mk_attr_inner(ast::attr::mk_list_item(
+            Ident::new(sym::allow, self.def_site),
+            vec![ast::attr::mk_nested_word_item(Ident::new(*sym::unused_parens, self.def_site))],
+        ));
+
+        krate.attrs.push(allow_unused_parens_attr);
+
+        ast::mut_visit::noop_visit_crate(krate, self);
+    }
+
     fn visit_block(&mut self, block: &mut P<ast::Block>) {
         ast::mut_visit::noop_visit_block(block, self);
 

@@ -232,6 +232,10 @@ pub mod mk {
         })
     }
 
+    pub fn expr_paren(sp: Span, expr: P<ast::Expr>) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::Paren(expr))
+    }
+
     pub fn expr_path(path: ast::Path) -> P<ast::Expr> {
         self::expr(path.span, ast::ExprKind::Path(None, path))
     }
