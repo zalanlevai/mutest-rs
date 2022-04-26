@@ -74,6 +74,7 @@ fn main() {
             mode,
             operators: &[
                 &mutest_operators::ArgDefaultShadow,
+                &mutest_operators::EqOpInvert,
                 &mutest_operators::MathOpAddMulSwap,
                 &mutest_operators::MathOpAddSubSwap,
                 &mutest_operators::MathOpDivRemSwap,
