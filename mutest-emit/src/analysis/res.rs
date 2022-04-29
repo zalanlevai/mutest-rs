@@ -58,6 +58,13 @@ pub fn trait_def_id<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Option<hir::Def
     }
 }
 
+pub fn fn_def_id<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Option<hir::DefId> {
+    match def_path_res(tcx, path) {
+        Res::Def(DefKind::Fn | DefKind::AssocFn, trait_id) => Some(trait_id),
+        _ => None,
+    }
+}
+
 pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hir::HirId, hir::Node)> {
     let def_hir_id = tcx.hir().local_def_id_to_hir_id(def_id);
 
@@ -130,7 +137,7 @@ pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<hi
 macro interned {
     (@STRINGIFY_PATH, $path:path) => { stringify!($path) },
 
-    (@ITEM, trait, $ident:ident, ::$($path:ident)::+) => {
+    (@ITEM_IMPL, $kind_fn:ident, $kind_display_name:expr, $ident:ident, ::$($path:ident)::+) => {
         mod $ident {
             use super::*;
             use std::lazy::SyncOnceCell;
@@ -141,10 +148,17 @@ macro interned {
         #[doc = concat!("`", interned!(@STRINGIFY_PATH, ::$($path)::+), "`")]
         pub fn $ident(tcx: TyCtxt) -> hir::DefId {
             *$ident::CELL.get_or_init(||
-                trait_def_id(tcx, &[$(Symbol::intern(stringify!($path)),)+])
-                    .expect(concat!("trait ", interned!(@STRINGIFY_PATH, ::$($path)::+), " not available"))
+                $kind_fn(tcx, &[$(Symbol::intern(stringify!($path)),)+])
+                    .expect(concat!($kind_display_name, " ", interned!(@STRINGIFY_PATH, ::$($path)::+), " not available"))
             )
         }
+    },
+
+    (@ITEM, trait, $ident:ident, ::$($path:ident)::+) => {
+        interned!(@ITEM_IMPL, trait_def_id, "trait", $ident, ::$($path)::+);
+    },
+    (@ITEM, fn, $ident:ident, ::$($path:ident)::+) => {
+        interned!(@ITEM_IMPL, fn_def_id, "function", $ident, ::$($path)::+);
     },
 
     ($($kind:tt $ident:ident (::$($path:ident)::+)),* $(,)?) => {
@@ -158,5 +172,11 @@ macro interned {
 pub mod traits {
     super::interned! {
         trait Default (::core::default::Default),
+    }
+}
+
+pub mod fns {
+    super::interned! {
+        fn default (::core::default::Default::default)
     }
 }
