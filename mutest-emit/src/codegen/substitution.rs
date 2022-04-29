@@ -7,7 +7,14 @@ use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
-use crate::codegen::mutation::{Mutant, MutId, Subst, SubstLoc};
+use crate::codegen::mutation::{Mutant, MutId, Subst, SubstDef, SubstLoc};
+
+pub fn conflicting_substs(a: &SubstDef, b: &SubstDef) -> bool {
+    match (&a.substitute, &b.substitute) {
+        (Subst::AstLocal(..), Subst::AstLocal(..)) => false,
+        _ => a.location == b.location,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct SubstLocId(SubstLoc);

@@ -18,6 +18,7 @@ use crate::analysis::tests::Test;
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
+use crate::codegen::substitution::conflicting_substs;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
@@ -432,12 +433,12 @@ pub fn batch_mutations<'m, 'tcx>(mutations: Vec<Mut<'m, 'tcx>>, mutant_max_mutat
     'mutation: for mutation in mutations {
         'mutant: for mutant in &mut mutants {
             for subst in &mutation.substs {
-                if mutant.iter_substitutions().any(|s| s.location == subst.location) {
+                if mutant.iter_substitutions().any(|s| conflicting_substs(s, subst)) {
                     continue 'mutant;
                 }
             }
 
-            if mutant.mutations.len() >= mutant_max_mutations_count { break 'mutant; }
+            if mutant.mutations.len() >= mutant_max_mutations_count { continue 'mutant; }
 
             mutant.mutations.push(mutation);
             continue 'mutation;
