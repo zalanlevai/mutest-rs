@@ -80,6 +80,26 @@ pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::
     }
 }
 
+pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<hir::DefId> {
+    match expr.kind {
+        hir::ExprKind::Call(expr, _) => {
+            if let hir::ExprKind::Path(qpath) = &expr.kind
+                && let Some(def_id) = qpath_res(typeck, qpath, expr.hir_id).opt_def_id()
+            {
+                return Some(def_id);
+            }
+        }
+        hir::ExprKind::MethodCall(_, _, _) => {
+            if let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) {
+                return Some(def_id);
+            }
+        }
+        _ => {}
+    }
+
+    None
+}
+
 struct CalleeCollector<'tcx> {
     typeck: &'tcx ty::TypeckResults<'tcx>,
     callees: Vec<hir::DefId>,
@@ -87,20 +107,8 @@ struct CalleeCollector<'tcx> {
 
 impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
-        match expr.kind {
-            hir::ExprKind::Call(expr, _) => {
-                if let hir::ExprKind::Path(qpath) = &expr.kind
-                    && let Some(def_id) = qpath_res(self.typeck, qpath, expr.hir_id).opt_def_id()
-                {
-                    self.callees.push(def_id);
-                }
-            }
-            hir::ExprKind::MethodCall(_, _, _) => {
-                if let Some(def_id) = self.typeck.type_dependent_def_id(expr.hir_id) {
-                    self.callees.push(def_id);
-                }
-            }
-            _ => {}
+        if let Some(callee) = callee(self.typeck, expr) {
+            self.callees.push(callee);
         }
 
         hir::intravisit::walk_expr(self, expr);
