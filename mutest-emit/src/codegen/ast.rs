@@ -56,15 +56,23 @@ pub mod mk {
     use rustc_span::{Span, Symbol};
     use rustc_span::symbol::Ident;
 
-    pub fn path_segment(sp: Span, ident: Ident, args: Vec<ast::GenericArg>) -> ast::PathSegment {
-        let args = match !args.is_empty() {
-            true => {
-                let args = args.into_iter().map(ast::AngleBracketedArg::Arg).collect();
-                ast::AngleBracketedArgs { span: sp, args }.into()
-            }
-            false => None,
-        };
+    pub fn angle_bracketed_args(sp: Span, args: Vec<ast::GenericArg>) -> Option<P<ast::GenericArgs>> {
+        if args.is_empty() { return None; }
 
+        let args = args.into_iter().map(ast::AngleBracketedArg::Arg).collect();
+        Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: sp, args })))
+    }
+
+    pub fn parenthesized_args(sp: Span, inputs: Vec<P<ast::Ty>>, output: Option<P<ast::Ty>>) -> P<ast::GenericArgs> {
+        P(ast::GenericArgs::Parenthesized(ast::ParenthesizedArgs {
+            span: sp,
+            inputs,
+            inputs_span: sp,
+            output: self::fn_ret_ty(sp, output),
+        }))
+    }
+
+    pub fn path_segment_raw(sp: Span, ident: Ident, args: Option<P<ast::GenericArgs>>) -> ast::PathSegment {
         ast::PathSegment {
             id: ast::DUMMY_NODE_ID,
             ident: ident.with_span_pos(sp),
@@ -72,7 +80,11 @@ pub mod mk {
         }
     }
 
-    pub fn path_args(sp: Span, global: bool, mut idents: Vec<Ident>, args: Vec<ast::GenericArg>) -> ast::Path {
+    pub fn path_segment(sp: Span, ident: Ident, args: Vec<ast::GenericArg>) -> ast::PathSegment {
+        self::path_segment_raw(sp, ident, self::angle_bracketed_args(sp, args))
+    }
+
+    pub fn path_raw(sp: Span, global: bool, mut idents: Vec<Ident>, args: Option<P<ast::GenericArgs>>) -> ast::Path {
         assert!(!idents.is_empty());
 
         let add_root = global && !idents[0].is_path_segment_keyword();
@@ -88,9 +100,13 @@ pub mod mk {
 
         segments.extend(idents.into_iter().map(|ident| ast::PathSegment::from_ident(ident.with_span_pos(sp))));
 
-        segments.push(self::path_segment(sp, last_ident, args));
+        segments.push(self::path_segment_raw(sp, last_ident, args));
 
         ast::Path { span: sp, segments, tokens: None }
+    }
+
+    pub fn path_args(sp: Span, global: bool, idents: Vec<Ident>, args: Vec<ast::GenericArg>) -> ast::Path {
+        self::path_raw(sp, global, idents, self::angle_bracketed_args(sp, args))
     }
 
     pub fn path(sp: Span, global: bool, idents: Vec<Ident>) -> ast::Path {
@@ -114,13 +130,17 @@ pub mod mk {
         self::path(sp, false, idents)
     }
 
-    pub fn pathx_args(sp: Span, path: ast::Path, idents: Vec<Ident>, args: Vec<ast::GenericArg>) -> ast::Path {
+    pub fn pathx_raw(sp: Span, path: ast::Path, idents: Vec<Ident>, args: Option<P<ast::GenericArgs>>) -> ast::Path {
         let idents = path.segments.iter()
             .map(|s| s.ident)
             .chain(idents.into_iter())
             .collect::<Vec<_>>();
 
-        self::path_args(sp, false, idents, args)
+        self::path_raw(sp, false, idents, args)
+    }
+
+    pub fn pathx_args(sp: Span, path: ast::Path, idents: Vec<Ident>, args: Vec<ast::GenericArg>) -> ast::Path {
+        self::pathx_raw(sp, path, idents, self::angle_bracketed_args(sp, args))
     }
 
     pub fn pathx(sp: Span, path: ast::Path, idents: Vec<Ident>) -> ast::Path {
@@ -176,6 +196,10 @@ pub mod mk {
         self::ty(sp, ast::TyKind::Slice(ty))
     }
 
+    pub fn ty_tuple(sp: Span, tys: Vec<P<ast::Ty>>) -> P<ast::Ty> {
+        self::ty(sp, ast::TyKind::Tup(tys))
+    }
+
     pub fn ty_param(sp: Span, ident: Ident, bounds: ast::GenericBounds, default: Option<P<ast::Ty>>) -> ast::GenericParam {
         ast::GenericParam {
             id: ast::DUMMY_NODE_ID,
@@ -185,6 +209,10 @@ pub mod mk {
             kind: ast::GenericParamKind::Type { default },
             is_placeholder: false,
         }
+    }
+
+    pub fn lifetime(sp: Span, ident: Ident) -> ast::Lifetime {
+        ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: ident.with_span_pos(sp) }
     }
 
     pub fn trait_ref(path: ast::Path) -> ast::TraitRef {
@@ -199,8 +227,12 @@ pub mod mk {
         }
     }
 
-    pub fn trait_bound(path: ast::Path, modifier: ast::TraitBoundModifier) -> ast::GenericBound {
+    pub fn trait_bound(modifier: ast::TraitBoundModifier, path: ast::Path) -> ast::GenericBound {
         ast::GenericBound::Trait(self::poly_trait_ref(path.span, path), modifier)
+    }
+
+    pub fn lifetime_bound(lifetime: ast::Lifetime) -> ast::GenericBound {
+        ast::GenericBound::Outlives(lifetime)
     }
 
     pub fn anon_const(sp: Span, kind: ast::ExprKind) -> ast::AnonConst {
@@ -218,10 +250,6 @@ pub mod mk {
 
     pub fn const_ident(sp: Span, ident: Ident) -> ast::AnonConst {
         self::anon_const(sp, ast::ExprKind::Path(None, self::path_ident(sp, ident)))
-    }
-
-    pub fn lifetime(sp: Span, ident: Ident) -> ast::Lifetime {
-        ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: ident.with_span_pos(sp) }
     }
 
     pub fn expr(sp: Span, kind: ast::ExprKind) -> P<ast::Expr> {
@@ -396,6 +424,13 @@ pub mod mk {
 
     pub fn param_ident(sp: Span, ident: Ident, ty: P<ast::Ty>) -> ast::Param {
         self::param(sp, self::pat_ident(sp, ident), ty)
+    }
+
+    pub fn fn_ret_ty(sp: Span, ty: Option<P<ast::Ty>>) -> ast::FnRetTy {
+        match ty {
+            Some(ty) => ast::FnRetTy::Ty(ty),
+            None => ast::FnRetTy::Default(sp),
+        }
     }
 
     pub fn fn_decl(inputs: Vec<ast::Param>, output: ast::FnRetTy) -> P<ast::FnDecl> {
@@ -579,10 +614,7 @@ pub mod mk {
             sig: ast::FnSig {
                 span: sp,
                 header: header.unwrap_or_default(),
-                decl: self::fn_decl(inputs, match output {
-                    Some(ty) => ast::FnRetTy::Ty(ty),
-                    None => ast::FnRetTy::Default(sp),
-                }),
+                decl: self::fn_decl(inputs, self::fn_ret_ty(sp, output)),
             },
             body,
         })))
