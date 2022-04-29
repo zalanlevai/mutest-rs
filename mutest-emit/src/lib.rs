@@ -1,6 +1,7 @@
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
 #![feature(is_some_with)]
+#![feature(iterator_try_collect)]
 #![feature(let_chains)]
 #![feature(let_else)]
 #![feature(once_cell)]
@@ -8,6 +9,7 @@
 #![feature(rustc_private)]
 extern crate rustc_ast;
 extern crate rustc_ast_lowering;
+extern crate rustc_const_eval;
 extern crate rustc_data_structures;
 extern crate rustc_error_messages;
 extern crate rustc_errors;
