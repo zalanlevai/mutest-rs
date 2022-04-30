@@ -330,14 +330,15 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
     }
 }
 
-pub struct Target<'ast> {
-    pub def_id: hir::DefId,
+pub struct Target<'ast, 'tst> {
+    pub def_id: hir::LocalDefId,
     pub item: ast_lowering::DefItem<'ast>,
+    pub reachable_from: Vec<(&'tst Test, usize)>,
     pub distance: usize,
 }
 
-pub fn reachable_fns<'tcx, 'ast>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &Vec<Test>, depth: usize) -> Vec<Target<'ast>> {
-    let mut previously_found_callees: FxHashSet<hir::DefId> = Default::default();
+pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'ast, 'tst>> {
+    let mut previously_found_callees: FxHashMap<hir::LocalDefId, Vec<&'tst Test>> = Default::default();
 
     for test in tests {
         let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
@@ -345,34 +346,56 @@ pub fn reachable_fns<'tcx, 'ast>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, kra
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
-        previously_found_callees.extend(callees.drain());
+        for callee in callees.drain() {
+            let Some(callee_def_id) = callee.as_local() else { continue; };
+
+            previously_found_callees.entry(callee_def_id)
+                .and_modify(|reachable_from| reachable_from.push(test))
+                .or_insert_with(|| vec![test]);
+        }
     }
 
-    let mut targets: FxHashMap<hir::DefId, (ast_lowering::DefItem, usize)> = Default::default();
+    let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
 
     for distance in 0..depth {
-        let mut newly_found_callees: FxHashSet<hir::DefId> = Default::default();
+        let mut newly_found_callees: FxHashMap<hir::LocalDefId, Vec<&'tst Test>> = Default::default();
 
-        for callee_def_id in previously_found_callees.drain() {
-            let Some(local_def_id) = callee_def_id.as_local() else { continue; };
-            let body = tcx.hir().body(tcx.hir().get_by_def_id(local_def_id).body_id().unwrap());
+        for (callee_def_id, reachable_from) in previously_found_callees.drain() {
+            let body = tcx.hir().body(tcx.hir().get_by_def_id(callee_def_id).body_id().unwrap());
 
-            let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) else { continue };
+            let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, callee_def_id, krate) else { continue; };
 
-            targets.insert(callee_def_id, (callee_def_item, distance));
+            targets.entry(callee_def_id)
+                .and_modify(|target| {
+                    for &test in &reachable_from {
+                        if target.reachable_from.iter().any(|&(t, _)| t == test) { continue; }
+                        target.reachable_from.push((test, distance));
+                    }
+                })
+                .or_insert_with(|| Target {
+                    def_id: callee_def_id,
+                    item: callee_def_item,
+                    reachable_from: reachable_from.iter().map(|&test| (test, distance)).collect(),
+                    distance,
+                });
 
             if distance < depth {
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
-                callees.retain(|callee| !targets.contains_key(callee));
 
-                newly_found_callees.extend(callees.drain());
+                for callee in callees.drain() {
+                    let Some(callee_def_id) = callee.as_local() else { continue; };
+
+                    newly_found_callees.entry(callee_def_id)
+                        .and_modify(|previously_reachable_from| previously_reachable_from.extend(reachable_from.clone()))
+                        .or_insert_with(|| reachable_from.clone());
+                }
             }
         }
 
         previously_found_callees.extend(newly_found_callees.drain());
     }
 
-    targets.drain().map(|(def_id, (def_item, distance))| Target { def_id, item: def_item, distance }).collect()
+    targets.into_values().collect()
 }
 
 pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, targets: &[Target], ops: &Operators<'_, 'm>) -> Vec<Mut<'m, 'tcx>> {
@@ -427,18 +450,36 @@ impl<'m, 'tcx> Mutant<'m, 'tcx> {
     }
 }
 
-pub fn batch_mutations<'m, 'tcx>(mutations: Vec<Mut<'m, 'tcx>>, mutant_max_mutations_count: usize) -> Vec<Mutant<'m, 'tcx>> {
+pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
+    let reachable_from_a = a.reachable_from.iter().map(|(test, _)| test.item.id).collect();
+    let reachable_from_b = b.reachable_from.iter().map(|(test, _)| test.item.id).collect();
+    !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
+}
+
+pub fn batch_mutations<'m, 'tcx>(targets: &[Target], mutations: Vec<Mut<'m, 'tcx>>, mutant_max_mutations_count: usize) -> Vec<Mutant<'m, 'tcx>> {
     let mut mutants: Vec<Mutant<'m, 'tcx>> = vec![];
+
+    let mut target_map: FxHashMap<MutId, &Target> = Default::default();
+    for mutation in &mutations {
+        let Some(containing_fn) = mutation.location.containing_fn() else { continue; };
+        let Some(target) = targets.iter().find(|target| target.def_id == containing_fn.hir.def_id) else { continue };
+        target_map.insert(mutation.id, target);
+    }
 
     'mutation: for mutation in mutations {
         'mutant: for mutant in &mut mutants {
+            if mutant.mutations.len() >= mutant_max_mutations_count { continue 'mutant; }
+
             for subst in &mutation.substs {
                 if mutant.iter_substitutions().any(|s| conflicting_substs(s, subst)) {
                     continue 'mutant;
                 }
             }
 
-            if mutant.mutations.len() >= mutant_max_mutations_count { continue 'mutant; }
+            let Some(target) = target_map.get(&mutation.id) else { break 'mutant; };
+            if mutant.mutations.iter().any(|m| target_map.get(&m.id).is_some_and(|t| conflicting_targets(t, target))) {
+                continue 'mutant;
+            }
 
             mutant.mutations.push(mutation);
             continue 'mutation;

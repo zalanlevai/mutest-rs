@@ -1,3 +1,5 @@
+use std::iter;
+
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
@@ -8,6 +10,22 @@ pub struct Test {
     pub path: Vec<Ident>,
     pub descriptor: P<ast::Item>,
     pub item: P<ast::Item>,
+}
+
+impl Test {
+    pub fn path_str(&self) -> String {
+        self.path.iter()
+            .map(|segment| segment.name.as_str())
+            .intersperse("::")
+            .collect::<String>()
+    }
+}
+
+impl Eq for Test {}
+impl PartialEq for Test {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
 }
 
 fn is_test_case(item: &ast::Item) -> bool {
@@ -27,7 +45,7 @@ fn extract_expanded_tests(path: &Vec<Ident>, items: &Vec<P<ast::Item>>) -> Vec<T
         let test_item = item_iterator.next().expect("test case not followed by the test item");
 
         tests.push(Test {
-            path: path.to_owned(),
+            path: path.iter().copied().chain(iter::once(test_case.ident)).collect(),
             descriptor: test_case.to_owned(),
             item: test_item.to_owned(),
         });

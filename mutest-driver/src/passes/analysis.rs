@@ -47,13 +47,18 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisP
                                 ident = target.item.ident(),
                                 span = target.item.span(),
                             );
+                            for &(test, distance) in &target.reachable_from {
+                                println!("  ({distance}) {test}",
+                                    test = test.path_str(),
+                                );
+                            }
                         }
 
                         return Flow::Break;
                     }
 
                     let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &targets, &config.opts.operators);
-                    let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, config.opts.mutant_max_mutations_count);
+                    let mutants = mutest_emit::codegen::mutation::batch_mutations(&targets, mutations, config.opts.mutant_max_mutations_count);
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
                     // Clean up the generated test harness's invalid AST.

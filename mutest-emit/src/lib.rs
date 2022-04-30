@@ -1,6 +1,7 @@
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
 #![feature(is_some_with)]
+#![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
 #![feature(let_chains)]
 #![feature(let_else)]
