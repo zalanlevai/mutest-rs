@@ -19,6 +19,9 @@ pub use continue_break_swap::*;
 mod eq_op_invert;
 pub use eq_op_invert::*;
 
+mod logical_op_swap;
+pub use logical_op_swap::*;
+
 mod math_op_swap;
 pub use math_op_swap::*;
 

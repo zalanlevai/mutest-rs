@@ -82,6 +82,7 @@ fn main() {
                 &mutest_operators::CallValueDefaultShadow { limit_scope_to_local_callees: false },
                 &mutest_operators::ContinueBreakSwap,
                 &mutest_operators::EqOpInvert,
+                &mutest_operators::LogicalOpAndOrSwap,
                 &mutest_operators::MathOpAddMulSwap,
                 &mutest_operators::MathOpAddSubSwap,
                 &mutest_operators::MathOpDivRemSwap,
