@@ -10,6 +10,9 @@ pub use arg_default_shadow::*;
 mod bit_op_swap;
 pub use bit_op_swap::*;
 
+mod bool_expr_negate;
+pub use bool_expr_negate::*;
+
 mod call_ignore;
 pub use call_ignore::*;
 

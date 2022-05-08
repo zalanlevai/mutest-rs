@@ -78,6 +78,7 @@ fn main() {
                 &mutest_operators::BitOpOrXorSwap,
                 &mutest_operators::BitOpShiftDirSwap,
                 &mutest_operators::BitOpXorAndSwap,
+                &mutest_operators::BoolExprNegate,
                 &mutest_operators::CallDelete { limit_scope_to_local_callees: false },
                 &mutest_operators::CallValueDefaultShadow { limit_scope_to_local_callees: false },
                 &mutest_operators::ContinueBreakSwap,
