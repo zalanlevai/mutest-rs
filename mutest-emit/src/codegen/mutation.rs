@@ -234,22 +234,22 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
 
 impl<'ast, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'r, 'op, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
-        let ast::visit::FnKind::Fn(ref ctx, ref ident, sig, vis, body) = kind else { return; };
+        let ast::visit::FnKind::Fn(ref ctx, ref ident, sig, vis, generics, body) = kind else { return; };
 
-        let fn_ast = ast::InlinedFn { id, span, ctx: *ctx, ident: *ident, sig, vis, body };
+        let fn_ast = ast::InlinedFn { id, span, ctx: *ctx, ident: *ident, vis, generics, sig, body };
 
         let fn_hir = match self.tcx.hir().get_by_def_id(self.resolver.local_def_id(fn_ast.id)) {
-            hir::Node::Item(&hir::Item { def_id, span, ref vis, ident, ref kind }) => {
-                let hir::ItemKind::Fn(sig, generics, body) = kind else { unreachable!() };
+            hir::Node::Item(&hir::Item { def_id, span, vis_span, ident, ref kind }) => {
+                let hir::ItemKind::Fn(sig, generics, body) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
-                let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header, vis);
-                hir::InlinedFn { def_id, span, vis: *vis, ident, sig, generics, body, kind: fn_kind }
+                let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header);
+                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span, sig, generics, body }
             }
-            hir::Node::ImplItem(&hir::ImplItem { def_id, span, ref vis, ident, ref generics, ref kind }) => {
-                let hir::ImplItemKind::Fn(sig, body) = kind else { unreachable!() };
+            hir::Node::ImplItem(&hir::ImplItem { def_id, span, vis_span, ident, ref generics, ref kind }) => {
+                let hir::ImplItemKind::Fn(sig, body) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
-                let fn_kind = hir::intravisit::FnKind::Method(ident, sig, Some(vis));
-                hir::InlinedFn { def_id, span, vis: *vis, ident, sig, generics, body, kind: fn_kind }
+                let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
+                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span, sig, generics, body }
             }
             _ => unreachable!(),
         };

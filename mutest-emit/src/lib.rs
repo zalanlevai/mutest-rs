@@ -27,7 +27,10 @@ extern crate rustc_typeck;
 
 extern crate itertools;
 extern crate lazy_static;
-extern crate smallvec;
+// HACK: When compiling mutest-operators, the compiler is unable to resolve the right version of smallvec. We have to
+//       use the version used by the compiler to interface with it but we also expose APIs which use smallvec for use by
+//       other crates. To resolve this, we re-export the compiler-supplied version of the library.
+pub extern crate smallvec;
 
 pub mod analysis;
 pub mod codegen;

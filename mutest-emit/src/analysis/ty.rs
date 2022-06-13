@@ -128,6 +128,7 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
                     ext: ast::Extern::None,
                     generic_params: vec![],
                     decl: ast::mk::fn_decl(input_params, ast::FnRetTy::Ty(output_ty_ast)),
+                    decl_span: DUMMY_SP,
                 }))))
             }
 
@@ -170,7 +171,7 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
             let dummy_self_ty = self.tcx.mk_ty_infer(ty::FreshTy(0));
             let principal = principal.with_self_ty(self.tcx, dummy_self_ty);
 
-            let args = self.generic_args_to_print(self.tcx.generics_of(principal.def_id), principal.substs);
+            let args = self.tcx.generics_of(principal.def_id).own_substs_no_defaults(self.tcx, principal.substs);
             let path = self.path_generic_args(|_| Ok(def_path), args)?;
             Ok(Some(ast::mk::trait_bound(ast::TraitBoundModifier::None, path)))
         })?;

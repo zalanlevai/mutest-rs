@@ -1,7 +1,7 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
-use smallvec::{SmallVec, smallvec};
+use mutest_emit::smallvec::{SmallVec, smallvec};
 
 macro define_math_op_swap_mutation(
     $(#[$meta:meta])*

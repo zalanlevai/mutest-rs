@@ -2,7 +2,7 @@ use mutest_emit::{Mutation, Operator};
 use mutest_emit::analysis::ty;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
-use smallvec::{SmallVec, smallvec};
+use mutest_emit::smallvec::{SmallVec, smallvec};
 
 pub struct RangeLimitSwapMutation {
     pub replacement_limits: ast::RangeLimits,

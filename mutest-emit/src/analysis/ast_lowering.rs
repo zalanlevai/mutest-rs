@@ -14,7 +14,7 @@ pub mod visit {
     use rustc_hir as hir;
     use rustc_hir::intravisit::Map;
     use rustc_hir::intravisit::nested_filter::{self, NestedFilter};
-    use rustc_span::Span;
+    use rustc_span::{Span, sym};
 
     pub trait AstHirVisitor<'ast, 'hir>: Sized {
         type Map: hir::intravisit::Map<'hir> = <Self::NestedFilter as NestedFilter<'hir>>::Map;
@@ -70,8 +70,8 @@ pub mod visit {
 
     pub fn walk_fn<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, kind_ast: ast::visit::FnKind<'ast>, _span_ast: Span, _id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, _decl_hir: &'hir hir::FnDecl<'hir>, body_hir: hir::BodyId, _span_hir: Span, _id_hir: hir::HirId) {
         match (kind_ast, kind_hir) {
-            | (ast::visit::FnKind::Fn(_, _, sig_ast, _, body_ast), hir::intravisit::FnKind::ItemFn(_, _, _, _))
-            | (ast::visit::FnKind::Fn(_, _, sig_ast, _, body_ast), hir::intravisit::FnKind::Method(_, _, _)) => {
+            | (ast::visit::FnKind::Fn(_, _, sig_ast, _, _, body_ast), hir::intravisit::FnKind::ItemFn(_, _, _))
+            | (ast::visit::FnKind::Fn(_, _, sig_ast, _, _, body_ast), hir::intravisit::FnKind::Method(_, _)) => {
                 if let Some(body_hir) = visitor.nested_body(body_hir) {
                     for (param_ast, param_hir) in iter::zip(&sig_ast.decl.inputs, body_hir.params) {
                         visitor.visit_param(param_ast, param_hir);
@@ -153,6 +153,14 @@ pub mod visit {
             }
             (ast::ExprKind::Paren(expr_ast), _) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
+            }
+
+            (ast::ExprKind::Call(_, args_ast), hir::ExprKind::Box(expr_hir)) => {
+                if expr_ast.attrs.iter().any(|attr| attr.has_name(sym::rustc_box))
+                    && let Some(expr_ast) = args_ast.first()
+                {
+                    visit_matching_expr(visitor, expr_ast, expr_hir);
+                }
             }
 
             _ => visitor.visit_expr(expr_ast, expr_hir),

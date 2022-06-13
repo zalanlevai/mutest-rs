@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use rustc_data_structures::sync::Lrc;
-use rustc_error_messages::FluentBundle;
+use rustc_error_messages::{FluentBundle, LazyFallbackBundle};
 use rustc_errors::{Diagnostic, DiagnosticBuilder, EmissionGuarantee};
 use rustc_errors::emitter::{Emitter, EmitterWriter};
 use rustc_session::Session;
@@ -36,7 +36,7 @@ pub fn raw_output_full(
     diagnostic: &Diagnostic,
     source_map: Option<Lrc<SourceMap>>,
     fluent_bundle: Option<Lrc<FluentBundle>>,
-    fallback_bundle: Lrc<FluentBundle>,
+    fallback_bundle: LazyFallbackBundle,
     short_message: bool,
     teach: bool,
     colored: bool,
@@ -69,7 +69,7 @@ pub fn output_full(
     diagnostic: &Diagnostic,
     source_map: Option<Lrc<SourceMap>>,
     fluent_bundle: Option<Lrc<FluentBundle>>,
-    fallback_bundle: Lrc<FluentBundle>,
+    fallback_bundle: LazyFallbackBundle,
     short_message: bool,
     teach: bool,
     colored: bool,
@@ -82,7 +82,7 @@ pub fn output_full(
 
 pub fn output(diagnostic: &Diagnostic, source_map: Lrc<SourceMap>) -> String {
     let fluent_bundle = None;
-    let fallback_bundle = rustc_errors::fallback_fluent_bundle(true).unwrap();
+    let fallback_bundle = rustc_errors::fallback_fluent_bundle(rustc_errors::DEFAULT_LOCALE_RESOURCES, true);
     let short_message = false;
     let teach = false;
     let colored = true;

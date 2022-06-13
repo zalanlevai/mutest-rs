@@ -15,10 +15,11 @@ mod inlined {
     pub struct InlinedFn<'ast> {
         pub id: ast::NodeId,
         pub span: Span,
-        pub ctx: ast::visit::FnCtxt,
         pub ident: Ident,
-        pub sig: &'ast ast::FnSig,
+        pub ctx: ast::visit::FnCtxt,
         pub vis: &'ast ast::Visibility,
+        pub generics: &'ast ast::Generics,
+        pub sig: &'ast ast::FnSig,
         pub body: Option<&'ast ast::Block>,
     }
 
@@ -54,7 +55,7 @@ pub mod mk {
     use rustc_ast as ast;
     use rustc_ast::ptr::P;
     use rustc_span::{Span, Symbol};
-    use rustc_span::symbol::Ident;
+    use rustc_span::symbol::{Ident, kw};
 
     pub fn angle_bracketed_args(sp: Span, args: Vec<ast::GenericArg>) -> Option<P<ast::GenericArgs>> {
         if args.is_empty() { return None; }
@@ -208,6 +209,7 @@ pub mod mk {
             bounds,
             kind: ast::GenericParamKind::Type { default },
             is_placeholder: false,
+            colon_span: Some(sp),
         }
     }
 
@@ -572,7 +574,10 @@ pub mod mk {
     }
 
     pub fn vis_pub_crate(sp: Span) -> ast::Visibility {
-        self::vis(sp, ast::VisibilityKind::Crate(ast::CrateSugar::PubCrate))
+        self::vis(sp, ast::VisibilityKind::Restricted {
+            id: ast::DUMMY_NODE_ID,
+            path: P(self::path_ident(sp, Ident::new(kw::Crate, sp))),
+        })
     }
 
     pub fn item(sp: Span, attrs: Vec<ast::Attribute>, vis: ast::Visibility, ident: Ident, kind: ast::ItemKind) -> P<ast::Item> {

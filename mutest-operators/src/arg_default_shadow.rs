@@ -4,7 +4,7 @@ use mutest_emit::analysis::ty;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, path};
-use smallvec::{SmallVec, smallvec};
+use mutest_emit::smallvec::{SmallVec, smallvec};
 
 pub struct ArgDefaultShadowMutation {
     pub param_ident: Ident,

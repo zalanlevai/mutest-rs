@@ -12,10 +12,10 @@ mod inlined {
         pub def_id: hir::def_id::LocalDefId,
         pub span: Span,
         pub ident: Ident,
-        pub vis: hir::Visibility<'hir>,
-        pub sig: &'hir hir::FnSig<'hir>,
-        pub generics: &'hir hir::Generics<'hir>,
-        pub body: &'hir hir::Body<'hir>,
         pub kind: hir::intravisit::FnKind<'hir>,
+        pub vis_span: Span,
+        pub generics: &'hir hir::Generics<'hir>,
+        pub sig: &'hir hir::FnSig<'hir>,
+        pub body: &'hir hir::Body<'hir>,
     }
 }

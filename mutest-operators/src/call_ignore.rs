@@ -5,7 +5,7 @@ use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
 use mutest_emit::codegen::ast::{self, P};
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, path, kw};
-use smallvec::{SmallVec, smallvec};
+use mutest_emit::smallvec::{SmallVec, smallvec};
 
 fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
     // Calls to functions that take no arguments (including self) are ignored, because they are likely
