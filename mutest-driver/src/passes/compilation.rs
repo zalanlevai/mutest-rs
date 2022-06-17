@@ -1,27 +1,23 @@
-use std::path::PathBuf;
-
 use rustc_feature::UnstableFeatures;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_interface::run_compiler;
-use rustc_session::config::{OutputFilenames, Input, OutputTypes, OutputType};
+use rustc_session::config::{Input, OutputFilenames};
 use rustc_session::search_paths::SearchPath;
-use rustc_span::{FileName, RealFileName};
 
 use crate::config::Config;
-use crate::passes::common_compiler_config;
+use crate::passes::base_compiler_config;
 use crate::passes::analysis::AnalysisPassResult;
 
 pub struct CompilationPassResult {
     pub outputs: OutputFilenames,
 }
 
-pub fn run(config: &Config, sysroot: PathBuf, analysis_pass: &AnalysisPassResult) -> CompilerResult<CompilationPassResult> {
-    let crate_root_path = config.crate_root_path();
-
-    let mut compiler_config = common_compiler_config(config, sysroot, Input::Str {
-        name: FileName::Real(RealFileName::LocalPath(crate_root_path)),
+pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResult<CompilationPassResult> {
+    let mut compiler_config = base_compiler_config(config);
+    compiler_config.input = Input::Str {
+        name: compiler_config.input.source_name(),
         input: analysis_pass.generated_crate_code.to_owned(),
-    });
+    };
 
     // The generated crate code relies on the rustc test harness using a custom test runner.
     compiler_config.opts.test = true;
@@ -36,12 +32,6 @@ pub fn run(config: &Config, sysroot: PathBuf, analysis_pass: &AnalysisPassResult
     //        option.
     let mutest_search_path = format!("{}/target/debug", std::env::current_dir().unwrap().display());
     compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&format!("crate={mutest_search_path}"), Default::default()));
-
-    let out_path = config.package_directory_path.join("target/mutest/out");
-    compiler_config.output_dir = Some(out_path.clone());
-    compiler_config.opts.output_types = OutputTypes::new(&[
-        (OutputType::Exe, Some(out_path.join("bin"))),
-    ]);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
         let (linker, outputs) = compiler.enter(|queries| {

@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "mutest",
+    "cargo-mutest",
     "mutest-driver",
     "mutest-emit",
     "mutest-operators",

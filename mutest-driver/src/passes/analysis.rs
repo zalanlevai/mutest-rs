@@ -1,25 +1,22 @@
-use std::path::PathBuf;
-
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
-use rustc_session::config::Input;
-use rustc_span::{FileName, RealFileName};
 use rustc_span::edition::Edition;
 
 use crate::config::{self, Config};
-use crate::passes::{Flow, common_compiler_config};
+use crate::passes::{Flow, base_compiler_config};
 
 pub struct AnalysisPassResult {
     pub generated_crate_code: String,
 }
 
-pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisPassResult>> {
-    let crate_root_path = config.crate_root_path();
-
-    let mut compiler_config = common_compiler_config(config, sysroot, Input::File(crate_root_path.to_owned()));
+pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
+    let mut compiler_config = base_compiler_config(config);
 
     // Compile the crate in test-mode to access tests defined behind `#[cfg(test)]`.
     compiler_config.opts.test = true;
+
+    let opts = &config.opts;
+    let source_name = compiler_config.input.source_name();
 
     let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
@@ -39,8 +36,8 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisP
                 tcx.analysis(())?;
 
                 resolver.borrow_mut().access(|resolver| {
-                    let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, config.opts.mutation_depth);
-                    if let config::Mode::PrintMutationTargets = config.opts.mode {
+                    let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, opts.mutation_depth);
+                    if let config::Mode::PrintMutationTargets = opts.mode {
                         for target in &targets {
                             println!("tests -({distance})-> {ident:#?} @ {span:#?}",
                                 distance = target.distance,
@@ -57,8 +54,8 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisP
                         return Flow::Break;
                     }
 
-                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &targets, &config.opts.operators);
-                    let mutants = mutest_emit::codegen::mutation::batch_mutations(&targets, mutations, config.opts.mutant_max_mutations_count);
+                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &targets, &opts.operators);
+                    let mutants = mutest_emit::codegen::mutation::batch_mutations(&targets, mutations, opts.mutant_max_mutations_count);
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
                     // Clean up the generated test harness's invalid AST.
@@ -83,7 +80,7 @@ pub fn run(config: &Config, sysroot: PathBuf) -> CompilerResult<Option<AnalysisP
                 code = rustc_ast_pretty::pprust::print_crate(
                     sess.source_map(),
                     &generated_crate_ast,
-                    FileName::Real(RealFileName::LocalPath(crate_root_path.to_owned())),
+                    source_name,
                     "".to_owned(),
                     &rustc_ast_pretty::pprust::state::NoAnn,
                     true,

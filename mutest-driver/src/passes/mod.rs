@@ -1,14 +1,12 @@
 use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
-use std::path::PathBuf;
-use std::process;
-use std::str;
 
-use rustc_errors::registry::Registry;
 use rustc_interface::Config as CompilerConfig;
+use rustc_interface::interface::Result as CompilerResult;
 use rustc_session::DiagnosticOutput;
-use rustc_session::config::{Input, Options};
-use rustc_span::edition::Edition;
+use rustc_session::config::{CheckCfg, Input};
+use rustc_session::parse::ParseSess;
+use rustc_span::Symbol;
 use rustc_span::source_map::RealFileLoader;
 
 use crate::config::Config;
@@ -69,44 +67,77 @@ impl<T, E, F: From<E>> From<Flow<T, E>> for Result<Option<T>, F> {
     }
 }
 
-pub fn get_sysroot() -> PathBuf {
-    let sysroot_out = process::Command::new("rustc")
-        .arg("--print=sysroot")
-        .current_dir(".")
-        .output().unwrap();
+pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
+    let crate_check_cfg = CheckCfg {
+        names_valid: config.crate_check_cfg.names_valid.clone(),
+        well_known_values: config.crate_check_cfg.well_known_values,
+        values_valid: config.crate_check_cfg.values_valid.clone(),
+    };
 
-    PathBuf::from(str::from_utf8(&sysroot_out.stdout).unwrap().trim())
-}
+    let input = match &config.input {
+        Input::File(f) => Input::File(f.clone()),
+        Input::Str { name, input } => Input::Str { name: name.clone(), input: input.clone() },
+    };
 
-pub fn common_compiler_config(_config: &Config, sysroot: PathBuf, input: Input) -> CompilerConfig {
     CompilerConfig {
-        opts: Options {
-            edition: Edition::Edition2021,
-
-            maybe_sysroot: Some(sysroot),
-
-            ..Default::default()
-        },
-
-        crate_cfg: Default::default(),
-        crate_check_cfg: Default::default(),
-
+        opts: config.opts.clone(),
+        crate_cfg: config.crate_cfg.clone(),
+        crate_check_cfg,
         input,
-        input_path: None,
-        output_dir: None,
-        output_file: None,
+        input_path: config.input_path.clone(),
+        output_file: config.output_file.clone(),
+        output_dir: config.output_dir.clone(),
         file_loader: Some(Box::new(RealFileLoader)),
         diagnostic_output: DiagnosticOutput::Default,
-
-        lint_caps: Default::default(),
-
+        lint_caps: config.lint_caps.clone(),
         parse_sess_created: None,
         register_lints: None,
         override_queries: None,
         make_codegen_backend: None,
-
-        registry: Registry::new(Default::default()),
+        registry: rustc_driver::diagnostics_registry(),
     }
+}
+
+struct RustcConfigCallbacks {
+    config: Option<CompilerConfig>,
+}
+
+impl rustc_driver::Callbacks for RustcConfigCallbacks {
+    fn config(&mut self, config: &mut CompilerConfig) {
+        self.config = Some(copy_compiler_settings(config));
+    }
+
+    fn after_parsing<'tcx>(
+        &mut self,
+        _compiler: &rustc_interface::interface::Compiler,
+        _queries: &'tcx rustc_interface::Queries<'tcx>,
+    ) -> rustc_driver::Compilation {
+        rustc_driver::Compilation::Stop
+    }
+}
+
+pub fn parse_compiler_args(args: &[String]) -> CompilerResult<Option<CompilerConfig>> {
+    let mut callbacks = RustcConfigCallbacks { config: None };
+    rustc_driver::RunCompiler::new(args, &mut callbacks).run()?;
+    Ok(callbacks.config)
+}
+
+pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_fingerprint: &Option<String>) {
+    parse_sess.env_depinfo.get_mut().insert((
+        Symbol::intern("MUTEST_FINGERPRINT"),
+        invocation_fingerprint.as_deref().map(Symbol::intern),
+    ));
+}
+
+pub fn base_compiler_config(config: &Config) -> CompilerConfig {
+    let mut compiler_config = copy_compiler_settings(&config.compiler_config);
+
+    let invocation_fingerprint = config.invocation_fingerprint.clone();
+    compiler_config.parse_sess_created = Some(Box::new(move |parse_sess| {
+        track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
+    }));
+
+    compiler_config
 }
 
 pub mod analysis;

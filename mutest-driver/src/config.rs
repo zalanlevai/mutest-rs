@@ -1,12 +1,10 @@
-use std::path::PathBuf;
-
 use mutest_emit::codegen::mutation::Operators;
+use rustc_interface::Config as CompilerConfig;
 
 pub enum Mode {
     PrintMutationTargets,
     PrintCode,
     Build,
-    BuildAndRun(Vec<String>),
 }
 
 pub struct Options<'op, 'm> {
@@ -17,13 +15,7 @@ pub struct Options<'op, 'm> {
 }
 
 pub struct Config<'op, 'm> {
-    pub package_directory_path: PathBuf,
-    pub crate_root_path: Option<PathBuf>,
+    pub compiler_config: CompilerConfig,
+    pub invocation_fingerprint: Option<String>,
     pub opts: Options<'op, 'm>,
-}
-
-impl<'op, 'm> Config<'op, 'm> {
-    pub fn crate_root_path(&self) -> PathBuf {
-        self.crate_root_path.clone().unwrap_or(self.package_directory_path.join("src/main.rs"))
-    }
 }
