@@ -1,6 +1,7 @@
 use rustc_feature::UnstableFeatures;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_interface::run_compiler;
+use rustc_lint_defs::Level as LintLevel;
 use rustc_session::config::{Input, OutputFilenames};
 use rustc_session::search_paths::SearchPath;
 
@@ -23,6 +24,8 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     compiler_config.opts.test = true;
     // The generated crate code uses many unstable and internal features, most of which are emitted by rustc itself.
     compiler_config.opts.unstable_features = UnstableFeatures::Allow;
+    // Disable lints on generated crate code.
+    compiler_config.opts.lint_cap = Some(LintLevel::Allow);
 
     // The generated crate code relies on the `mutest_runtime` crate which must be loaded.
     // FIXME: Currently, an invocation of the tool from the mutest project's
