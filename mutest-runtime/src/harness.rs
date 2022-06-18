@@ -131,14 +131,20 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
         }
     }
 
-    println!("mutants:   {score:.2}%. {detected} detected; {undetected} undetected; {total} total",
-        score = (total_mutants_count - undetected_mutants_count) as f64 / total_mutants_count as f64 * 100_f64,
+    println!("mutants:   {score}. {detected} detected; {undetected} undetected; {total} total",
+        score = match total_mutants_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%", (total_mutants_count - undetected_mutants_count) as f64 / total_mutants_count as f64 * 100_f64),
+        },
         detected = total_mutants_count - undetected_mutants_count,
         undetected = undetected_mutants_count,
         total = total_mutants_count,
     );
-    println!("mutations: {score:.2}%. {detected} detected; {undetected} undetected; {total} total",
-        score = (total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64 * 100_f64,
+    println!("mutations: {score}. {detected} detected; {undetected} undetected; {total} total",
+        score = match total_mutations_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%",(total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64 * 100_f64),
+        },
         detected = total_mutations_count - undetected_mutations_count,
         undetected = undetected_mutations_count,
         total = total_mutations_count,
