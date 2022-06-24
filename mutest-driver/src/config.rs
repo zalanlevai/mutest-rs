@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use mutest_emit::codegen::mutation::Operators;
 use rustc_interface::Config as CompilerConfig;
 
@@ -17,5 +19,6 @@ pub struct Options<'op, 'm> {
 pub struct Config<'op, 'm> {
     pub compiler_config: CompilerConfig,
     pub invocation_fingerprint: Option<String>,
+    pub mutest_search_path: PathBuf,
     pub opts: Options<'op, 'm>,
 }

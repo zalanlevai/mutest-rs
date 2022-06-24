@@ -113,6 +113,10 @@ pub fn main() {
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let compiler_config = mutest_driver::passes::parse_compiler_args(&args)?.expect("no compiler configuration was generated");
 
+        let mutest_search_path = env::var("MUTEST_SEARCH_PATH").ok().map(PathBuf::from)
+            .or_else(|| env::current_dir().ok().map(|v| v.join("target").join("debug")))
+            .expect("specify MUTEST_SEARCH_PATH environment variable");
+
         let mode = match mutest_arg_matches.subcommand() {
             Some(("print-targets", _)) => config::Mode::PrintMutationTargets,
             Some(("print-code", _)) => config::Mode::PrintCode,
@@ -126,6 +130,7 @@ pub fn main() {
         let config = Config {
             compiler_config,
             invocation_fingerprint: mutest_args,
+            mutest_search_path,
             opts: config::Options {
                 mode,
                 operators: &[

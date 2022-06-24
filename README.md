@@ -17,14 +17,24 @@ cargo build
 
 Install `mutest-driver` and the Cargo subcommand `cargo-mutest` locally.
 
-> The `mutest-runtime` crate, injected into the generated code is currently assumed to be in `./target/debug`.
-
 ```sh
 cargo install --force --path mutest-driver
 cargo install --force --path cargo-mutest
 ```
 
 ## Usage
+
+> Currently, the invocation of the tool requires manually specifying the following values:
+> * `MUTEST_SEARCH_PATH`: environment variable pointing to the local build artifacts, and
+> * the compiler version used to build the tool.
+>
+> In addition, the Cargo test target may have to be specified explicitly with the `--lib` or `--bin <BIN>` options. For more targeting options, see `--help`.
+>
+> Thus, a typical invocation, with the code checked out and built in `~/Developer/mutest-rs` and a library target will look as follows:
+>
+> ```sh
+> MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/debug cargo +nightly-2022-06-13 mutest --lib run
+> ```
 
 Run the `cargo mutest` subcommand against a standard Cargo package directory or workspace containing your crate.
 

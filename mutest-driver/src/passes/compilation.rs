@@ -28,13 +28,7 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     compiler_config.opts.lint_cap = Some(LintLevel::Allow);
 
     // The generated crate code relies on the `mutest_runtime` crate which must be loaded.
-    // FIXME: Currently, an invocation of the tool from the mutest project's
-    //        workspace root is assumed. We will need to add more flexibility to
-    //        the resolution of this injected dependency, potentially by specifying
-    //        it via an argument to mutest, and the `compiler_config.opts.externs`
-    //        option.
-    let mutest_search_path = format!("{}/target/debug", std::env::current_dir().unwrap().display());
-    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&format!("crate={mutest_search_path}"), Default::default()));
+    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&format!("crate={}", config.mutest_search_path.display()), Default::default()));
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
         let (linker, outputs) = compiler.enter(|queries| {
