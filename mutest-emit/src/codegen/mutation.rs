@@ -4,17 +4,17 @@ use rustc_ast_lowering::ResolverAstLowering;
 use rustc_expand::base::ResolverExpand;
 use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::hir::nested_filter::OnlyBodies;
-use rustc_middle::ty::TyCtxt;
 use rustc_resolve::Resolver;
 use rustc_session::Session;
 use smallvec::SmallVec;
 
-use crate::analysis::ast_lowering;
+use crate::analysis::ast_lowering::{self, DefItem};
 use crate::analysis::diagnostic;
 use crate::analysis::diagnostic::SessionRcSourceMap;
 use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::tests::Test;
+use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
@@ -332,13 +332,13 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
 
 pub struct Target<'ast, 'tst> {
     pub def_id: hir::LocalDefId,
-    pub item: ast_lowering::DefItem<'ast>,
+    pub item: DefItem<'ast>,
     pub reachable_from: Vec<(&'tst Test, usize)>,
     pub distance: usize,
 }
 
 pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'ast, 'tst>> {
-    let mut previously_found_callees: FxHashMap<hir::LocalDefId, Vec<&'tst Test>> = Default::default();
+    let mut previously_found_callees: FxHashMap<(hir::LocalDefId, Option<ty::SubstsRef<'tcx>>), Vec<&'tst Test>> = Default::default();
 
     for test in tests {
         let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
@@ -346,10 +346,10 @@ pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
-        for callee in callees.drain() {
+        for (callee, substs) in callees.drain() {
             let Some(callee_def_id) = callee.as_local() else { continue; };
 
-            previously_found_callees.entry(callee_def_id)
+            previously_found_callees.entry((callee_def_id, substs))
                 .and_modify(|reachable_from| reachable_from.push(test))
                 .or_insert_with(|| vec![test]);
         }
@@ -358,10 +358,11 @@ pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
 
     for distance in 0..depth {
-        let mut newly_found_callees: FxHashMap<hir::LocalDefId, Vec<&'tst Test>> = Default::default();
+        let mut newly_found_callees: FxHashMap<(hir::LocalDefId, Option<ty::SubstsRef<'tcx>>), Vec<&'tst Test>> = Default::default();
 
-        for (callee_def_id, reachable_from) in previously_found_callees.drain() {
-            let body = tcx.hir().body(tcx.hir().get_by_def_id(callee_def_id).body_id().unwrap());
+        for ((callee_def_id, outer_substs), reachable_from) in previously_found_callees.drain() {
+            let Some(body_id) = tcx.hir().get_by_def_id(callee_def_id).body_id() else { continue; };
+            let body = tcx.hir().body(body_id);
 
             let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, callee_def_id, krate) else { continue; };
 
@@ -382,10 +383,15 @@ pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
             if distance < depth {
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
-                for callee in callees.drain() {
+                for (callee, substs) in callees.drain() {
                     let Some(callee_def_id) = callee.as_local() else { continue; };
 
-                    newly_found_callees.entry(callee_def_id)
+                    let param_env = tcx.param_env(callee);
+                    let instance = outer_substs.and_then(|substs| tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten());
+
+                    let callee_def_id = instance.as_ref().map(ty::Instance::def_id).and_then(hir::DefId::as_local).unwrap_or(callee_def_id);
+
+                    newly_found_callees.entry((callee_def_id, substs))
                         .and_modify(|previously_reachable_from| previously_reachable_from.extend(reachable_from.clone()))
                         .or_insert_with(|| reachable_from.clone());
                 }
@@ -419,9 +425,9 @@ pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Reso
 
     for target in targets {
         match target.item {
-            ast_lowering::DefItem::Item(item) => collector.visit_item(item),
-            ast_lowering::DefItem::ForeignItem(item) => collector.visit_foreign_item(item),
-            ast_lowering::DefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
+            DefItem::Item(item) => collector.visit_item(item),
+            DefItem::ForeignItem(item) => collector.visit_foreign_item(item),
+            DefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
         }
     }
 

@@ -1,7 +1,7 @@
 use crate::analysis::hir;
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
-use crate::analysis::ty::{self, TyCtxt};
+use crate::analysis::ty::{self, TyCtxt, TypeFoldable};
 use crate::codegen::symbols::Symbol;
 
 pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
@@ -87,29 +87,40 @@ pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::
     }
 }
 
-pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<hir::DefId> {
-    match expr.kind {
-        hir::ExprKind::Call(expr, _) => {
-            if let hir::ExprKind::Path(qpath) = &expr.kind
-                && let Some(def_id) = qpath_res(typeck, qpath, expr.hir_id).opt_def_id()
-            {
-                return Some(def_id);
+pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<(hir::DefId, Option<ty::SubstsRef<'tcx>>)> {
+    fn callee_def_id<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<hir::DefId> {
+        match expr.kind {
+            hir::ExprKind::Call(expr, _) => {
+                if let hir::ExprKind::Path(qpath) = &expr.kind
+                    && let Some(def_id) = qpath_res(typeck, qpath, expr.hir_id).opt_def_id()
+                {
+                    return Some(def_id);
+                }
             }
-        }
-        hir::ExprKind::MethodCall(_, _, _) => {
-            if let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) {
-                return Some(def_id);
+            hir::ExprKind::MethodCall(_, _, _) => {
+                if let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) {
+                    return Some(def_id);
+                }
             }
-        }
-        _ => {}
+            _ => {}
+        };
+
+        None
     }
 
-    None
+    let Some(def_id) = callee_def_id(typeck, expr) else { return None; };
+
+    let substs = match typeck.node_substs(expr.hir_id) {
+        substs if substs.needs_subst() => None,
+        substs => Some(substs),
+    };
+
+    Some((def_id, substs))
 }
 
 struct CalleeCollector<'tcx> {
     typeck: &'tcx ty::TypeckResults<'tcx>,
-    callees: Vec<hir::DefId>,
+    callees: Vec<(hir::DefId, Option<ty::SubstsRef<'tcx>>)>,
 }
 
 impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
@@ -122,7 +133,7 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
     }
 }
 
-pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<hir::DefId> {
+pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<(hir::DefId, Option<ty::SubstsRef<'tcx>>)> {
     let typeck = tcx.typeck_body(body.id());
 
     let mut collector = CalleeCollector {
