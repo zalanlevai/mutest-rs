@@ -88,34 +88,23 @@ pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::
 }
 
 pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<(hir::DefId, Option<ty::SubstsRef<'tcx>>)> {
-    fn callee_def_id<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<hir::DefId> {
-        match expr.kind {
-            hir::ExprKind::Call(expr, _) => {
-                if let hir::ExprKind::Path(qpath) = &expr.kind
-                    && let Some(def_id) = qpath_res(typeck, qpath, expr.hir_id).opt_def_id()
-                {
-                    return Some(def_id);
-                }
-            }
-            hir::ExprKind::MethodCall(_, _, _) => {
-                if let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) {
-                    return Some(def_id);
-                }
-            }
-            _ => {}
-        };
+    match expr.kind {
+        hir::ExprKind::Call(expr, _) => {
+            let &ty::TyKind::FnDef(def_id, substs) = typeck.node_type(expr.hir_id).kind() else { return None; };
+            Some((def_id, Some(substs)))
+        }
+        hir::ExprKind::MethodCall(_, _, _) => {
+            let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) else { return None; };
 
-        None
+            let substs = match typeck.node_substs(expr.hir_id) {
+                substs if substs.needs_subst() => None,
+                substs => Some(substs),
+            };
+
+            Some((def_id, substs))
+        }
+        _ => None,
     }
-
-    let Some(def_id) = callee_def_id(typeck, expr) else { return None; };
-
-    let substs = match typeck.node_substs(expr.hir_id) {
-        substs if substs.needs_subst() => None,
-        substs => Some(substs),
-    };
-
-    Some((def_id, substs))
 }
 
 struct CalleeCollector<'tcx> {
