@@ -32,6 +32,8 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
 
         let MutLoc::FnParam(param, f) = location else { return None; };
 
+        if param.ast.is_self() { return None; };
+
         let ast::PatKind::Ident(
             ast::BindingMode::ByRef(param_mutbl) | ast::BindingMode::ByValue(param_mutbl),
             param_ident,
