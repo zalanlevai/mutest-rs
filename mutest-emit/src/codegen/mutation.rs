@@ -8,7 +8,7 @@ use rustc_resolve::Resolver;
 use rustc_session::Session;
 use smallvec::SmallVec;
 
-use crate::analysis::ast_lowering::{self, DefItem};
+use crate::analysis::ast_lowering::{self, AstDefItem};
 use crate::analysis::diagnostic;
 use crate::analysis::diagnostic::SessionRcSourceMap;
 use crate::analysis::hir;
@@ -332,7 +332,7 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
 
 pub struct Target<'ast, 'tst> {
     pub def_id: hir::LocalDefId,
-    pub item: DefItem<'ast>,
+    pub item: AstDefItem<'ast>,
     pub reachable_from: Vec<(&'tst Test, usize)>,
     pub distance: usize,
 }
@@ -425,9 +425,9 @@ pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Reso
 
     for target in targets {
         match target.item {
-            DefItem::Item(item) => collector.visit_item(item),
-            DefItem::ForeignItem(item) => collector.visit_foreign_item(item),
-            DefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
+            AstDefItem::Item(item) => collector.visit_item(item),
+            AstDefItem::ForeignItem(item) => collector.visit_foreign_item(item),
+            AstDefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
         }
     }
 

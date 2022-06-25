@@ -1,10 +1,12 @@
 use std::collections::VecDeque;
+use std::iter;
+
+use itertools::Itertools;
 
 use crate::analysis::hir;
 use crate::analysis::ty::TyCtxt;
 use crate::analysis::res;
 use crate::codegen::ast;
-use crate::codegen::ast::visit::Visitor;
 use crate::codegen::symbols::{Ident, Span};
 
 pub mod visit {
@@ -384,13 +386,13 @@ pub mod visit {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum DefItem<'ast> {
+pub enum AstDefItem<'ast> {
     Item(&'ast ast::Item),
     ForeignItem(&'ast ast::ForeignItem),
     AssocItem(&'ast ast::AssocItem, ast::visit::AssocCtxt),
 }
 
-impl<'ast> DefItem<'ast> {
+impl<'ast> AstDefItem<'ast> {
     pub fn ident(&self) -> Ident {
         match self {
             Self::Item(item) => item.ident,
@@ -416,155 +418,500 @@ impl<'ast> DefItem<'ast> {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum HirDefItem<'hir> {
+    Item(&'hir hir::Item<'hir>),
+    ForeignItem(&'hir hir::ForeignItem<'hir>),
+    TraitItem(&'hir hir::TraitItem<'hir>),
+    ImplItem(&'hir hir::ImplItem<'hir>),
+}
+
+impl<'hir> HirDefItem<'hir> {
+    pub fn from_node(node: &'hir hir::Node<'hir>) -> Option<Self> {
+        match node {
+            hir::Node::Item(item) => Some(Self::Item(item)),
+            hir::Node::ForeignItem(item) => Some(Self::ForeignItem(item)),
+            hir::Node::TraitItem(item) => Some(Self::TraitItem(item)),
+            hir::Node::ImplItem(item) => Some(Self::ImplItem(item)),
+            _ => None,
+        }
+    }
+
+    pub fn def_id(&self) -> hir::LocalDefId {
+        match self {
+            Self::Item(item) => item.def_id,
+            Self::ForeignItem(item) => item.def_id,
+            Self::TraitItem(item) => item.def_id,
+            Self::ImplItem(item) => item.def_id,
+        }
+    }
+
+    pub fn ident(&self) -> Ident {
+        match self {
+            Self::Item(item) => item.ident,
+            Self::ForeignItem(item) => item.ident,
+            Self::TraitItem(item) => item.ident,
+            Self::ImplItem(item) => item.ident,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Item(item) => item.span,
+            Self::ForeignItem(item) => item.span,
+            Self::TraitItem(item) => item.span,
+            Self::ImplItem(item) => item.span,
+        }
+    }
+}
+
+struct AstBodyChildItemCollector<'ast> {
+    result: Vec<AstDefItem<'ast>>,
+}
+
+impl<'ast> ast::visit::Visitor<'ast> for AstBodyChildItemCollector<'ast> {
+    fn visit_item(&mut self, item: &'ast ast::Item) {
+        self.result.push(AstDefItem::Item(item));
+    }
+
+    fn visit_foreign_item(&mut self, item: &'ast ast::ForeignItem) {
+        self.result.push(AstDefItem::ForeignItem(item));
+    }
+
+    fn visit_assoc_item(&mut self, item: &'ast ast::AssocItem, ctx: rustc_ast::visit::AssocCtxt) {
+        self.result.push(AstDefItem::AssocItem(item, ctx));
+    }
+}
+
+fn ast_body_child_items<'ast>(block: &'ast ast::Block) -> Vec<AstDefItem<'ast>> {
+    use ast::visit::Visitor;
+
+    let mut collector = AstBodyChildItemCollector { result: vec![] };
+    collector.visit_block(block);
+    collector.result
+}
+
+struct HirBodyChildItemCollector<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    result: Vec<HirDefItem<'tcx>>,
+}
+
+impl<'hir> hir::intravisit::Visitor<'hir> for HirBodyChildItemCollector<'hir> {
+    type NestedFilter = rustc_middle::hir::nested_filter::All;
+
+    fn nested_visit_map(&mut self) -> Self::Map {
+        self.tcx.hir()
+    }
+
+    fn visit_item(&mut self, item: &'hir hir::Item<'hir>) {
+        self.result.push(HirDefItem::Item(item));
+    }
+
+    fn visit_foreign_item(&mut self, item: &'hir hir::ForeignItem<'hir>) {
+        self.result.push(HirDefItem::ForeignItem(item));
+    }
+
+    fn visit_trait_item(&mut self, item: &'hir hir::TraitItem<'hir>) {
+        self.result.push(HirDefItem::TraitItem(item));
+    }
+
+    fn visit_impl_item(&mut self, item: &'hir hir::ImplItem<'hir>) {
+        self.result.push(HirDefItem::ImplItem(item));
+    }
+}
+
+fn hir_body_child_items<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> Vec<HirDefItem<'tcx>> {
+    use hir::intravisit::Visitor;
+
+    let mut collector = HirBodyChildItemCollector { tcx, result: vec![] };
+    collector.visit_body(body);
+    collector.result
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+struct DefDisambiguator {
+    pub kind: hir::definitions::DefPathData,
+    pub disambiguator: usize,
+}
+
+fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path: &[hir::Node]) -> Vec<Option<DefDisambiguator>> {
+    fn disambiguated_kind<'hir>(def_item: HirDefItem<'hir>) -> Option<hir::definitions::DefPathData> {
+        match def_item {
+            HirDefItem::Item(item) => match item.kind {
+                hir::ItemKind::ExternCrate(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Use(_, _) => None,
+                hir::ItemKind::Static(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ItemKind::Fn(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ItemKind::Macro(_, _) => Some(hir::definitions::DefPathData::MacroNs(item.ident.name)),
+                hir::ItemKind::Mod(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::ForeignMod { .. } => Some(hir::definitions::DefPathData::ForeignMod),
+                hir::ItemKind::GlobalAsm(_) => Some(hir::definitions::DefPathData::GlobalAsm),
+                hir::ItemKind::TyAlias(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::OpaqueTy(_) => Some(hir::definitions::DefPathData::ImplTrait),
+                hir::ItemKind::Enum(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Struct(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Union(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Trait(_, _, _, _, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::TraitAlias(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Impl(_) => Some(hir::definitions::DefPathData::Impl),
+            }
+            HirDefItem::ForeignItem(item) => match item.kind {
+                hir::ForeignItemKind::Fn(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ForeignItemKind::Static(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ForeignItemKind::Type => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+            }
+            HirDefItem::TraitItem(item) => match item.kind {
+                hir::TraitItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::TraitItemKind::Fn(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::TraitItemKind::Type(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+            }
+            HirDefItem::ImplItem(item) => match item.kind {
+                hir::ImplItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ImplItemKind::Fn(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
+                hir::ImplItemKind::TyAlias(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+            }
+        }
+    }
+
+    fn disambiguate_child_item<'hir, I>(def_item: HirDefItem<'hir>, items: I) -> Option<DefDisambiguator>
+    where
+        I: IntoIterator<Item = HirDefItem<'hir>>,
+    {
+        let kind = disambiguated_kind(def_item);
+
+        let disambiguator = items.into_iter()
+            .filter(|&item| disambiguated_kind(item) == kind)
+            .position(|item| item.def_id() == def_item.def_id());
+
+        match (kind, disambiguator) {
+            (Some(kind), Some(disambiguator)) => Some(DefDisambiguator { kind, disambiguator }),
+            _ => None,
+        }
+    }
+
+    path.iter()
+        .tuple_windows::<(_, _)>()
+        .map(|(parent_node, current_node)| {
+            let Some(current_def_item) = HirDefItem::from_node(current_node) else { return None; };
+
+            match parent_node {
+                hir::Node::Crate(parent_mod) => {
+                    let items = parent_mod.item_ids.iter().map(|item_id| tcx.hir().item(*item_id)).map(HirDefItem::Item);
+                    disambiguate_child_item(current_def_item, items)
+                }
+                hir::Node::Item(parent_item) => match &parent_item.kind {
+                    hir::ItemKind::Mod(parent_mod) => {
+                        let items = parent_mod.item_ids.iter().map(|item_id| tcx.hir().item(*item_id)).map(HirDefItem::Item);
+                        disambiguate_child_item(current_def_item, items)
+                    }
+                    hir::ItemKind::ForeignMod { items: parent_items, .. } => {
+                        let items = parent_items.iter().map(|item_ref| tcx.hir().foreign_item(item_ref.id)).map(HirDefItem::ForeignItem);
+                        disambiguate_child_item(current_def_item, items)
+                    }
+                    hir::ItemKind::Trait(_, _, _, _, parent_items) => {
+                        let items = parent_items.iter().map(|item_ref| tcx.hir().trait_item(item_ref.id)).map(HirDefItem::TraitItem);
+                        disambiguate_child_item(current_def_item, items)
+                    }
+                    hir::ItemKind::Impl(parent_impl) => {
+                        let items = parent_impl.items.iter().map(|item_ref| tcx.hir().impl_item(item_ref.id)).map(HirDefItem::ImplItem);
+                        disambiguate_child_item(current_def_item, items)
+                    }
+                    | hir::ItemKind::Static(_, _, parent_body)
+                    | hir::ItemKind::Const(_, parent_body)
+                    | hir::ItemKind::Fn(_, _, parent_body) => {
+                        disambiguate_child_item(current_def_item, hir_body_child_items(tcx, tcx.hir().body(*parent_body)))
+                    }
+                    _ => None,
+                }
+                hir::Node::TraitItem(parent_item) => match &parent_item.kind {
+                    | hir::TraitItemKind::Const(_, Some(parent_body))
+                    | hir::TraitItemKind::Fn(_, hir::TraitFn::Provided(parent_body)) => {
+                        disambiguate_child_item(current_def_item, hir_body_child_items(tcx, tcx.hir().body(*parent_body)))
+                    }
+                    _ => None,
+                }
+                hir::Node::ImplItem(parent_item) => match &parent_item.kind {
+                    | hir::ImplItemKind::Const(_, parent_body)
+                    | hir::ImplItemKind::Fn(_, parent_body) => {
+                        disambiguate_child_item(current_def_item, hir_body_child_items(tcx, tcx.hir().body(*parent_body)))
+                    }
+                    _ => None,
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 struct AstDefFinder<'ast, 'hir> {
-    path_stack: VecDeque<hir::Node<'hir>>,
-    result: Option<DefItem<'ast>>,
+    path_stack: VecDeque<(hir::Node<'hir>, Option<DefDisambiguator>)>,
+    result: Option<AstDefItem<'ast>>,
 }
 
-fn is_matching_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::ItemKind, item_kind_hir: &'hir hir::ItemKind) -> bool {
-    match (item_kind_hir, item_kind_ast) {
-        (hir::ItemKind::ExternCrate(symbol_hir), ast::ItemKind::ExternCrate(symbol_ast)) => {
-            symbol_ast == symbol_hir
+fn find_hir_def_item_in_ast<'ast, 'hir, I>(item_hir: HirDefItem<'hir>, disambiguator: Option<DefDisambiguator>, items_ast: I) -> Option<AstDefItem<'ast>>
+where
+    I: IntoIterator<Item = AstDefItem<'ast>>,
+{
+    macro matching_item {
+        ($(|)? $($pat:pat_param)|+ $(if $guard:expr)? $(,)?) => {
+            items_ast.into_iter().find(|&item_ast| matches!(&item_ast.kind(), $($pat)|+ $(if $guard)?))
+        },
+        ($(|)? $($pat:pat_param)|+ $(if $guard:expr)? => |$item_ast:ident| $filter:expr $(,)?) => {
+            items_ast.into_iter().find(|&$item_ast| matches!(&$item_ast.kind(), $($pat)|+ $(if $guard)?) && $filter)
+        },
+    }
+
+    match item_hir {
+        HirDefItem::Item(item_hir) => match &item_hir.kind {
+            hir::ItemKind::ExternCrate(symbol_hir) => {
+                matching_item!(ast::ItemKind::ExternCrate(symbol_ast) if symbol_ast == symbol_hir)
+            }
+            hir::ItemKind::Use(_, _) => None,
+            hir::ItemKind::Static(_, _, _) => {
+                matching_item!(ast::ItemKind::Static(_, _, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Const(_, _) => {
+                matching_item!(ast::ItemKind::Const(_, _, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Fn(_, _, _) => {
+                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Macro(def_hir, _) => {
+                matching_item!(ast::ItemKind::MacroDef(def_ast) if std::ptr::eq(def_hir, def_ast))
+            }
+            hir::ItemKind::Mod(_) => {
+                matching_item!(ast::ItemKind::Mod(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::ForeignMod { abi: _, items: _ } => {
+                let Some(disambiguator) = disambiguator else { return None; };
+
+                let hir::definitions::DefPathData::ForeignMod = disambiguator.kind else { return None; };
+                let index = disambiguator.disambiguator;
+
+                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::ForeignMod(_))).nth(index)
+            }
+            hir::ItemKind::GlobalAsm(_) => {
+                let Some(disambiguator) = disambiguator else { return None; };
+
+                let hir::definitions::DefPathData::GlobalAsm = disambiguator.kind else { return None; };
+                let index = disambiguator.disambiguator;
+
+                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::GlobalAsm(_))).nth(index)
+            }
+            hir::ItemKind::TyAlias(_, _) => {
+                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::OpaqueTy(_) => None,
+            hir::ItemKind::Enum(_, _) => {
+                matching_item!(ast::ItemKind::Enum(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Struct(_, _) => {
+                matching_item!(ast::ItemKind::Struct(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Union(_, _) => {
+                matching_item!(ast::ItemKind::Union(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Trait(_, _, _, _, _) => {
+                matching_item!(ast::ItemKind::Trait(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::TraitAlias(_, _) => {
+                matching_item!(ast::ItemKind::TraitAlias(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ItemKind::Impl(_) => {
+                let Some(disambiguator) = disambiguator else { return None; };
+
+                let hir::definitions::DefPathData::Impl = disambiguator.kind else { return None; };
+                let index = disambiguator.disambiguator;
+
+                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::Impl(_))).nth(index)
+            }
         }
-        (hir::ItemKind::Use(_, _), _) => false,
-        (hir::ItemKind::Static(_, _, _), ast::ItemKind::Static(_, _, _)) => true,
-        (hir::ItemKind::Const(_, _), ast::ItemKind::Const(_, _, _)) => true,
-        (hir::ItemKind::Fn(_, _, _), ast::ItemKind::Fn(_)) => true,
-        (hir::ItemKind::Macro(def_hir, _), ast::ItemKind::MacroDef(def_ast)) => {
-            std::ptr::eq(def_hir, def_ast)
+        HirDefItem::ForeignItem(item_hir) => match &item_hir.kind {
+            hir::ForeignItemKind::Fn(_, _, _) => {
+                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ForeignItemKind::Static(_, _) => {
+                matching_item!(ast::ItemKind::Static(_, _, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ForeignItemKind::Type => {
+                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
         }
-        (hir::ItemKind::Mod(_), ast::ItemKind::Mod(_, _)) => true,
-        (hir::ItemKind::ForeignMod { abi: _, items: _ }, ast::ItemKind::ForeignMod(_)) => true,
-        (hir::ItemKind::GlobalAsm(_), ast::ItemKind::GlobalAsm(_)) => true,
-        (hir::ItemKind::TyAlias(_, _), ast::ItemKind::TyAlias(_)) => true,
-        (hir::ItemKind::OpaqueTy(_), _) => false,
-        (hir::ItemKind::Enum(_, _), ast::ItemKind::Enum(_, _)) => true,
-        (hir::ItemKind::Struct(_, _), ast::ItemKind::Struct(_, _)) => true,
-        (hir::ItemKind::Union(_, _), ast::ItemKind::Union(_, _)) => true,
-        (hir::ItemKind::Trait(_, _, _, _, _), ast::ItemKind::Trait(_)) => true,
-        (hir::ItemKind::TraitAlias(_, _), ast::ItemKind::TraitAlias(_, _)) => true,
-        (hir::ItemKind::Impl(_), ast::ItemKind::Impl(_)) => true,
-
-        _ => false,
-    }
-}
-
-fn is_matching_foreign_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::ForeignItemKind, item_kind_hir: &'hir hir::ForeignItemKind) -> bool {
-    match (item_kind_hir, item_kind_ast) {
-        (hir::ForeignItemKind::Fn(_, _, _), ast::ForeignItemKind::Fn(_)) => true,
-        (hir::ForeignItemKind::Static(_, _), ast::ForeignItemKind::Static(_, _, _)) => true,
-        (hir::ForeignItemKind::Type, ast::ForeignItemKind::TyAlias(_)) => true,
-
-        _ => false,
-    }
-}
-
-fn is_matching_trait_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::AssocItemKind, item_kind_hir: &'hir hir::TraitItemKind) -> bool {
-    match (item_kind_hir, item_kind_ast) {
-        (hir::TraitItemKind::Const(_, _), ast::AssocItemKind::Const(_, _, _)) => true,
-        (hir::TraitItemKind::Fn(_, _), ast::AssocItemKind::Fn(_)) => true,
-        (hir::TraitItemKind::Type(_, _), ast::AssocItemKind::TyAlias(_)) => true,
-
-        _ => false,
-    }
-}
-
-fn is_matching_impl_item_kind<'ast, 'hir>(item_kind_ast: &'ast ast::AssocItemKind, item_kind_hir: &'hir hir::ImplItemKind) -> bool {
-    match (item_kind_hir, item_kind_ast) {
-        (hir::ImplItemKind::Const(_, _), ast::AssocItemKind::Const(_, _, _)) => true,
-        (hir::ImplItemKind::Fn(_, _), ast::AssocItemKind::Fn(_)) => true,
-        (hir::ImplItemKind::TyAlias(_), ast::AssocItemKind::TyAlias(_)) => true,
-
-        _ => false,
+        HirDefItem::TraitItem(item_hir) => match &item_hir.kind {
+            hir::TraitItemKind::Const(_, _) => {
+                matching_item!(ast::ItemKind::Const(_, _, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::TraitItemKind::Fn(_, _) => {
+                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::TraitItemKind::Type(_, _) => {
+                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+        }
+        HirDefItem::ImplItem(item_hir) => match &item_hir.kind {
+            hir::ImplItemKind::Const(_, _) => {
+                matching_item!(ast::ItemKind::Const(_, _, _) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ImplItemKind::Fn(_, _) => {
+                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+            hir::ImplItemKind::TyAlias(_) => {
+                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+            }
+        }
     }
 }
 
 impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
     fn visit_crate(&mut self, krate: &'ast ast::Crate) {
-        let Some(&path_segment) = self.path_stack.front() else { return; };
+        let Some(&(node_hir, None)) = self.path_stack.front() else { return; };
 
-        if let hir::Node::Crate(_) = path_segment {
-            self.path_stack.pop_front();
+        let hir::Node::Crate(_) = node_hir else { return; };
+        self.path_stack.pop_front();
+
+        let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
+        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
+
+        let def_item_ast = match def_item_hir {
+            HirDefItem::Item(_) => {
+                let def_items_ast = krate.items.iter().map(ast::AstDeref::ast_deref).map(AstDefItem::Item);
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
+            }
+            _ => { return; }
+        };
+
+        let Some(def_item_ast) = def_item_ast else { return; };
+        self.path_stack.pop_front();
+
+        if self.path_stack.is_empty() {
+            self.result = Some(def_item_ast);
+            return;
         }
 
-        ast::visit::walk_crate(self, krate);
+        match def_item_ast {
+            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
+            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+        }
     }
 
     fn visit_item(&mut self, item: &'ast ast::Item) {
-        let Some(path_segment) = self.path_stack.front() else { return; };
+        let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
+        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
 
-        match path_segment {
-            hir::Node::Item(item_hir) => {
-                if item.ident.name != item_hir.ident.name { return; }
-                if !is_matching_item_kind(&item.kind, &item_hir.kind) { return; }
-                self.path_stack.pop_front();
+        let def_item_ast = match (def_item_hir, &item.kind) {
+            (HirDefItem::Item(_), ast::ItemKind::Mod(_, ast::ModKind::Loaded(items_ast, _, _))) => {
+                let def_items_ast = items_ast.iter().map(ast::AstDeref::ast_deref).map(AstDefItem::Item);
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
             }
-
+            (HirDefItem::ForeignItem(_), ast::ItemKind::ForeignMod(foreign_mod_ast)) => {
+                let def_items_ast = foreign_mod_ast.items.iter().map(ast::AstDeref::ast_deref).map(AstDefItem::ForeignItem);
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
+            }
+            (HirDefItem::TraitItem(_), ast::ItemKind::Trait(trait_ast)) => {
+                let def_items_ast = trait_ast.items.iter().map(ast::AstDeref::ast_deref)
+                    .map(|item_ast| AstDefItem::AssocItem(item_ast, ast::visit::AssocCtxt::Trait));
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
+            }
+            (HirDefItem::ImplItem(_), ast::ItemKind::Impl(impl_ast)) => {
+                let def_items_ast = impl_ast.items.iter().map(ast::AstDeref::ast_deref)
+                    .map(|item_ast| AstDefItem::AssocItem(item_ast, ast::visit::AssocCtxt::Impl));
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
+            }
+            (HirDefItem::Item(_), ast::ItemKind::Fn(fn_ast)) => {
+                let Some(body_ast) = &fn_ast.body else { return; };
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, ast_body_child_items(body_ast))
+            }
             _ => { return; }
-        }
+        };
+
+        let Some(def_item_ast) = def_item_ast else { return; };
+        self.path_stack.pop_front();
 
         if self.path_stack.is_empty() {
-            self.result = Some(DefItem::Item(item));
+            self.result = Some(def_item_ast);
             return;
         }
 
-        ast::visit::walk_item(self, item);
+        match def_item_ast {
+            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
+            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+        }
     }
 
     fn visit_foreign_item(&mut self, item: &'ast ast::ForeignItem) {
-        let Some(path_segment) = self.path_stack.front() else { return; };
+        let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
+        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
 
-        match path_segment {
-            hir::Node::ForeignItem(item_hir) => {
-                if item.ident.name != item_hir.ident.name { return; }
-                if !is_matching_foreign_item_kind(&item.kind, &item_hir.kind) { return; }
-                self.path_stack.pop_front();
+        let def_item_ast = match (def_item_hir, &item.kind) {
+            (HirDefItem::Item(_), ast::ForeignItemKind::Fn(fn_ast)) => {
+                let Some(body_ast) = &fn_ast.body else { return; };
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, ast_body_child_items(body_ast))
             }
-
             _ => { return; }
-        }
+        };
+
+        let Some(def_item_ast) = def_item_ast else { return; };
+        self.path_stack.pop_front();
 
         if self.path_stack.is_empty() {
-            self.result = Some(DefItem::ForeignItem(item));
+            self.result = Some(def_item_ast);
             return;
         }
 
-        ast::visit::walk_foreign_item(self, item);
+        match def_item_ast {
+            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
+            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+        }
     }
 
-    fn visit_assoc_item(&mut self, item: &'ast ast::AssocItem, ctx: ast::visit::AssocCtxt) {
-        let Some(path_segment) = self.path_stack.front() else { return; };
+    fn visit_assoc_item(&mut self, item: &'ast ast::AssocItem, _ctx: ast::visit::AssocCtxt) {
+        let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
+        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
 
-        match (path_segment, ctx) {
-            (hir::Node::TraitItem(item_hir), ast::visit::AssocCtxt::Trait) => {
-                if item.ident.name != item_hir.ident.name { return; }
-                if !is_matching_trait_item_kind(&item.kind, &item_hir.kind) { return; }
-                self.path_stack.pop_front();
+        let def_item_ast = match (def_item_hir, &item.kind) {
+            (HirDefItem::Item(_), ast::AssocItemKind::Fn(fn_ast)) => {
+                let Some(body_ast) = &fn_ast.body else { return; };
+                find_hir_def_item_in_ast(def_item_hir, disambiguator, ast_body_child_items(body_ast))
             }
-            (hir::Node::ImplItem(item_hir), ast::visit::AssocCtxt::Impl) => {
-                if item.ident.name != item_hir.ident.name { return; }
-                if !is_matching_impl_item_kind(&item.kind, &item_hir.kind) { return; }
-                self.path_stack.pop_front();
-            }
-
             _ => { return; }
-        }
+        };
+
+        let Some(def_item_ast) = def_item_ast else { return; };
+        self.path_stack.pop_front();
 
         if self.path_stack.is_empty() {
-            self.result = Some(DefItem::AssocItem(item, ctx));
+            self.result = Some(def_item_ast);
             return;
         }
 
-        ast::visit::walk_assoc_item(self, item, ctx);
+        match def_item_ast {
+            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
+            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+        }
     }
 }
 
-pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<DefItem<'ast>> {
-    let def_hir_path = res::def_hir_path(tcx, def_id);
-    let def_hir_node_path = def_hir_path.into_iter().map(|(_, node)| node).collect::<VecDeque<_>>();
+pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<AstDefItem<'ast>> {
+    use ast::visit::Visitor;
+
+    // The definition HIR path will contain the full HIR tree walk, including blocks, statements, expressions, etc.
+    // (e.g. for items nested inside function bodies). However, it is sufficient to only look at the item-like path
+    // components to resolve definitions. This is also how the compiler's own `DefPath`s are defined.
+    let def_hir_item_node_path = res::def_hir_path(tcx, def_id).into_iter()
+        .map(|(_, node)| node)
+        .filter(|node| matches!(node, hir::Node::Crate(_)) || HirDefItem::from_node(node).is_some())
+        .collect::<Vec<_>>();
+
+    let disambiguators = iter::once(None).chain(disambiguate_hir_def_item_node_path_components(tcx, &def_hir_item_node_path));
+    let path_stack = iter::zip(def_hir_item_node_path, disambiguators).collect::<VecDeque<_>>();
 
     let mut finder = AstDefFinder {
-        path_stack: def_hir_node_path,
+        path_stack,
         result: None,
     };
     finder.visit_crate(krate);
