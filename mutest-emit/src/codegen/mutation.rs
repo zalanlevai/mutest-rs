@@ -285,6 +285,8 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
     }
 
     fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {
+        if !self.tcx.sess.source_map().is_local_span(param_ast.span) { return; };
+
         if let Some(lowered_fn) = &self.current_fn {
             let lowered_param = Lowered { ast: param_ast, hir: param_hir };
 
@@ -299,7 +301,15 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
         ast_lowering::visit::walk_param(self, param_ast, param_hir);
     }
 
+    fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
+        if !self.tcx.sess.source_map().is_local_span(block_ast.span) { return; };
+
+        ast_lowering::visit::walk_block(self, block_ast, block_hir);
+    }
+
     fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
+        if !self.tcx.sess.source_map().is_local_span(stmt_ast.span) { return; };
+
         if let Some(lowered_fn) = &self.current_fn {
             let lowered_stmt = Lowered { ast: stmt_ast, hir: stmt_hir };
 
@@ -315,6 +325,8 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
     }
 
     fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
+        if !self.tcx.sess.source_map().is_local_span(expr_ast.span) { return; };
+
         if let Some(lowered_fn) = &self.current_fn {
             let lowered_expr = Lowered { ast: expr_ast, hir: expr_hir };
 
