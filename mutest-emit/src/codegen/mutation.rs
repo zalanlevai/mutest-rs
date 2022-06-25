@@ -387,7 +387,7 @@ pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
                     let Some(callee_def_id) = callee.as_local() else { continue; };
 
                     let param_env = tcx.param_env(callee);
-                    let instance = outer_substs.and_then(|substs| tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten());
+                    let instance = substs.or(outer_substs).and_then(|substs| tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten());
 
                     let callee_def_id = instance.as_ref().map(ty::Instance::def_id).and_then(hir::DefId::as_local).unwrap_or(callee_def_id);
 
