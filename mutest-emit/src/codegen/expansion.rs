@@ -16,6 +16,7 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 
 #![feature(box_syntax)]
 #![feature(core_panic)]
+#![feature(rustc_private)]
 "#;
 
 pub const GENERATED_CODE_CRATE_REFS: &str = r#"
