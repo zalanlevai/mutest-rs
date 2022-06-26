@@ -9,8 +9,7 @@ use rustc_session::Session;
 use smallvec::SmallVec;
 
 use crate::analysis::ast_lowering::{self, AstDefItem};
-use crate::analysis::diagnostic;
-use crate::analysis::diagnostic::SessionRcSourceMap;
+use crate::analysis::diagnostic::{self, SessionRcSourceMap};
 use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::tests::Test;
@@ -182,6 +181,12 @@ impl<'m, 'hir> Mut<'m, 'hir> {
 
     pub fn display_location(&self, sess: &Session) -> String {
         sess.source_map().span_to_embeddable_string(self.location.span())
+    }
+
+    pub fn undetected_diagnostic(&self, sess: &Session) -> String {
+        let mut diagnostic = sess.struct_span_warn(self.location.span(), "the following mutation was not detected");
+        diagnostic.span_label(self.location.span(), &self.display_name());
+        diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
 }
 
@@ -457,14 +462,6 @@ impl<'m, 'tcx> Mutant<'m, 'tcx> {
 
     pub fn iter_substitutions(&self) -> impl Iterator<Item = &SubstDef> {
         self.mutations.iter().flat_map(|m| &m.substs)
-    }
-
-    pub fn undetected_diagnostic(&self, sess: &Session) -> String {
-        let mut diagnostic = sess.struct_warn("the following mutations were not detected");
-        for mutation in &self.mutations {
-            diagnostic.span_note(mutation.location.span(), &mutation.display_name());
-        }
-        diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
 }
 

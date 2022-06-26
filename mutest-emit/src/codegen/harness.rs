@@ -24,17 +24,16 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_location, sp), {
             ast::mk::expr_str(sp, &mutation.display_location(sess))
         }),
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::undetected_diagnostic, sp), {
+            ast::mk::expr_str(sp, &mutation.undetected_diagnostic(sess))
+        }),
     ])
 }
 
-pub fn bake_mutant(mutant: &Mutant, sp: Span, sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
+pub fn bake_mutant(_mutant: &Mutant, sp: Span, _sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutantMeta(sp)), vec![
         ast::mk::expr_struct_field(sp, Ident::new(*sym::mutations, sp), mutations_expr),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::substitutions, sp), subst_map_expr),
-
-        ast::mk::expr_struct_field(sp, Ident::new(*sym::undetected_diagnostic, sp), {
-            ast::mk::expr_str(sp, &mutant.undetected_diagnostic(sess))
-        }),
     ])
 }
 

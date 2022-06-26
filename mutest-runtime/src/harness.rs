@@ -121,7 +121,9 @@ pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants:
                     undetected_mutants_count += 1;
                     undetected_mutations_count += mutant.mutations.len();
 
-                    print!("{}", mutant.undetected_diagnostic);
+                    for mutation in mutant.mutations {
+                        print!("{}", mutation.undetected_diagnostic);
+                    }
                 }
             }
             Err(err) => {
