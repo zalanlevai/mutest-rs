@@ -80,7 +80,7 @@ fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>) -> P<ast::I
     ast::mk::item_mod(sp, vis, ident, items).map(|mut m| { m.attrs = vec![allow_non_upper_case_globals_attr]; m })
 }
 
-fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &Vec<Mutant>, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
+fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
     let elements = mutants.iter()
         .map(|mutant| {
             // &[...]
@@ -176,13 +176,13 @@ fn mk_harness_fn(sp: Span) -> P<ast::Item> {
     ast::mk::item_fn(sp, vis, ident, None, None, inputs, None, Some(body))
 }
 
-struct HarnessGenerator<'op, 'tcx> {
-    sess: &'op Session,
-    mutants: &'op Vec<Mutant<'op, 'tcx>>,
+struct HarnessGenerator<'tcx, 'trg, 'm> {
+    sess: &'tcx Session,
+    mutants: &'m [Mutant<'tcx, 'trg, 'm>],
     def_site: Span,
 }
 
-impl<'op, 'tcx> ast::mut_visit::MutVisitor for HarnessGenerator<'op, 'tcx> {
+impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg, 'm> {
     fn visit_crate(&mut self, c: &mut ast::Crate) {
         ast::mut_visit::noop_visit_crate(c, self);
 

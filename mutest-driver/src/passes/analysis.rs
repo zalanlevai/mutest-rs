@@ -39,12 +39,12 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, opts.mutation_depth);
                     if let config::Mode::PrintMutationTargets = opts.mode {
                         for target in &targets {
-                            println!("tests -({distance})-> {ident:#?} @ {span:#?}",
+                            println!("tests -({distance})-> {def_path} at {span:#?}",
                                 distance = target.distance,
-                                ident = target.item.ident(),
-                                span = target.item.span(),
+                                def_path = tcx.def_path_str(target.def_id.to_def_id()),
+                                span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(target.def_id)),
                             );
-                            for &(test, distance) in &target.reachable_from {
+                            for (&test, &distance) in &target.reachable_from {
                                 println!("  ({distance}) {test}",
                                     test = test.path_str(),
                                 );
@@ -54,8 +54,8 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         return Flow::Break;
                     }
 
-                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &targets, &opts.operators);
-                    let mutants = mutest_emit::codegen::mutation::batch_mutations(&targets, mutations, opts.mutant_max_mutations_count);
+                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &generated_crate_ast, &targets, &opts.operators);
+                    let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count);
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
                     // Clean up the generated test harness's invalid AST.

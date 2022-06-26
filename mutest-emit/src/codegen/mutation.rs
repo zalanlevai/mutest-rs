@@ -14,8 +14,7 @@ use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::tests::Test;
 use crate::analysis::ty::{self, TyCtxt};
-use crate::codegen::ast;
-use crate::codegen::ast::P;
+use crate::codegen::ast::{self, P};
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::substitution::conflicting_substs;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
@@ -89,7 +88,7 @@ impl<'hir> OwnedMutLoc<'hir> {
     }
 }
 
-pub struct MutCtxt<'op, 'ast, 'tcx, 'r> {
+pub struct MutCtxt<'ast, 'tcx, 'r, 'op> {
     pub tcx: TyCtxt<'tcx>,
     pub resolver: &'op Resolver<'r>,
     pub def_site: Span,
@@ -167,14 +166,15 @@ impl MutId {
     }
 }
 
-pub struct Mut<'m, 'hir> {
+pub struct Mut<'hir, 'trg, 'm> {
     pub id: MutId,
+    pub target: &'trg Target<'trg>,
     pub location: OwnedMutLoc<'hir>,
     pub mutation: BoxedMutation<'m>,
     pub substs: SmallVec<[SubstDef; 1]>,
 }
 
-impl<'m, 'hir> Mut<'m, 'hir> {
+impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
     pub fn display_name(&self) -> String {
         self.mutation.display_name()
     }
@@ -190,27 +190,28 @@ impl<'m, 'hir> Mut<'m, 'hir> {
     }
 }
 
-impl<'m, 'hir> Eq for Mut<'m, 'hir> {}
-impl<'m, 'hir> PartialEq for Mut<'m, 'hir> {
+impl<'hir, 'trg, 'm> Eq for Mut<'hir, 'trg, 'm> {}
+impl<'hir, 'trg, 'm> PartialEq for Mut<'hir, 'trg, 'm> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<'m, 'hir> Hash for Mut<'m, 'hir> {
+impl<'hir, 'trg, 'm> Hash for Mut<'hir, 'trg, 'm> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-struct MutationCollector<'ast, 'tcx, 'r, 'op, 'm> {
-    pub operators: &'op Operators<'op, 'm>,
+struct MutationCollector<'ast, 'tcx, 'r, 'op, 'trg, 'm> {
+    pub operators: Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
     pub resolver: &'op Resolver<'r>,
     pub def_site: Span,
+    pub target: Option<&'trg Target<'trg>>,
     pub current_fn: Option<LoweredFn<'ast, 'tcx>>,
     pub next_mut_index: u32,
-    pub mutations: Vec<Mut<'m, 'tcx>>,
+    pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
 }
 
 /// Macro used during mutation collection to apply every mutation operator using the given mutation
@@ -222,10 +223,11 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     {
         let mcx = $($mcx)+;
 
-        for operator in *$self.operators {
+        for operator in $self.operators {
             if let Some((mutation, substs)) = operator.try_apply_boxed(&mcx) {
                 $self.mutations.push(Mut {
                     id: MutId($self.next_mut_index),
+                    target: $self.target.expect("attempted to collect mutations without a target"),
                     location: mcx.location.into_owned(),
                     mutation,
                     substs,
@@ -237,7 +239,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     }
 }
 
-impl<'ast, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'r, 'op, 'm> {
+impl<'ast, 'tcx, 'r, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'r, 'op, 'trg, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
         let ast::visit::FnKind::Fn(ref ctx, ref ident, sig, vis, generics, body) = kind else { return; };
 
@@ -282,7 +284,7 @@ impl<'ast, 'tcx, 'r, 'op, 'm> ast::visit::Visitor<'ast> for MutationCollector<'a
     }
 }
 
-impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'ast, 'hir, 'r, 'op, 'm> {
+impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'ast, 'hir, 'r, 'op, 'trg, 'm> {
     type NestedFilter = OnlyBodies;
 
     fn nested_visit_map(&mut self) -> Self::Map {
@@ -347,14 +349,13 @@ impl<'ast, 'hir, 'r, 'op, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for
     }
 }
 
-pub struct Target<'ast, 'tst> {
+pub struct Target<'tst> {
     pub def_id: hir::LocalDefId,
-    pub item: AstDefItem<'ast>,
     pub reachable_from: Vec<(&'tst Test, usize)>,
     pub distance: usize,
 }
 
-pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'ast, 'tst>> {
+pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
     let mut previously_found_callees: FxHashMap<(hir::LocalDefId, Option<ty::SubstsRef<'tcx>>), Vec<&'tst Test>> = Default::default();
 
     for test in tests {
@@ -392,7 +393,6 @@ pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
                 })
                 .or_insert_with(|| Target {
                     def_id: callee_def_id,
-                    item: callee_def_item,
                     reachable_from: reachable_from.iter().map(|&test| (test, distance)).collect(),
                     distance,
                 });
@@ -421,7 +421,7 @@ pub fn reachable_fns<'tcx, 'ast, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, targets: &[Target], ops: &Operators<'_, 'm>) -> Vec<Mut<'m, 'tcx>> {
+pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>) -> Vec<Mut<'tcx, 'trg, 'm>> {
     let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
@@ -435,13 +435,18 @@ pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Reso
         tcx,
         resolver,
         def_site,
+        target: None,
         current_fn: None,
         next_mut_index: 1,
         mutations: vec![],
     };
 
     for target in targets {
-        match target.item {
+        collector.target = Some(target);
+
+        let Some(target_item) = ast_lowering::find_def_in_ast(tcx, target.def_id, krate) else { continue; };
+
+        match target_item {
             AstDefItem::Item(item) => collector.visit_item(item),
             AstDefItem::ForeignItem(item) => collector.visit_foreign_item(item),
             AstDefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
@@ -451,11 +456,11 @@ pub fn apply_mutation_operators<'tcx, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Reso
     collector.mutations
 }
 
-pub struct Mutant<'m, 'tcx> {
-    pub mutations: Vec<Mut<'m, 'tcx>>,
+pub struct Mutant<'tcx, 'trg, 'm> {
+    pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
 }
 
-impl<'m, 'tcx> Mutant<'m, 'tcx> {
+impl<'tcx, 'trg, 'm> Mutant<'tcx, 'trg, 'm> {
     pub fn iter_mutations(&self) -> impl Iterator<Item = &BoxedMutation<'m>> {
         self.mutations.iter().map(|m| &m.mutation)
     }
@@ -471,15 +476,8 @@ pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
     !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
 }
 
-pub fn batch_mutations<'m, 'tcx>(targets: &[Target], mutations: Vec<Mut<'m, 'tcx>>, mutant_max_mutations_count: usize) -> Vec<Mutant<'m, 'tcx>> {
-    let mut mutants: Vec<Mutant<'m, 'tcx>> = vec![];
-
-    let mut target_map: FxHashMap<MutId, &Target> = Default::default();
-    for mutation in &mutations {
-        let Some(containing_fn) = mutation.location.containing_fn() else { continue; };
-        let Some(target) = targets.iter().find(|target| target.def_id == containing_fn.hir.def_id) else { continue };
-        target_map.insert(mutation.id, target);
-    }
+pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+    let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
 
     'mutation: for mutation in mutations {
         'mutant: for mutant in &mut mutants {
@@ -491,8 +489,7 @@ pub fn batch_mutations<'m, 'tcx>(targets: &[Target], mutations: Vec<Mut<'m, 'tcx
                 }
             }
 
-            let Some(target) = target_map.get(&mutation.id) else { break 'mutant; };
-            if mutant.mutations.iter().any(|m| target_map.get(&m.id).is_some_and(|t| conflicting_targets(t, target))) {
+            if mutant.mutations.iter().any(|m| conflicting_targets(m.target, mutation.target)) {
                 continue 'mutant;
             }
 
