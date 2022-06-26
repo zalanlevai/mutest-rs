@@ -41,13 +41,11 @@ pub fn bake_mutant(mutant: &Mutant, sp: Span, sess: &Session, mutations_expr: P<
 fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
     let fields = subst_locs.iter()
         .map(|subst_loc| {
-            // pub $subst_loc_id: Option<SubstMeta<'static>>,
+            // pub $subst_loc_id: Option<SubstMeta>,
             let vis = ast::mk::vis_pub(sp);
             let ident = Ident::new(subst_loc.into_subst_loc_id().into_symbol(), sp);
             let ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp, path::Option(sp), vec![], vec![
-                ast::GenericArg::Type(ast::mk::ty_path(None, ast::mk::pathx_args(sp, ast::mk::path_local(path::SubstMeta(sp)), vec![], vec![
-                    ast::GenericArg::Lifetime(ast::mk::lifetime(sp, Ident::new(kw::StaticLifetime, sp))),
-                ]))),
+                ast::GenericArg::Type(ast::mk::ty_path(None, ast::mk::path_local(path::SubstMeta(sp)))),
             ]));
             ast::mk::field_def(sp, vis, Some(ident), ty)
         })

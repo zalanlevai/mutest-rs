@@ -1,19 +1,19 @@
 #[derive(Debug)]
-pub struct SubstMeta<'a> {
-    pub mutation: &'a MutationMeta<'a>,
+pub struct SubstMeta {
+    pub mutation: &'static MutationMeta,
 }
 
 #[derive(Debug)]
-pub struct MutationMeta<'a> {
+pub struct MutationMeta {
     pub id: u32,
-    pub display_name: &'a str,
-    pub display_location: &'a str,
+    pub display_name: &'static str,
+    pub display_location: &'static str,
 }
 
 #[derive(Debug)]
-pub struct MutantMeta<'a, S> {
-    pub mutations: &'a [&'a MutationMeta<'a>],
+pub struct MutantMeta<S: 'static> {
+    pub mutations: &'static [&'static MutationMeta],
     pub substitutions: S,
 
-    pub undetected_diagnostic: &'a str,
+    pub undetected_diagnostic: &'static str,
 }

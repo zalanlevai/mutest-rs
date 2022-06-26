@@ -13,22 +13,22 @@ mod test {
 
 // TODO: Consider using `MaybeUninit<Mutant>` for the cell type if the harness never runs the
 //       program without any mutations applied.
-pub struct ActiveMutantHandle<'a, S>(parking_lot::RwLock<Option<&'a MutantMeta<'a, S>>>);
+pub struct ActiveMutantHandle<S: 'static>(parking_lot::RwLock<Option<&'static MutantMeta<S>>>);
 
-impl <'a, S> ActiveMutantHandle<'a, S> {
+impl <S> ActiveMutantHandle<S> {
     pub const fn empty() -> Self {
         Self(parking_lot::const_rwlock(None))
     }
 
-    pub const fn with(v: &'a MutantMeta<'a, S>) -> Self {
+    pub const fn with(v: &'static MutantMeta<S>) -> Self {
         Self(parking_lot::const_rwlock(Some(v)))
     }
 
-    pub fn borrow(&self) -> Option<&'a MutantMeta<'a, S>> {
+    pub fn borrow(&self) -> Option<&'static MutantMeta<S>> {
         *self.0.read()
     }
 
-    pub fn replace(&self, v: Option<&'a MutantMeta<'a, S>>) {
+    pub fn replace(&self, v: Option<&'static MutantMeta<S>>) {
         *self.0.write() = v;
     }
 }
@@ -87,7 +87,7 @@ fn clone_tests(tests: &Vec<test::TestDescAndFn>) -> Vec<test::TestDescAndFn> {
     tests.iter().map(make_owned_test).collect()
 }
 
-pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'m [&'m MutantMeta<'m, S>], active_mutant_handle: &ActiveMutantHandle<'m, S>) {
+pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     let opts = match test::parse_opts(args) {
         Some(Ok(o)) => o,
         Some(Err(msg)) => {
@@ -155,7 +155,7 @@ pub fn mutest_main<'m, S>(args: &[String], tests: Vec<test::TestDescAndFn>, muta
     }
 }
 
-pub fn mutest_main_static<'m, S>(tests: &[&test::TestDescAndFn], mutants: &'m [&'m MutantMeta<'m, S>], active_mutant_handle: &ActiveMutantHandle<'m, S>) {
+pub fn mutest_main_static<S>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     let args = env::args().collect::<Vec<_>>();
     let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test(test)).collect();
 
