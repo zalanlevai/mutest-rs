@@ -159,10 +159,6 @@ name = "mutest-runtime"
 version = "0.0.0"
 
 [[package]]
-name = "mutest-test"
-version = "0.0.0"
-
-[[package]]
 name = "os_str_bytes"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
