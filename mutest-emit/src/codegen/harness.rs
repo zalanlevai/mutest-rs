@@ -9,7 +9,7 @@ use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::mutation::{Mut, Mutant, SubstLoc};
-use crate::codegen::symbols::{DUMMY_SP, Ident, Span, kw, path, sym};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
@@ -24,6 +24,35 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_location, sp), {
             ast::mk::expr_str(sp, &mutation.display_location(sess))
         }),
+
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::reachable_from, sp), {
+            let args_token_trees = mutation.target.reachable_from.iter()
+                .flat_map(|(&test, &distance)| {
+                    let key_lit = ast::TokenKind::lit(ast::token::LitKind::Str, Symbol::intern(&test.path_str()), None);
+                    let key_token = ast::mk::ts_token(sp, ast::Spacing::Alone, key_lit);
+
+                    let arrow_token = ast::mk::ts_token(sp, ast::Spacing::Alone, ast::TokenKind::FatArrow);
+
+                    let value_lit = ast::TokenKind::lit(ast::token::LitKind::Integer, Symbol::intern(&distance.to_string()), None);
+                    let value_token = ast::mk::ts_token(sp, ast::Spacing::Alone, value_lit);
+
+                    let comma_token = ast::mk::ts_token(sp, ast::Spacing::Alone, ast::TokenKind::Comma);
+
+                    [key_token, arrow_token, value_token, comma_token]
+                })
+                .collect::<Vec<_>>();
+
+            ast::mk::expr(sp, ast::ExprKind::MacCall(ast::MacCall {
+                path: ast::mk::path_local(path::static_map(sp)),
+                args: P(ast::MacArgs::Delimited(
+                    ast::DelimSpan::from_single(sp),
+                    ast::MacDelimiter::Brace,
+                    ast::mk::token_stream(args_token_trees),
+                )),
+                prior_type_ascription: None,
+            }))
+        }),
+
         ast::mk::expr_struct_field(sp, Ident::new(*sym::undetected_diagnostic, sp), {
             ast::mk::expr_str(sp, &mutation.undetected_diagnostic(sess))
         }),

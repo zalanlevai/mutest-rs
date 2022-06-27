@@ -45,6 +45,7 @@ pub mod sym {
         substitutions,
         SubstMap,
         SubstMeta,
+        reachable_from,
         tests,
         undetected_diagnostic,
     }
@@ -101,6 +102,7 @@ pub mod path {
         mutations (crate::mutest_generated::mutations),
         MutationMeta (::mutest_runtime::MutationMeta),
         mutest_main_static (::mutest_runtime::mutest_main_static),
+        static_map (::mutest_runtime::static_map),
         SubstMap (crate::mutest_generated::SubstMap),
         SubstMeta (::mutest_runtime::SubstMeta),
         wrap (::mutest_runtime::wrap),

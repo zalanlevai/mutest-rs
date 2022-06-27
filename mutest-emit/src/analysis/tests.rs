@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use std::iter;
 
 use crate::codegen::ast;
@@ -25,6 +26,12 @@ impl Eq for Test {}
 impl PartialEq for Test {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
+    }
+}
+
+impl Hash for Test {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
     }
 }
 

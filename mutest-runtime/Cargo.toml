@@ -16,3 +16,4 @@ crate-type = ["rlib"]
 rustc_private = true
 
 [dependencies]
+phf = { version = "0.10", features = ["macros"], default-features = false }

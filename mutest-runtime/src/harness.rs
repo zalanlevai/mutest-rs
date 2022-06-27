@@ -88,7 +88,7 @@ fn clone_tests(tests: &Vec<test::TestDescAndFn>) -> Vec<test::TestDescAndFn> {
 }
 
 pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
-    let opts = match test::parse_opts(args) {
+    let mut opts = match test::parse_opts(args) {
         Some(Ok(o)) => o,
         Some(Err(msg)) => {
             eprintln!("error: {}", msg);
@@ -96,6 +96,8 @@ pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants:
         }
         None => return,
     };
+
+    opts.filter_exact = true;
 
     let mut all_test_runs_failed_successfully = true;
     let mut total_mutants_count = 0;
@@ -110,6 +112,8 @@ pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants:
         for mutation in mutant.mutations {
             println!("- {} at {}", mutation.display_name, mutation.display_location);
         }
+
+        opts.filters = mutant.mutations.iter().flat_map(|&m| m.reachable_from.entries().map(|(&test_path, _)| test_path.to_owned())).collect();
 
         match test::run_tests_console(&opts, clone_tests(&tests)) {
             Ok(all_tests_passed) => {

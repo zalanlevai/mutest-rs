@@ -351,7 +351,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
 pub struct Target<'tst> {
     pub def_id: hir::LocalDefId,
-    pub reachable_from: Vec<(&'tst Test, usize)>,
+    pub reachable_from: FxHashMap<&'tst Test, usize>,
     pub distance: usize,
 }
 
@@ -387,8 +387,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
             targets.entry(callee_def_id)
                 .and_modify(|target| {
                     for &test in &reachable_from {
-                        if target.reachable_from.iter().any(|&(t, _)| t == test) { continue; }
-                        target.reachable_from.push((test, distance));
+                        target.reachable_from.entry(test).or_insert(distance);
                     }
                 })
                 .or_insert_with(|| Target {
