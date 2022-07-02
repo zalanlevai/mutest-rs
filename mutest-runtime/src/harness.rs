@@ -1,10 +1,11 @@
+use std::collections::HashMap;
+use std::convert::Infallible;
 use std::env;
 use std::process::{self, Termination};
-use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
-use crate::metadata::MutantMeta;
+use crate::metadata::{MutantMeta, MutationMeta};
+use crate::test_runner;
 
 mod test {
     pub use ::test::*;
@@ -33,44 +34,14 @@ impl <S> ActiveMutantHandle<S> {
     }
 }
 
-fn execute_with_timeout<T, F>(test: F, timeout: Duration) -> T
-where
-    T: Termination + Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
-{
-    let (tx, rx) = mpsc::channel();
-
-    let handle = thread::Builder::new()
-        .name(format!("{} <wrapped>", thread::current().name().unwrap()))
-        .spawn(move || {
-            match tx.send(test()) {
-                Ok(()) => {}
-                Err(_) => {}
-            }
-        })
-        .unwrap();
-
-    let termination = rx.recv_timeout(timeout);
-
-    if handle.is_finished() {
-        match handle.join() {
-            Ok(_) => {}
-            Err(_) => panic!("wrapped thread panicked"),
-        }
-    }
-
-    match termination {
-        Ok(t) => t,
-        Err(_) => panic!("test timed out after {timeout:?}"),
-    }
-}
-
+// NOTE: `mutest_runtime::wrap` is currently a no-op test wrapper. The codegen for it was left intact if we ever need
+//       such functionality in the future.
 pub fn wrap<T, F>(test: F) -> T
 where
     T: Termination + Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    execute_with_timeout(test, Duration::from_millis(2000))
+    test()
 }
 
 const ERROR_EXIT_CODE: i32 = 101;
@@ -87,21 +58,59 @@ fn clone_tests(tests: &Vec<test::TestDescAndFn>) -> Vec<test::TestDescAndFn> {
     tests.iter().map(make_owned_test).collect()
 }
 
-pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
-    let mut opts = match test::parse_opts(args) {
-        Some(Ok(o)) => o,
-        Some(Err(msg)) => {
-            eprintln!("error: {}", msg);
-            process::exit(ERROR_EXIT_CODE);
+pub enum MutationTestResult {
+    Undetected,
+    Detected,
+    TimedOut,
+    Crashed,
+}
+
+fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static MutationMeta]) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
+    let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutations.len());
+
+    for &mutation in mutations {
+        results.insert(mutation.id, MutationTestResult::Undetected);
+    }
+
+    tests.retain(|test| mutations.iter().any(|m| m.reachable_from.contains_key(test.desc.name.as_slice())));
+
+    let on_test_event = |event| -> Result<_, Infallible> {
+        match event {
+            test_runner::TestEvent::Result(test) => {
+                let mutation = mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
+                    .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
+
+                match test.result {
+                    test_runner::TestResult::Ignored => {}
+                    test_runner::TestResult::Ok => {}
+
+                    | test_runner::TestResult::Failed
+                    | test_runner::TestResult::FailedMsg(_) => {
+                        results.insert(mutation.id, MutationTestResult::Detected);
+                    }
+
+                    test_runner::TestResult::TimedOut => {
+                        results.insert(mutation.id, MutationTestResult::TimedOut);
+                    }
+                }
+
+                if results.iter().all(|(_, result)| !matches!(result, MutationTestResult::Undetected)) {
+                    return Ok(test_runner::Flow::Stop);
+                }
+            }
+            _ => {}
         }
-        None => return,
+
+        Ok(test_runner::Flow::Continue)
     };
 
-    opts.filter_exact = true;
+    test_runner::run_tests(tests, on_test_event, Some(Duration::from_secs(2)), false)?;
 
+    Ok(results)
+}
+
+pub fn mutest_main<S>(_args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     let mut all_test_runs_failed_successfully = true;
-    let mut total_mutants_count = 0;
-    let mut undetected_mutants_count = 0;
     let mut total_mutations_count = 0;
     let mut undetected_mutations_count = 0;
 
@@ -112,40 +121,33 @@ pub fn mutest_main<S>(args: &[String], tests: Vec<test::TestDescAndFn>, mutants:
         for mutation in mutant.mutations {
             println!("- {} at {}", mutation.display_name, mutation.display_location);
         }
+        println!();
 
-        opts.filters = mutant.mutations.iter().flat_map(|&m| m.reachable_from.entries().map(|(&test_path, _)| test_path.to_owned())).collect();
-
-        match test::run_tests_console(&opts, clone_tests(&tests)) {
-            Ok(all_tests_passed) => {
-                total_mutants_count += 1;
+        match run_tests(clone_tests(&tests), mutant.mutations) {
+            Ok(results) => {
                 total_mutations_count += mutant.mutations.len();
 
-                if all_tests_passed {
-                    all_test_runs_failed_successfully = false;
-                    undetected_mutants_count += 1;
-                    undetected_mutations_count += mutant.mutations.len();
+                for &mutation in mutant.mutations {
+                    let Some(result) = results.get(&mutation.id) else { unreachable!() };
 
-                    for mutation in mutant.mutations {
-                        print!("{}", mutation.undetected_diagnostic);
+                    match result {
+                        MutationTestResult::Undetected => {
+                            all_test_runs_failed_successfully = false;
+
+                            undetected_mutations_count += 1;
+                            print!("{}", mutation.undetected_diagnostic);
+                        }
+
+                        | MutationTestResult::Detected
+                        | MutationTestResult::TimedOut
+                        | MutationTestResult::Crashed => {}
                     }
                 }
             }
-            Err(err) => {
-                eprintln!("error: io error: {:?}", err);
-                process::exit(ERROR_EXIT_CODE);
-            }
+            Err(_) => { process::exit(ERROR_EXIT_CODE); }
         }
     }
 
-    println!("mutants:   {score}. {detected} detected; {undetected} undetected; {total} total",
-        score = match total_mutants_count {
-            0 => "none".to_owned(),
-            _ => format!("{:.2}%", (total_mutants_count - undetected_mutants_count) as f64 / total_mutants_count as f64 * 100_f64),
-        },
-        detected = total_mutants_count - undetected_mutants_count,
-        undetected = undetected_mutants_count,
-        total = total_mutants_count,
-    );
     println!("mutations: {score}. {detected} detected; {undetected} undetected; {total} total",
         score = match total_mutations_count {
             0 => "none".to_owned(),
