@@ -121,6 +121,10 @@ impl SubstDef {
 
 pub trait Mutation {
     fn display_name(&self) -> String;
+
+    fn span_label(&self) -> String {
+        self.display_name()
+    }
 }
 
 pub trait Operator<'a>: Send + Sync {
@@ -185,7 +189,7 @@ impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
         let mut diagnostic = sess.struct_span_warn(self.location.span(), "the following mutation was not detected");
-        diagnostic.span_label(self.location.span(), &self.display_name());
+        diagnostic.span_label(self.location.span(), &self.mutation.span_label());
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
 }

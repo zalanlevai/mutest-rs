@@ -19,6 +19,16 @@ impl Mutation for RelationalOpEqSwapMutation {
             original_bin_op = self.original_bin_op.to_string(),
         )
     }
+
+    fn span_label(&self) -> String {
+        format!("{operation} relational operator",
+            operation = match self.replacement_bin_op {
+                ast::BinOpKind::Le | ast::BinOpKind::Ge => "add equality to",
+                ast::BinOpKind::Lt | ast::BinOpKind::Gt => "remove equality from",
+                _ => unreachable!(),
+            },
+        )
+    }
 }
 
 /// Include or remove the boundary (equality) of relational operators.

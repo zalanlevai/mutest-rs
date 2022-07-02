@@ -26,6 +26,16 @@ macro define_math_op_swap_mutation(
                 replacement_bin_op = self.replacement_bin_op.to_string(),
             )
         }
+
+        fn span_label(&self) -> String {
+            format!("swap math {expr_kind} for `{replacement_bin_op}`",
+                expr_kind = match self.is_assignment {
+                    true => "assignment operator",
+                    false => "operator",
+                },
+                replacement_bin_op = self.replacement_bin_op.to_string(),
+            )
+        }
     }
 
     $(#[$meta])*

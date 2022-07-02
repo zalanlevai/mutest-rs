@@ -15,6 +15,12 @@ impl Mutation for EqOpInvertMutation {
             replacement_bin_op = self.replacement_bin_op.to_string(),
         )
     }
+
+    fn span_label(&self) -> String {
+        format!("invert equality operator to `{replacement_bin_op}`",
+            replacement_bin_op = self.replacement_bin_op.to_string(),
+        )
+    }
 }
 
 /// Invert equlaity operators.

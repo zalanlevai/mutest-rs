@@ -23,6 +23,20 @@ impl Mutation for ContinueBreakSwapMutation {
             replacement_expr = display_expr(&self.replacement_expr),
         )
     }
+
+    fn span_label(&self) -> String {
+        let display_expr = |expr: &ast::ExprKind| match expr {
+            ast::ExprKind::Break(Some(label), _) => format!("break with label `{}`", label.ident),
+            ast::ExprKind::Break(None, _) => "break".to_owned(),
+            ast::ExprKind::Continue(Some(label)) => format!("continue with label `{}`", label.ident),
+            ast::ExprKind::Continue(None) => "continue".to_owned(),
+            _ => unreachable!(),
+        };
+
+        format!("swap for {replacement_expr}",
+            replacement_expr = display_expr(&self.replacement_expr),
+        )
+    }
 }
 
 /// Swap continue expressions for break expressions and vice versa.

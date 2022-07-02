@@ -16,6 +16,10 @@ impl Mutation for ArgDefaultShadowMutation {
             param = self.param_ident
         )
     }
+
+    fn span_label(&self) -> String {
+        "ignore argument by shadowing it with `Default::default()`".to_owned()
+    }
 }
 
 /// Replace the provided arguments of functions with `Default::default()` to check if each parameter

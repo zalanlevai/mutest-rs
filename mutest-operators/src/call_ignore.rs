@@ -40,6 +40,10 @@ impl Mutation for CallValueDefaultShadowMutation {
             callee = self.callee_path
         )
     }
+
+    fn span_label(&self) -> String {
+        "ignore return value of call by shadowing it with `Default::default()`".to_owned()
+    }
 }
 
 /// Replace the return value of function calls with `Default::default()` to test whether the return
@@ -100,6 +104,10 @@ impl Mutation for CallDeleteMutation {
         format!("delete call to `{callee}` and replace it with `Default::default()`",
             callee = self.callee_path
         )
+    }
+
+    fn span_label(&self) -> String {
+        "delete call and replace it with `Default::default()`".to_owned()
     }
 }
 
