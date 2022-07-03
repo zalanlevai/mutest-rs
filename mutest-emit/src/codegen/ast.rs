@@ -738,8 +738,45 @@ pub mod mk {
 }
 
 pub mod inspect {
+    use std::iter;
+
     use rustc_ast as ast;
     use rustc_span::Symbol;
+
+    pub fn match_attr_name(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
+        let ast::AttrKind::Normal(attr_item, _) = &attr.kind else { return false; };
+        match (tool, &attr_item.path.segments[..]) {
+            (None, [path_name]) => path_name.ident.name == name,
+            (Some(tool), [path_tool, path_name]) => path_tool.ident.name == tool && path_name.ident.name == name,
+            _ => false,
+        }
+    }
+
+    pub fn is_word_attr(attr: &ast::Attribute, tool: Option<Symbol>, word: Symbol) -> bool {
+        let Some(ast::MetaItemKind::Word) = attr.meta_kind() else { return false; };
+        match_attr_name(attr, tool, word)
+    }
+
+    pub fn is_name_value_attr(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::Lit) -> bool {
+        let Some(ast::MetaItemKind::NameValue(lit)) = attr.meta_kind() else { return false; };
+        match_attr_name(attr, tool, name) && lit.kind == value.kind
+    }
+
+    pub fn is_list_attr_with_path(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, path: &ast::Path) -> bool {
+        let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
+        match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {
+            let Some(ast::MetaItem { path: meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item.meta_item() else { return false };
+            iter::zip(&meta_path.segments, &path.segments).all(|(a, b)| a.ident.name == b.ident.name)
+        })
+    }
+
+    pub fn is_list_attr_with_ident(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, ident: Symbol) -> bool {
+        let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
+        match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {
+            let Some(ast::MetaItem { path: meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item.meta_item() else { return false };
+            meta_path.segments.len() == 1 && meta_path.segments[0].ident.name == ident
+        })
+    }
 
     pub fn is_extern_crate_decl(item: &ast::Item, sym: Symbol) -> bool {
         if let ast::ItemKind::ExternCrate(..) = item.kind {
