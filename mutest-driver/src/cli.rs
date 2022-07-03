@@ -26,6 +26,10 @@ pub fn command() -> clap::Command<'static> {
             .arg(clap::arg!(-V --version "Print version information."))
         )
         // Arguments
+        .arg(clap::arg!(--safe "Avoid mutating code in contexts which contain `unsafe` blocks.").display_order(100))
+        .arg(clap::arg!(--cautious "Produce unsafe mutations in contexts which contain `unsafe` blocks.").display_order(100))
+        .arg(clap::arg!(--unsafe "Mutate code in `unsafe` blocks.").display_order(100))
+        .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "unsafe"]).multiple(false))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").validator(str::parse::<usize>).display_order(100))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").validator(str::parse::<usize>).display_order(100))
         // Information

@@ -174,6 +174,7 @@ pub struct Mut<'hir, 'trg, 'm> {
     pub id: MutId,
     pub target: &'trg Target<'trg>,
     pub location: OwnedMutLoc<'hir>,
+    pub is_in_unsafe_block: bool,
     pub mutation: BoxedMutation<'m>,
     pub substs: SmallVec<[SubstDef; 1]>,
 }
@@ -192,6 +193,10 @@ impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
         diagnostic.span_label(self.location.span(), &self.mutation.span_label());
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
+
+    pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
+        self.is_in_unsafe_block || self.target.is_unsafe(unsafe_targeting)
+    }
 }
 
 impl<'hir, 'trg, 'm> Eq for Mut<'hir, 'trg, 'm> {}
@@ -207,13 +212,39 @@ impl<'hir, 'trg, 'm> Hash for Mut<'hir, 'trg, 'm> {
     }
 }
 
+/// | Flag       | UnsafeTargeting | `unsafe fn` | `unsafe {}` | `{ unsafe {} }` | `{}` |
+/// | ---------- | --------------- | ----------- | ----------- | --------------- | ---- |
+/// | --safe     | None            |             |             |                 | M    |
+/// | (default)  | Context         |             |             | M               | M    |
+/// | --cautious | UnsafeContext   |             |             | unsafe M        | M    |
+/// | --unsafe   | Block           | unsafe M    | unsafe M    | M               | M    |
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnsafeTargeting {
+    None,
+    Context,
+    UnsafeContext,
+    Block,
+}
+
+impl UnsafeTargeting {
+    pub fn inner(&self) -> bool {
+        matches!(self, Self::Block)
+    }
+
+    pub fn outer(&self) -> bool {
+        matches!(self, Self::Block | Self::Context | Self::UnsafeContext)
+    }
+}
+
 struct MutationCollector<'ast, 'tcx, 'r, 'op, 'trg, 'm> {
     pub operators: Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
     pub resolver: &'op Resolver<'r>,
     pub def_site: Span,
+    pub unsafe_targeting: UnsafeTargeting,
     pub target: Option<&'trg Target<'trg>>,
     pub current_fn: Option<LoweredFn<'ast, 'tcx>>,
+    pub is_in_unsafe_block: bool,
     pub next_mut_index: u32,
     pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
 }
@@ -233,6 +264,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
                     id: MutId($self.next_mut_index),
                     target: $self.target.expect("attempted to collect mutations without a target"),
                     location: mcx.location.into_owned(),
+                    is_in_unsafe_block: $self.is_in_unsafe_block,
                     mutation,
                     substs,
                 });
@@ -314,8 +346,12 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         if !self.tcx.sess.source_map().is_local_span(block_ast.span) { return; };
+        if !self.unsafe_targeting.inner() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
 
+        let is_in_unsafe_block = self.is_in_unsafe_block;
+        if let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { self.is_in_unsafe_block = true; }
         ast_lowering::visit::walk_block(self, block_ast, block_hir);
+        if let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { self.is_in_unsafe_block = is_in_unsafe_block; }
     }
 
     fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
@@ -353,10 +389,64 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Unsafety {
+    None,
+    Decl,
+    Body,
+}
+
+impl Unsafety {
+    pub fn inner(&self) -> bool {
+        matches!(self, Self::Body)
+    }
+
+    pub fn any(&self) -> bool {
+        matches!(self, Self::Decl | Self::Body)
+    }
+}
+
+struct BodyUnsafetyChecker {
+    unsafety: Option<Unsafety>,
+}
+
+impl<'ast> ast::visit::Visitor<'ast> for BodyUnsafetyChecker {
+    fn visit_block(&mut self, block: &'ast ast::Block) {
+        if let ast::BlockCheckMode::Unsafe(ast::UnsafeSource::UserProvided) = block.rules {
+            self.unsafety = Some(Unsafety::Body);
+            return;
+        }
+
+        ast::visit::walk_block(self, block);
+    }
+}
+
+fn check_target_unsafety<'ast>(item: AstDefItem<'ast>) -> Unsafety {
+    let ast::ItemKind::Fn(target_fn) = item.kind() else { return Unsafety::None };
+
+    let ast::Unsafe::No = target_fn.sig.header.unsafety else { return Unsafety::Decl };
+
+    let Some(target_body) = target_fn.body else { return Unsafety::None };
+    let mut checker = BodyUnsafetyChecker { unsafety: None };
+    checker.visit_block(&target_body);
+    checker.unsafety.unwrap_or(Unsafety::None)
+}
+
 pub struct Target<'tst> {
     pub def_id: hir::LocalDefId,
+    pub unsafety: Unsafety,
     pub reachable_from: FxHashMap<&'tst Test, usize>,
     pub distance: usize,
+}
+
+impl<'tst> Target<'tst> {
+    pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
+        matches!((unsafe_targeting, self.unsafety),
+            | (_, Unsafety::Decl)
+            | (UnsafeTargeting::None, Unsafety::Body)
+            | (UnsafeTargeting::UnsafeContext, Unsafety::Body)
+        )
+    }
 }
 
 pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
@@ -396,6 +486,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
                 })
                 .or_insert_with(|| Target {
                     def_id: callee_def_id,
+                    unsafety: check_target_unsafety(callee_def_item),
                     reachable_from: reachable_from.iter().map(|&test| (test, distance)).collect(),
                     distance,
                 });
@@ -424,7 +515,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>) -> Vec<Mut<'tcx, 'trg, 'm>> {
+pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting) -> Vec<Mut<'tcx, 'trg, 'm>> {
     let expn_id = resolver.expansion_for_ast_pass(
         DUMMY_SP,
         AstPass::TestHarness,
@@ -438,14 +529,20 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolve
         tcx,
         resolver,
         def_site,
+        unsafe_targeting,
         target: None,
         current_fn: None,
+        is_in_unsafe_block: false,
         next_mut_index: 1,
         mutations: vec![],
     };
 
     for target in targets {
+        if unsafe_targeting == UnsafeTargeting::None && target.unsafety.any() { continue; }
+        if !unsafe_targeting.inner() && target.unsafety == Unsafety::Decl { continue; }
+
         collector.target = Some(target);
+        collector.is_in_unsafe_block = target.unsafety == Unsafety::Decl;
 
         let Some(target_item) = ast_lowering::find_def_in_ast(tcx, target.def_id, krate) else { continue; };
 
@@ -479,7 +576,7 @@ pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
     !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
 }
 
-pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize, unsafe_targeting: UnsafeTargeting) -> Vec<Mutant<'tcx, 'trg, 'm>> {
     let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
 
     'mutation: for mutation in mutations {
@@ -491,6 +588,9 @@ pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, muta
                     continue 'mutant;
                 }
             }
+
+            if mutation.is_unsafe(unsafe_targeting) { break 'mutant; }
+            if mutant.mutations.iter().any(|m| m.is_unsafe(unsafe_targeting)) { continue 'mutant; }
 
             if mutant.mutations.iter().any(|m| conflicting_targets(m.target, mutation.target)) {
                 continue 'mutant;

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 use mutest_driver::config::{self, Config};
+use mutest_emit::codegen::mutation::UnsafeTargeting;
 use rustc_interface::Config as CompilerConfig;
 
 struct DefaultCallbacks;
@@ -124,6 +125,13 @@ pub fn main() {
             _ => unreachable!(),
         };
 
+        let unsafe_targeting = match () {
+            _ if mutest_arg_matches.is_present("safe") => UnsafeTargeting::None,
+            _ if mutest_arg_matches.is_present("cautious") => UnsafeTargeting::UnsafeContext,
+            _ if mutest_arg_matches.is_present("unsafe") => UnsafeTargeting::Block,
+            _ => UnsafeTargeting::Context,
+        };
+
         let mutation_depth = mutest_arg_matches.value_of_t("depth").unwrap();
         let mutant_max_mutations_count = mutest_arg_matches.value_of_t("mutant-batch-size").unwrap();
 
@@ -133,6 +141,7 @@ pub fn main() {
             mutest_search_path,
             opts: config::Options {
                 mode,
+                unsafe_targeting,
                 operators: &[
                     &mutest_operators::ArgDefaultShadow,
                     &mutest_operators::BitOpOrAndSwap,

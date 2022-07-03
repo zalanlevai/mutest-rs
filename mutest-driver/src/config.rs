@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use mutest_emit::codegen::mutation::Operators;
+use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_interface::Config as CompilerConfig;
 
 pub enum Mode {
@@ -11,6 +11,7 @@ pub enum Mode {
 
 pub struct Options<'op, 'm> {
     pub mode: Mode,
+    pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub mutation_depth: usize,
     pub mutant_max_mutations_count: usize,
