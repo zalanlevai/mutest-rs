@@ -29,6 +29,8 @@ impl<'a> Operator<'a> for BoolExprNegate {
 
         let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
 
+        if let ast::ExprKind::Let(_, _, _) = expr.ast.kind { return None; };
+
         let typeck = tcx.typeck_body(f.hir.body.id());
 
         let expr_ty = typeck.expr_ty(expr.hir);
