@@ -4,7 +4,7 @@ use rustc_middle::ty;
 use rustc_middle::ty::print::Printer;
 use rustc_infer::infer::TyCtxtInferExt;
 
-use crate::analysis::hir;
+use crate::analysis::hir::{self, LOCAL_CRATE};
 use crate::codegen::ast::{self, P};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, sym, kw};
 
@@ -271,8 +271,13 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
     }
 
     fn path_crate(self, cnum: hir::CrateNum) -> Result<Self::Path, Self::Error> {
-        let crate_name = self.tcx.crate_name(cnum);
-        Ok(ast::mk::path_ident(self.sp, Ident::new(crate_name, self.sp)))
+        match cnum {
+            LOCAL_CRATE => Ok(ast::mk::path_ident(self.sp, Ident::new(kw::Crate, self.sp))),
+            _ => {
+                let crate_name = self.tcx.crate_name(cnum);
+                Ok(ast::mk::path_ident(self.sp, Ident::new(crate_name, self.sp)))
+            }
+        }
     }
 
     fn path_qualified(self, self_ty: Ty<'tcx>, trait_ref: Option<ty::TraitRef<'tcx>>) -> Result<Self::Path, Self::Error> {
