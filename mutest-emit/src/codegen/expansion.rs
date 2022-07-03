@@ -15,8 +15,13 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(libstd_thread_internals)]
 
 #![feature(box_syntax)]
+#![feature(core_intrinsics)]
 #![feature(core_panic)]
+#![feature(derive_clone_copy)]
+#![feature(derive_eq)]
+#![feature(no_coverage)]
 #![feature(rustc_private)]
+#![feature(structural_match)]
 "#;
 
 pub const GENERATED_CODE_CRATE_REFS: &str = r#"
