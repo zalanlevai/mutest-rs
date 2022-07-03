@@ -6,7 +6,7 @@ use rustc_infer::infer::TyCtxtInferExt;
 
 use crate::analysis::hir::{self, LOCAL_CRATE};
 use crate::codegen::ast::{self, P};
-use crate::codegen::symbols::{DUMMY_SP, Ident, Span, sym, kw};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
 pub fn impls_trait_params<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId) -> bool {
     tcx.infer_ctxt().enter(|infcx| {
@@ -195,44 +195,73 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
 
         match ct.val() {
             ty::ConstKind::Value(rustc_const_eval::interpret::ConstValue::Scalar(scalar)) => {
-                if let Ok(v) = scalar.to_bool() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Bool(v)).into_inner().kind));
+                match ct.ty().kind() {
+                    ty::TyKind::Bool => {
+                        scalar.to_bool().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Bool(v)).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid bool const: {e}"))
+                    }
+                    ty::TyKind::Char => {
+                        scalar.to_char().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Char(v)).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid char const: {e}"))
+                    }
+                    ty::TyKind::Int(ty::IntTy::I8) => {
+                        scalar.to_i8().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I8))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid i8 const: {e}"))
+                    }
+                    ty::TyKind::Int(ty::IntTy::I16) => {
+                        scalar.to_i16().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I16))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid i16 const: {e}"))
+                    }
+                    ty::TyKind::Int(ty::IntTy::I32) => {
+                        scalar.to_i32().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I32))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid i32 const: {e}"))
+                    }
+                    ty::TyKind::Int(ty::IntTy::I64) => {
+                        scalar.to_i64().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I64))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid i64 const: {e}"))
+                    }
+                    ty::TyKind::Int(ty::IntTy::I128) => {
+                        scalar.to_i128().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I128))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid i128 const: {e}"))
+                    }
+                    ty::TyKind::Int(ty::IntTy::Isize) => {
+                        scalar.to_machine_isize(&self.tcx).map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::Isize))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid isize const: {e}"))
+                    }
+                    ty::TyKind::Uint(ty::UintTy::U8) => {
+                        scalar.to_u8().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U8))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid u8 const: {e}"))
+                    }
+                    ty::TyKind::Uint(ty::UintTy::U16) => {
+                        scalar.to_u16().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U16))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid u16 const: {e}"))
+                    }
+                    ty::TyKind::Uint(ty::UintTy::U32) => {
+                        scalar.to_u32().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U32))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid u32 const: {e}"))
+                    }
+                    ty::TyKind::Uint(ty::UintTy::U64) => {
+                        scalar.to_u64().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U64))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid u64 const: {e}"))
+                    }
+                    ty::TyKind::Uint(ty::UintTy::U128) => {
+                        scalar.to_u128().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U128))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid u128 const: {e}"))
+                    }
+                    ty::TyKind::Uint(ty::UintTy::Usize) => {
+                        scalar.to_machine_usize(&self.tcx).map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::Usize))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid usize const: {e}"))
+                    }
+                    ty::TyKind::Float(ty::FloatTy::F32) => {
+                        scalar.to_f32().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Float(Symbol::intern(&v.to_string()), ast::LitFloatType::Suffixed(ast::FloatTy::F32))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid f32 const: {e}"))
+                    }
+                    ty::TyKind::Float(ty::FloatTy::F64) => {
+                        scalar.to_f64().map(|v| ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Float(Symbol::intern(&v.to_string()), ast::LitFloatType::Suffixed(ast::FloatTy::F64))).into_inner().kind))
+                            .map_err(|e| format!("encountered invalid f64 const: {e}"))
+                    }
+                    _ => Err("encountered unknown constant scalar value".to_owned())
                 }
-                if let Ok(v) = scalar.to_char() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Char(v)).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_i8() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I8))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_i16() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I16))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_i32() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I32))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_i64() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I64))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_i128() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Signed(ast::IntTy::I128))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_u8() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U8))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_u16() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U16))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_u32() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U32))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_u64() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U64))).into_inner().kind));
-                }
-                if let Ok(v) = scalar.to_u128() {
-                    return Ok(ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::LitKind::Int(v as u128, ast::LitIntType::Unsigned(ast::UintTy::U128))).into_inner().kind));
-                }
-
-                Err("encountered unknown constant scalar value".to_owned())
             }
             ty::ConstKind::Value(rustc_const_eval::interpret::ConstValue::Slice { .. }) => Err("encountered slice constant value".to_owned()),
             ty::ConstKind::Value(rustc_const_eval::interpret::ConstValue::ByRef { .. }) => Err("encountered ref constant value".to_owned()),
