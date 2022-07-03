@@ -79,6 +79,9 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
+                    // HACK: See below.
+                    mutest_emit::codegen::expansion::insert_generated_code_crate_refs(resolver, &mut generated_crate_ast);
+
                     // Clean up the generated test harness's invalid AST.
                     mutest_emit::codegen::tests::clean_up_test_cases(&tests, &mut generated_crate_ast);
                     mutest_emit::codegen::tests::clean_entry_points(&mut generated_crate_ast);
@@ -92,12 +95,11 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 Flow::Continue(())
             })?;
 
-            // HACK: The generated code is currently based on the expanded AST and contains
-            //       references to the internals of macro expansions. These are patched over using a
-            //       static attribute prelude and a static set of crate references.
-            let generated_crate_code = format!("{prelude}\n{code}\n{crate_refs}",
+            // HACK: The generated code is currently based on the expanded AST and contains references to the internals
+            //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
+            //       set of crate references (above).
+            let generated_crate_code = format!("{prelude}\n{code}",
                 prelude = mutest_emit::codegen::expansion::GENERATED_CODE_PRELUDE,
-                crate_refs = mutest_emit::codegen::expansion::GENERATED_CODE_CRATE_REFS,
                 code = rustc_ast_pretty::pprust::print_crate(
                     sess.source_map(),
                     &generated_crate_ast,

@@ -736,3 +736,18 @@ pub mod mk {
         ast::tokenstream::TokenStream::new(token_trees)
     }
 }
+
+pub mod inspect {
+    use rustc_ast as ast;
+    use rustc_span::Symbol;
+
+    pub fn is_extern_crate_decl(item: &ast::Item, sym: Symbol) -> bool {
+        if let ast::ItemKind::ExternCrate(..) = item.kind {
+            if item.ident.name == sym {
+                return true;
+            }
+        }
+
+        false
+    }
+}

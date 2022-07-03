@@ -23,22 +23,12 @@ fn unambiguous_test_item_ident(ident: &Ident) -> Ident {
     Ident::new(symbol, ident.span)
 }
 
-fn is_extern_crate_decl(item: &ast::Item, sym: Symbol) -> bool {
-    if let ast::ItemKind::ExternCrate(..) = item.kind {
-        if item.ident.name == sym {
-            return true;
-        }
-    }
-
-    false
-}
-
 fn dedupe_extern_crate_decls(items: &mut Vec<P<ast::Item>>, sym: Symbol) -> Option<P<ast::Item>> {
-    let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| is_extern_crate_decl(item, sym)) else { return None; };
+    let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| ast::inspect::is_extern_crate_decl(item, sym)) else { return None; };
 
     let mut i = first_extern_crate_index + 1;
     while let Some(item) = items.get(i) {
-        if !is_extern_crate_decl(item, sym) {
+        if !ast::inspect::is_extern_crate_decl(item, sym) {
             i += 1;
             continue;
         }

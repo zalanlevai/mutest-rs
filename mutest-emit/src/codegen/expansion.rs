@@ -1,3 +1,10 @@
+use rustc_expand::base::ResolverExpand;
+use rustc_resolve::Resolver;
+
+use crate::codegen::ast;
+use crate::codegen::symbols::{DUMMY_SP, sym};
+use crate::codegen::symbols::hygiene::AstPass;
+
 pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![allow(unused_features)]
 #![allow(unused_imports)]
@@ -24,6 +31,17 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(structural_match)]
 "#;
 
-pub const GENERATED_CODE_CRATE_REFS: &str = r#"
-extern crate alloc;
-"#;
+pub fn insert_generated_code_crate_refs(resolver: &mut Resolver, krate: &mut ast::Crate) {
+    let expn_id = resolver.expansion_for_ast_pass(
+        DUMMY_SP,
+        AstPass::StdImports,
+        &[sym::rustc_attrs],
+        None,
+    );
+    let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
+
+    // extern crate alloc;
+    if !krate.items.iter().any(|item| ast::inspect::is_extern_crate_decl(item, sym::alloc)) {
+        krate.items.push(ast::mk::item_extern_crate(def_site, sym::alloc, None));
+    }
+}
