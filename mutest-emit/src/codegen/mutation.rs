@@ -16,6 +16,7 @@ use crate::analysis::tests::Test;
 use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast::{self, P};
 use crate::codegen::ast::visit::Visitor;
+use crate::codegen::attr;
 use crate::codegen::substitution::conflicting_substs;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
@@ -484,18 +485,20 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
 
             let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, callee_def_id, krate) else { continue; };
 
-            targets.entry(callee_def_id)
-                .and_modify(|target| {
-                    for &test in &reachable_from {
-                        target.reachable_from.entry(test).or_insert(distance);
-                    }
-                })
-                .or_insert_with(|| Target {
-                    def_id: callee_def_id,
-                    unsafety: check_target_unsafety(callee_def_item),
-                    reachable_from: reachable_from.iter().map(|&test| (test, distance)).collect(),
-                    distance,
-                });
+            if !attr::skip(tcx.hir().attrs(tcx.hir().local_def_id_to_hir_id(callee_def_id))) {
+                targets.entry(callee_def_id)
+                    .and_modify(|target| {
+                        for &test in &reachable_from {
+                            target.reachable_from.entry(test).or_insert(distance);
+                        }
+                    })
+                    .or_insert_with(|| Target {
+                        def_id: callee_def_id,
+                        unsafety: check_target_unsafety(callee_def_item),
+                        reachable_from: reachable_from.iter().map(|&test| (test, distance)).collect(),
+                        distance,
+                    });
+            }
 
             if distance < depth {
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));

@@ -16,3 +16,10 @@ pub fn register(krate: &mut ast::Crate) {
     krate.attrs.push(feature_register_tool_attr);
     krate.attrs.push(register_tool_mutest_attr);
 }
+
+pub fn skip<'tcx, I>(attrs: I) -> bool
+where
+    I: IntoIterator<Item = &'tcx ast::Attribute>,
+{
+    attrs.into_iter().any(|attr| ast::inspect::is_word_attr(attr, Some(*sym::mutest), sym::skip))
+}
