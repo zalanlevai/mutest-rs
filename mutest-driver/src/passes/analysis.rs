@@ -57,6 +57,26 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                     let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
                     let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count, opts.unsafe_targeting);
+                    if let config::Mode::PrintMutants = opts.mode {
+                        for mutant in &mutants {
+                            match mutant.mutations.len() {
+                                1 => println!("1 mutation"),
+                                _ => println!("{} mutations", mutant.mutations.len()),
+                            };
+
+                            for mutation in &mutant.mutations {
+                                println!("  - {unsafe_marker}{display_name} in {def_path} at {span:#?}",
+                                    unsafe_marker = mutation.is_unsafe(opts.unsafe_targeting).then_some(format!("[unsafe] ")).unwrap_or_default(),
+                                    display_name = mutation.display_name(),
+                                    def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
+                                    span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(mutation.target.def_id)),
+                                );
+                            }
+                        }
+
+                        return Flow::Break;
+                    }
+
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
                     // Clean up the generated test harness's invalid AST.

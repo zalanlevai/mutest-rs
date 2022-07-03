@@ -5,6 +5,7 @@ use rustc_interface::Config as CompilerConfig;
 
 pub enum Mode {
     PrintMutationTargets,
+    PrintMutants,
     PrintCode,
     Build,
 }

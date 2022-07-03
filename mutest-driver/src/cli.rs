@@ -5,8 +5,15 @@ pub fn command() -> clap::Command<'static> {
         .arg_required_else_help(true)
         // Subcommands
         .subcommand(clap::Command::new("print-targets")
-            .display_order(3)
+            .display_order(4)
             .about("Print list of functions targeted for mutation at the specified depth.")
+            // Information
+            .arg(clap::arg!(-h --help "Print help information."))
+            .arg(clap::arg!(-V --version "Print version information."))
+        )
+        .subcommand(clap::Command::new("print-mutants")
+            .display_order(3)
+            .about("Print list of generated mutations, grouped into mutant batches.")
             // Information
             .arg(clap::arg!(-h --help "Print help information."))
             .arg(clap::arg!(-V --version "Print version information."))

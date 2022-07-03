@@ -120,6 +120,7 @@ pub fn main() {
 
         let mode = match mutest_arg_matches.subcommand() {
             Some(("print-targets", _)) => config::Mode::PrintMutationTargets,
+            Some(("print-mutants", _)) => config::Mode::PrintMutants,
             Some(("print-code", _)) => config::Mode::PrintCode,
             Some(("build", _)) => config::Mode::Build,
             _ => unreachable!(),
