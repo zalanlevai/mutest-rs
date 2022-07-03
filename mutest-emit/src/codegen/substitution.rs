@@ -196,6 +196,21 @@ impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
     fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
         ast::mut_visit::noop_visit_expr(expr, self);
 
+        match &mut expr.kind {
+            // The AST printer does not print the field name, only the expression, when using shorthand syntax. This
+            // happens even if the field's expression is not an ident matching the field's name, resulting in malformed
+            // code. To counter this, we force the printer to not use shorthand syntax when the field's expression is
+            // substituted.
+            ast::ExprKind::Struct(struct_expr) => {
+                for field in &mut struct_expr.fields {
+                    if self.substitutions.contains_key(&SubstLoc::Replace(field.id)) {
+                        field.is_shorthand = false;
+                    }
+                }
+            }
+            _ => {}
+        }
+
         let expr_id = expr.id;
 
         if let Some(_insertions_before) = self.substitutions.remove(&SubstLoc::InsertBefore(expr_id)) {
