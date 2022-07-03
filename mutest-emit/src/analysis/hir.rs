@@ -13,7 +13,7 @@ mod inlined {
         pub span: Span,
         pub ident: Ident,
         pub kind: hir::intravisit::FnKind<'hir>,
-        pub vis_span: Span,
+        pub vis_span: Option<Span>,
         pub generics: &'hir hir::Generics<'hir>,
         pub sig: &'hir hir::FnSig<'hir>,
         pub body: &'hir hir::Body<'hir>,

@@ -286,13 +286,19 @@ impl<'ast, 'tcx, 'r, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollec
                 let hir::ItemKind::Fn(sig, generics, body) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header);
-                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span, sig, generics, body }
+                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
+            }
+            hir::Node::TraitItem(&hir::TraitItem { def_id, span, ident, ref generics, ref kind }) => {
+                let hir::TraitItemKind::Fn(sig, hir::TraitFn::Provided(body)) = kind else { unreachable!(); };
+                let body = self.tcx.hir().body(*body);
+                let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
+                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body }
             }
             hir::Node::ImplItem(&hir::ImplItem { def_id, span, vis_span, ident, ref generics, ref kind }) => {
                 let hir::ImplItemKind::Fn(sig, body) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
-                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span, sig, generics, body }
+                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
             }
             _ => unreachable!(),
         };
