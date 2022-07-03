@@ -137,6 +137,8 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
         track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
     }));
 
+    compiler_config.crate_cfg.insert(("mutest".to_owned(), None));
+
     compiler_config
 }
 

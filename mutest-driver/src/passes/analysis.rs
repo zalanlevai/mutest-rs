@@ -22,7 +22,15 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
             let sess = compiler.session();
 
-            let _crate_ast = queries.parse()?.peek().clone();
+            let mut _crate_ast = {
+                // NOTE: We must register our custom tool attribute namespace before the relevant attribute validation
+                //       is performed during macro expansion. The mutable reference to the AST must be dropped before
+                //       any further queries are performed.
+                let mut crate_ast = queries.parse()?.peek_mut();
+                mutest_emit::codegen::attr::register(&mut crate_ast);
+                crate_ast.clone()
+            };
+
             let (expanded_crate_ast, resolver, _lint_store) = queries.expansion()?.peek().clone();
 
             let tests = mutest_emit::analysis::tests::collect_tests(&expanded_crate_ast);
