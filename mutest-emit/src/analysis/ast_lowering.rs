@@ -371,7 +371,12 @@ pub mod visit {
                 // TODO: Visit anonymous const
             }
             (ast::ExprKind::Try(expr_ast), hir::ExprKind::Match(expr_hir, _, hir::MatchSource::TryDesugar)) => {
-                visit_matching_expr(visitor, expr_ast, expr_hir);
+                if let hir::ExprKind::Call(path_expr_hir, [expr_hir]) = &expr_hir.kind
+                    && let hir::ExprKind::Path(qpath_hir) = &path_expr_hir.kind
+                    && let hir::QPath::LangItem(lang_item_hir, _, _) = qpath_hir && *lang_item_hir == hir::LangItem::TryTraitBranch
+                {
+                    visit_matching_expr(visitor, expr_ast, expr_hir);
+                }
             }
             (ast::ExprKind::Yield(expr_ast), hir::ExprKind::Yield(expr_hir, _)) => {
                 if let Some(expr_ast) = expr_ast {
