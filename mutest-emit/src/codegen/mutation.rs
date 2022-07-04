@@ -336,6 +336,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
     fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {
         if !self.tcx.sess.source_map().is_local_span(param_ast.span) { return; };
+        if attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
             let lowered_param = Lowered { ast: param_ast, hir: param_hir };
@@ -353,6 +354,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         if !self.tcx.sess.source_map().is_local_span(block_ast.span) { return; };
+        if attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
         if !self.unsafe_targeting.inner() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
 
         let is_in_unsafe_block = self.is_in_unsafe_block;
@@ -363,6 +365,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
     fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
         if !self.tcx.sess.source_map().is_local_span(stmt_ast.span) { return; };
+        if attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
             let lowered_stmt = Lowered { ast: stmt_ast, hir: stmt_hir };
@@ -380,6 +383,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
     fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
         if !self.tcx.sess.source_map().is_local_span(expr_ast.span) { return; };
+        if attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
             let lowered_expr = Lowered { ast: expr_ast, hir: expr_hir };

@@ -17,6 +17,13 @@ pub fn register(krate: &mut ast::Crate) {
     krate.attrs.push(register_tool_mutest_attr);
 }
 
+pub fn ignore<'tcx, I>(attrs: I) -> bool
+where
+    I: IntoIterator<Item = &'tcx ast::Attribute>,
+{
+    attrs.into_iter().any(|attr| ast::inspect::is_word_attr(attr, Some(*sym::mutest), sym::ignore))
+}
+
 pub fn skip<'tcx, I>(attrs: I) -> bool
 where
     I: IntoIterator<Item = &'tcx ast::Attribute>,
