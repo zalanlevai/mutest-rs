@@ -1,8 +1,9 @@
 pub use rustc_middle::ty::*;
 
+use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::ty;
 use rustc_middle::ty::print::Printer;
-use rustc_infer::infer::TyCtxtInferExt;
+use rustc_target::spec::abi::Abi;
 
 use crate::analysis::hir::{self, LOCAL_CRATE};
 use crate::codegen::ast::{self, P};
@@ -125,7 +126,16 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
                         hir::Unsafety::Normal => ast::Unsafe::No,
                         hir::Unsafety::Unsafe => ast::Unsafe::Yes(sp),
                     },
-                    ext: ast::Extern::None,
+                    ext: match sig.abi {
+                        Abi::Rust => ast::Extern::Implicit,
+                        _ => ast::Extern::Explicit(ast::StrLit {
+                            span: sp,
+                            style: ast::StrStyle::Cooked,
+                            symbol: Symbol::intern(sig.abi.name()),
+                            symbol_unescaped: Symbol::intern(sig.abi.name()),
+                            suffix: None,
+                        }),
+                    },
                     generic_params: vec![],
                     decl: ast::mk::fn_decl(input_params, ast::FnRetTy::Ty(output_ty_ast)),
                     decl_span: DUMMY_SP,
