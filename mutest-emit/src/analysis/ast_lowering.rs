@@ -108,9 +108,15 @@ pub mod visit {
 
     pub fn walk_block<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         let block_ast_stmts = block_ast.stmts.iter()
-            .filter(|stmt| !matches!(stmt.kind, ast::StmtKind::Empty | ast::StmtKind::MacCall(_)));
+            // These nodes do not exist in the HIR.
+            .filter(|stmt| !matches!(stmt.kind, ast::StmtKind::Empty | ast::StmtKind::MacCall(_)))
+            // Some item nodes are incompatible across the AST and the HIR, so we skip visiting them.
+            .filter(|stmt| !matches!(stmt.kind, ast::StmtKind::Item(_)));
+        let block_hir_stmts = block_hir.stmts.iter()
+            // See above.
+            .filter(|stmt| !matches!(stmt.kind, hir::StmtKind::Item(_)));
 
-        for (stmt_ast, stmt_hir) in iter::zip(block_ast_stmts.clone(), block_hir.stmts) {
+        for (stmt_ast, stmt_hir) in iter::zip(block_ast_stmts.clone(), block_hir_stmts) {
             visitor.visit_stmt(stmt_ast, stmt_hir);
         }
 
