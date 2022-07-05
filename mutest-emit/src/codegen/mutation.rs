@@ -461,7 +461,7 @@ impl<'tst> Target<'tst> {
 }
 
 pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
-    let mut previously_found_callees: FxHashMap<(hir::LocalDefId, Option<ty::SubstsRef<'tcx>>), Vec<&'tst Test>> = Default::default();
+    let mut previously_found_callees: FxHashMap<(hir::LocalDefId, ty::SubstsRef<'tcx>), Vec<&'tst Test>> = Default::default();
 
     for test in tests {
         let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
@@ -472,6 +472,13 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
         for (callee, substs) in callees.drain() {
             let Some(callee_def_id) = callee.as_local() else { continue; };
 
+            let param_env = tcx.param_env(callee);
+            // Using the concrete type substitutions of this call, we resolve the corresponding definition instance. The
+            // type substitutions might take a different form at the resolved definition site, so we propagate them
+            // instead.
+            let instance = tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten();
+            let (callee_def_id, substs) = instance.and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs))).unwrap_or((callee_def_id, substs));
+
             previously_found_callees.entry((callee_def_id, substs))
                 .and_modify(|reachable_from| reachable_from.push(test))
                 .or_insert_with(|| vec![test]);
@@ -481,7 +488,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
 
     for distance in 0..depth {
-        let mut newly_found_callees: FxHashMap<(hir::LocalDefId, Option<ty::SubstsRef<'tcx>>), Vec<&'tst Test>> = Default::default();
+        let mut newly_found_callees: FxHashMap<(hir::LocalDefId, ty::SubstsRef<'tcx>), Vec<&'tst Test>> = Default::default();
 
         for ((callee_def_id, outer_substs), reachable_from) in previously_found_callees.drain() {
             let Some(body_id) = tcx.hir().get_by_def_id(callee_def_id).body_id() else { continue; };
@@ -511,9 +518,14 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
                     let Some(callee_def_id) = callee.as_local() else { continue; };
 
                     let param_env = tcx.param_env(callee);
-                    let instance = substs.or(outer_substs).and_then(|substs| tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten());
-
-                    let callee_def_id = instance.as_ref().map(ty::Instance::def_id).and_then(hir::DefId::as_local).unwrap_or(callee_def_id);
+                    // The type substitutions from the local, generic scope may still contain type parameters, so we
+                    // fold the bound type substitutions of the concrete invocation of the enclosing function into it.
+                    let substs = res::fold_substs(tcx, substs, outer_substs);
+                    // Using the concrete type substitutions of this call, we resolve the corresponding definition
+                    // instance. The type substitutions might take a different form at the resolved definition site, so
+                    // we propagate them instead.
+                    let instance = tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten();
+                    let (callee_def_id, substs) = instance.and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs))).unwrap_or((callee_def_id, substs));
 
                     newly_found_callees.entry((callee_def_id, substs))
                         .and_modify(|previously_reachable_from| previously_reachable_from.extend(reachable_from.clone()))

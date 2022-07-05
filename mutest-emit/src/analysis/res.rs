@@ -1,7 +1,7 @@
 use crate::analysis::hir;
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
-use crate::analysis::ty::{self, TyCtxt, TypeFoldable};
+use crate::analysis::ty::{self, Subst, TyCtxt};
 use crate::codegen::symbols::Symbol;
 
 pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
@@ -87,20 +87,15 @@ pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::
     }
 }
 
-pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<(hir::DefId, Option<ty::SubstsRef<'tcx>>)> {
+pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<(hir::DefId, ty::SubstsRef<'tcx>)> {
     match expr.kind {
         hir::ExprKind::Call(expr, _) => {
             let &ty::TyKind::FnDef(def_id, substs) = typeck.node_type(expr.hir_id).kind() else { return None; };
-            Some((def_id, Some(substs)))
+            Some((def_id, substs))
         }
         hir::ExprKind::MethodCall(_, _, _) => {
             let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) else { return None; };
-
-            let substs = match typeck.node_substs(expr.hir_id) {
-                substs if substs.needs_subst() => None,
-                substs => Some(substs),
-            };
-
+            let substs = typeck.node_substs(expr.hir_id);
             Some((def_id, substs))
         }
         _ => None,
@@ -109,7 +104,7 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
 
 struct CalleeCollector<'tcx> {
     typeck: &'tcx ty::TypeckResults<'tcx>,
-    callees: Vec<(hir::DefId, Option<ty::SubstsRef<'tcx>>)>,
+    callees: Vec<(hir::DefId, ty::SubstsRef<'tcx>)>,
 }
 
 impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
@@ -122,7 +117,7 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
     }
 }
 
-pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<(hir::DefId, Option<ty::SubstsRef<'tcx>>)> {
+pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<(hir::DefId, ty::SubstsRef<'tcx>)> {
     let typeck = tcx.typeck_body(body.id());
 
     let mut collector = CalleeCollector {
@@ -132,6 +127,10 @@ pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<(h
     collector.visit_body(body);
 
     collector.callees
+}
+
+pub fn fold_substs<'tcx>(tcx: TyCtxt<'tcx>, substs: ty::SubstsRef<'tcx>, outer_substs: ty::SubstsRef<'tcx>) -> ty::SubstsRef<'tcx> {
+    ty::EarlyBinder(substs).subst(tcx, outer_substs)
 }
 
 macro interned {
