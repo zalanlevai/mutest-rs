@@ -399,6 +399,11 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
             //        avoid generating leaking, malformed mutations.
             if let Some(_) = self.current_closure { return; }
 
+            // Ignore block expressions with only a single nested node, visit the nested node instead.
+            if let ast::ExprKind::Block(block_ast, _) = &expr_ast.kind && block_ast.stmts.len() == 1 {
+                return ast_lowering::visit::walk_expr(self, expr_ast, expr_hir);
+            }
+
             let lowered_expr = Lowered { ast: expr_ast, hir: expr_hir };
 
             register_mutations!(self, MutCtxt {
