@@ -245,6 +245,7 @@ struct MutationCollector<'ast, 'tcx, 'r, 'op, 'trg, 'm> {
     pub unsafe_targeting: UnsafeTargeting,
     pub target: Option<&'trg Target<'trg>>,
     pub current_fn: Option<LoweredFn<'ast, 'tcx>>,
+    pub current_closure: Option<hir::BodyId>,
     pub is_in_unsafe_block: bool,
     pub next_mut_index: u32,
     pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
@@ -339,6 +340,10 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
         if attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
+            // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
+            //        avoid generating leaking, malformed mutations.
+            if let Some(_) = self.current_closure { return; }
+
             let lowered_param = Lowered { ast: param_ast, hir: param_hir };
 
             register_mutations!(self, MutCtxt {
@@ -368,6 +373,10 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
         if attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
+            // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
+            //        avoid generating leaking, malformed mutations.
+            if let Some(_) = self.current_closure { return; }
+
             let lowered_stmt = Lowered { ast: stmt_ast, hir: stmt_hir };
 
             register_mutations!(self, MutCtxt {
@@ -386,6 +395,10 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
         if attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
+            // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
+            //        avoid generating leaking, malformed mutations.
+            if let Some(_) = self.current_closure { return; }
+
             let lowered_expr = Lowered { ast: expr_ast, hir: expr_hir };
 
             register_mutations!(self, MutCtxt {
@@ -396,7 +409,10 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
             });
         }
 
+        let current_closure = self.current_closure;
+        if let hir::ExprKind::Closure(_, _, body, _, _) = expr_hir.kind { self.current_closure = Some(body); }
         ast_lowering::visit::walk_expr(self, expr_ast, expr_hir);
+        if let hir::ExprKind::Closure(_, _, _, _, _) = expr_hir.kind { self.current_closure = current_closure; }
     }
 }
 
@@ -557,6 +573,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolve
         unsafe_targeting,
         target: None,
         current_fn: None,
+        current_closure: None,
         is_in_unsafe_block: false,
         next_mut_index: 1,
         mutations: vec![],
