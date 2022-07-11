@@ -22,6 +22,7 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(libstd_thread_internals)]
 
 #![feature(box_syntax)]
+#![feature(cfg_target_thread_local)]
 #![feature(core_intrinsics)]
 #![feature(core_panic)]
 #![feature(derive_clone_copy)]
@@ -29,6 +30,7 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(no_coverage)]
 #![feature(rustc_private)]
 #![feature(structural_match)]
+#![feature(thread_local)]
 "#;
 
 pub fn insert_generated_code_crate_refs(resolver: &mut Resolver, krate: &mut ast::Crate) {
