@@ -95,13 +95,14 @@ pub fn main() {
     }
 
     let primary_package = env::var("CARGO_PRIMARY_PACKAGE").is_ok();
+    let test_target = args.iter().any(|arg| arg.starts_with("--test"));
     let normal_rustc = args.iter().any(|arg| arg.starts_with("--print"));
 
     let mutest_args = (!rustc_wrapper)
         .then_some(args.iter().skip(1).map(ToOwned::to_owned).collect::<Vec<_>>().join(" "))
         .or_else(|| env::var("MUTEST_ARGS").ok());
 
-    if normal_rustc || !primary_package {
+    if normal_rustc || !primary_package || !test_target {
         process::exit(rustc_driver::catch_with_exit_code(|| {
             rustc_driver::RunCompiler::new(&args, &mut RustcCallbacks { mutest_args }).run()
         }));
