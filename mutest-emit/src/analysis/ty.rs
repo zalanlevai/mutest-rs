@@ -4,19 +4,34 @@ use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::ty;
 use rustc_middle::ty::print::Printer;
 use rustc_target::spec::abi::Abi;
+use rustc_trait_selection::infer::InferCtxtExt;
 
 use crate::analysis::hir::{self, LOCAL_CRATE};
 use crate::codegen::ast::{self, P};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
-pub fn impls_trait_params<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId) -> bool {
+pub fn impls_trait_with_env<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: &[ty::GenericArg<'tcx>]) -> bool {
+    let ty = tcx.erase_regions(ty);
+    if ty.has_escaping_bound_vars() { return false; }
+
+    let args = tcx.mk_substs(args.iter());
+
     tcx.infer_ctxt().enter(|infcx| {
-        rustc_trait_selection::traits::type_known_to_meet_bound_modulo_regions(&infcx, param_env, ty, trait_def_id, DUMMY_SP)
+        infcx.type_implements_trait(trait_def_id, ty, args, param_env).must_apply_modulo_regions()
     })
 }
 
-pub fn impls_trait<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId) -> bool {
-    impls_trait_params(tcx, ty::ParamEnv::empty(), ty, trait_def_id)
+pub fn impls_trait<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: &[ty::GenericArg<'tcx>]) -> bool {
+    impls_trait_with_env(tcx, ty::ParamEnv::empty(), ty, trait_def_id, args)
+}
+
+pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: &[ty::GenericArg<'tcx>], assoc_ty: Symbol) -> Option<Ty<'tcx>> {
+    tcx.associated_items(trait_def_id)
+        .find_by_name_and_kind(tcx, Ident::new(assoc_ty, DUMMY_SP), ty::AssocKind::Type, trait_def_id)
+        .and_then(|assoc_item| {
+            let proj = tcx.mk_projection(assoc_item.def_id, tcx.mk_substs_trait(ty, args));
+            tcx.try_normalize_erasing_regions(param_env, proj).ok()
+        })
 }
 
 #[derive(Clone, Copy)]

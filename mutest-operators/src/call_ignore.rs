@@ -21,7 +21,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, body: hir::BodyId, expr: &'tcx hir:
 
     let expr_ty = typeck.expr_ty(expr);
     if expr_ty == tcx.types.unit || expr_ty == tcx.types.never { return None; }
-    if !ty::impls_trait(tcx, expr_ty, res::traits::Default(tcx)) { return None; }
+    if !ty::impls_trait(tcx, expr_ty, res::traits::Default(tcx), &[]) { return None; }
 
     let Some((callee, _)) = res::callee(typeck, expr) else { return None; };
     if limit_scope_to_local_callees && !callee.is_local() { return None; }

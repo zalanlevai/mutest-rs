@@ -50,7 +50,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         let typeck = tcx.typeck_body(f.hir.body.id());
 
         let param_ty = typeck.pat_ty(param.hir.pat);
-        if !ty::impls_trait(tcx, param_ty, res::traits::Default(tcx)) { return None; }
+        if !ty::impls_trait(tcx, param_ty, res::traits::Default(tcx), &[]) { return None; }
 
         // Default::default();
         let default = ast::mk::expr_call_path(def, path::default(def), vec![]);
