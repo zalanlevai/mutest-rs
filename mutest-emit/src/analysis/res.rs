@@ -171,11 +171,32 @@ macro interned {
 pub mod traits {
     super::interned! {
         trait Default (::core::default::Default),
+
+        trait Add (::core::ops::Add),
+        trait AddAssign (::core::ops::AddAssign),
+        trait BitAnd (::core::ops::BitAnd),
+        trait BitAndAssign (::core::ops::BitAndAssign),
+        trait BitOr (::core::ops::BitOr),
+        trait BitOrAssign (::core::ops::BitOrAssign),
+        trait BitXor (::core::ops::BitXor),
+        trait BitXorAssign (::core::ops::BitXorAssign),
+        trait Div (::core::ops::Div),
+        trait DivAssign (::core::ops::DivAssign),
+        trait Mul (::core::ops::Mul),
+        trait MulAssign (::core::ops::MulAssign),
+        trait Rem (::core::ops::Rem),
+        trait RemAssign (::core::ops::RemAssign),
+        trait Shl (::core::ops::Shl),
+        trait ShlAssign (::core::ops::ShlAssign),
+        trait Shr (::core::ops::Shr),
+        trait ShrAssign (::core::ops::ShrAssign),
+        trait Sub (::core::ops::Sub),
+        trait SubAssign (::core::ops::SubAssign),
     }
 }
 
 pub mod fns {
     super::interned! {
-        fn default (::core::default::Default::default)
+        fn default (::core::default::Default::default),
     }
 }

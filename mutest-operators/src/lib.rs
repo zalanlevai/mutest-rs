@@ -7,9 +7,6 @@
 mod arg_default_shadow;
 pub use arg_default_shadow::*;
 
-mod bit_op_swap;
-pub use bit_op_swap::*;
-
 mod bool_expr_negate;
 pub use bool_expr_negate::*;
 
@@ -22,11 +19,8 @@ pub use continue_break_swap::*;
 mod eq_op_invert;
 pub use eq_op_invert::*;
 
-mod logical_op_swap;
-pub use logical_op_swap::*;
-
-mod math_op_swap;
-pub use math_op_swap::*;
+mod op_swap;
+pub use op_swap::*;
 
 mod range_limit_swap;
 pub use range_limit_swap::*;
