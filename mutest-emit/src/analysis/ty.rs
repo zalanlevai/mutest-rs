@@ -34,10 +34,18 @@ pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty:
         })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpaqueTyHandling {
+    Keep,
+    Infer,
+    Resolve,
+}
+
 #[derive(Clone, Copy)]
 struct AstTyPrinter<'tcx> {
     tcx: TyCtxt<'tcx>,
     sp: Span,
+    opaque_ty_handling: OpaqueTyHandling,
 }
 
 impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
@@ -76,7 +84,17 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
             ty::TyKind::Str => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::str, sp))),
             ty::TyKind::Never => Ok(ast::mk::ty(sp, ast::TyKind::Never)),
 
-            ty::TyKind::Param(param) => Ok(ast::mk::ty_ident(sp, None, Ident::new(param.name, sp))),
+            ty::TyKind::Param(param) => {
+                let is_opaque_ty = param.name.as_str().starts_with("impl ");
+
+                match (is_opaque_ty, self.opaque_ty_handling) {
+                    (false, _) | (_, OpaqueTyHandling::Keep) => {
+                        Ok(ast::mk::ty_ident(sp, None, Ident::new(param.name, sp)))
+                    }
+                    (true, OpaqueTyHandling::Infer) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                    (true, OpaqueTyHandling::Resolve) => Err("opaque type parameter cannot be resolved".to_owned()),
+                }
+            }
             ty::TyKind::Bound(_, _) => Err("encountered bound type variable".to_owned()),
             ty::TyKind::Infer(_) => Err("encountered type variable".to_owned()),
 
@@ -120,10 +138,19 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
                 Ok(dyn_existential)
             }
             ty::TyKind::Opaque(def_id, substs) => {
-                let def_path = self.print_def_path(def_id, substs)?;
-                Ok(ast::mk::ty(sp, ast::TyKind::ImplTrait(ast::DUMMY_NODE_ID, vec![
-                    ast::mk::trait_bound(ast::TraitBoundModifier::None, def_path)
-                ])))
+                match self.opaque_ty_handling {
+                    OpaqueTyHandling::Infer => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                    OpaqueTyHandling::Keep => {
+                        let def_path = self.print_def_path(def_id, substs)?;
+                        Ok(ast::mk::ty(sp, ast::TyKind::ImplTrait(ast::DUMMY_NODE_ID, vec![
+                            ast::mk::trait_bound(ast::TraitBoundModifier::None, def_path)
+                        ])))
+                    }
+                    OpaqueTyHandling::Resolve => {
+                        let ty = self.tcx.type_of(def_id);
+                        self.print_type(ty)
+                    }
+                }
             }
             ty::TyKind::Projection(projection) => {
                 let def_path = self.print_def_path(projection.item_def_id, projection.substs)?;
@@ -408,10 +435,11 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
     }
 }
 
-pub fn ast_repr<'tcx>(tcx: TyCtxt<'tcx>, sp: Span, ty: Ty<'tcx>) -> Option<P<ast::Ty>> {
+pub fn ast_repr<'tcx>(tcx: TyCtxt<'tcx>, sp: Span, ty: Ty<'tcx>, opaque_ty_handling: OpaqueTyHandling) -> Option<P<ast::Ty>> {
     let printer = AstTyPrinter {
         tcx,
         sp,
+        opaque_ty_handling,
     };
     printer.print_type(ty).ok()
 }
