@@ -416,7 +416,19 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
         let current_closure = self.current_closure;
         if let hir::ExprKind::Closure(_, _, body, _, _) = expr_hir.kind { self.current_closure = Some(body); }
-        ast_lowering::visit::walk_expr(self, expr_ast, expr_hir);
+
+        match (&expr_ast.kind, &expr_hir.kind) {
+            // The left-hand side of assignment expressions only supports a strict subset of expressions, not including
+            // the branching match expressions we use for substitutions, so we only mutate the right-hand side.
+            (ast::ExprKind::Assign(_lhs_ast, rhs_ast, _), hir::ExprKind::Assign(_lhs_hir, rhs_hir, _)) => {
+                ast_lowering::visit::visit_matching_expr(self, rhs_ast, rhs_hir);
+            }
+            (ast::ExprKind::AssignOp(_, _lhs_ast, rhs_ast), hir::ExprKind::AssignOp(_, _lhs_hir, rhs_hir)) => {
+                ast_lowering::visit::visit_matching_expr(self, rhs_ast, rhs_hir);
+            }
+            _ => ast_lowering::visit::walk_expr(self, expr_ast, expr_hir),
+        }
+
         if let hir::ExprKind::Closure(_, _, _, _, _) = expr_hir.kind { self.current_closure = current_closure; }
     }
 }
