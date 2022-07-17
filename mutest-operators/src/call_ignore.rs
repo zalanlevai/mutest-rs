@@ -7,7 +7,7 @@ use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc}
 use mutest_emit::codegen::symbols::{Ident, path, kw};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
-fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
+fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
     // Calls to functions that take no arguments (including self) are ignored, because they are likely
     // default constructor functions.
     let call_args_count = match expr.kind {
@@ -27,7 +27,21 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, body: hir::BodyId, expr: &'tcx hir:
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
     if callee == res::fns::default(tcx) { return None; }
 
-    return Some((callee, expr_ty))
+    // Avoid replacing the call if the type's `Default::default` implementation refers back to this function (the
+    // function this call expression is in). This avoids a case of infinite recursion, resulting in a stack overflow.
+    let ty_default = (res::fns::default(tcx), tcx.mk_substs_trait(expr_ty, &[]));
+    if let Some(ty_default_impl) = tcx.resolve_instance(tcx.param_env(f).and(ty_default)).ok().flatten()
+        && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
+        && let Some(ty_default_impl_body_id) = tcx.hir().get_by_def_id(ty_default_impl_def_id).body_id()
+    {
+        let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
+            .flat_map(|(def_id, substs)| tcx.resolve_instance(tcx.param_env(def_id).and((def_id, substs))).ok().flatten());
+
+        let ty_default_impl_refers_to_call = ty_default_impl_callees.any(|instance| instance.def_id() == f);
+        if ty_default_impl_refers_to_call { return None; }
+    }
+
+    Some((callee, expr_ty))
 }
 
 pub struct CallValueDefaultShadowMutation {
@@ -65,6 +79,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
 
         let Some((callee, expr_ty)) = non_default_call(
             tcx,
+            f.hir.def_id.to_def_id(),
             f.hir.body.id(),
             expr.hir,
             self.limit_scope_to_local_callees,
@@ -129,6 +144,7 @@ impl<'a> Operator<'a> for CallDelete {
 
         let Some((callee, _)) = non_default_call(
             tcx,
+            f.hir.def_id.to_def_id(),
             f.hir.body.id(),
             expr.hir,
             self.limit_scope_to_local_callees,
