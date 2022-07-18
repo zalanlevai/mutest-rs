@@ -40,8 +40,8 @@ impl <S> ActiveMutantHandle<S> {
 //       such functionality in the future.
 pub fn wrap<T, F>(test: F) -> T
 where
-    T: Termination + Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
+    T: Termination + 'static,
+    F: FnOnce() -> T + 'static,
 {
     test()
 }
