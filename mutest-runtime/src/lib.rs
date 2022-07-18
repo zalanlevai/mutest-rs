@@ -1,5 +1,6 @@
 #![feature(deadline_api)]
 #![feature(decl_macro)]
+#![feature(drain_filter)]
 #![feature(let_chains)]
 #![feature(let_else)]
 
@@ -14,6 +15,9 @@ extern crate parking_lot;
 extern crate test;
 
 pub mod test_runner;
+
+mod config;
+pub use config::*;
 
 mod harness;
 pub use harness::*;
