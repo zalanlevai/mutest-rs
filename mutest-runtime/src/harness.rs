@@ -74,15 +74,22 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
 
     tests.retain(|test| mutations.iter().any(|m| m.reachable_from.contains_key(test.desc.name.as_slice())));
 
-    let on_test_event = |event| -> Result<_, Infallible> {
+    let total_tests_count = tests.len();
+    let mut completed_tests_count = 0;
+
+    let on_test_event = |event, remaining_tests: &mut Vec<(test::TestId, test::TestDescAndFn)>| -> Result<_, Infallible> {
         match event {
             test_runner::TestEvent::Result(test) => {
+                completed_tests_count += 1;
+
                 let mutation = mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
                     .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
 
                 match test.result {
-                    test_runner::TestResult::Ignored => {}
-                    test_runner::TestResult::Ok => {}
+                    | test_runner::TestResult::Ignored
+                    | test_runner::TestResult::Ok => {
+                        return Ok(test_runner::Flow::Continue);
+                    }
 
                     | test_runner::TestResult::Failed
                     | test_runner::TestResult::FailedMsg(_) => {
@@ -93,6 +100,8 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
                         results.insert(mutation.id, MutationTestResult::TimedOut);
                     }
                 }
+
+                remaining_tests.retain(|(_, test)| !mutation.reachable_from.contains_key(test.desc.name.as_slice()));
 
                 if results.iter().all(|(_, result)| !matches!(result, MutationTestResult::Undetected)) {
                     return Ok(test_runner::Flow::Stop);
@@ -105,6 +114,16 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
     };
 
     test_runner::run_tests(tests, on_test_event, Some(Duration::from_secs(2)), false)?;
+
+    println!("ran {completed} out of {total} {descr}",
+        completed = completed_tests_count,
+        total = total_tests_count,
+        descr = match total_tests_count {
+            1 => "test",
+            _ => "tests",
+        },
+    );
+    println!();
 
     Ok(results)
 }

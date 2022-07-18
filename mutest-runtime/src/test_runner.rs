@@ -257,7 +257,6 @@ pub enum TestEvent {
     Queue(usize, usize),
     Wait(test::TestDesc),
     Result(CompletedTest),
-    Done(Vec<test::TestDescAndFn>, Vec<RunningTest>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -271,9 +270,9 @@ pub fn run_tests<E, F>(
     mut on_test_event: F,
     test_timeout: Option<Duration>,
     no_capture: bool,
-) -> Result<(), E>
+) -> Result<(Vec<test::TestDescAndFn>, Vec<RunningTest>), E>
 where
-    F: FnMut(TestEvent) -> Result<Flow, E>,
+    F: FnMut(TestEvent, &mut Vec<(test::TestId, test::TestDescAndFn)>) -> Result<Flow, E>,
 {
     let tests = tests.into_iter().enumerate()
         .map(|(i, test)| (test::TestId(i), test))
@@ -299,11 +298,9 @@ where
 
     if concurrency == 1 {
         macro event($event:expr) {
-            if let Flow::Stop = on_test_event($event)? {
+            if let Flow::Stop = on_test_event($event, &mut remaining_tests)? {
                 let remaining_tests = remaining_tests.into_iter().map(|(_, test)| test).collect();
-                on_test_event(TestEvent::Done(remaining_tests, vec![]))?;
-
-                return Ok(());
+                return Ok((remaining_tests, vec![]));
             }
         }
 
@@ -325,17 +322,15 @@ where
         event!(TestEvent::Queue(0, 0));
 
         let remaining_tests = remaining_tests.into_iter().map(|(_, test)| test).collect();
-        on_test_event(TestEvent::Done(remaining_tests, vec![]))?;
+        return Ok((remaining_tests, vec![]));
     } else {
         macro event($event:expr) {
-            if let Flow::Stop = on_test_event($event)? {
+            if let Flow::Stop = on_test_event($event, &mut remaining_tests)? {
                 lingering_tests.extend(running_tests.drain());
 
                 let remaining_tests = remaining_tests.into_iter().map(|(_, test)| test).collect();
                 let lingering_tests = lingering_tests.into_values().collect();
-                on_test_event(TestEvent::Done(remaining_tests, lingering_tests))?;
-
-                return Ok(());
+                return Ok((remaining_tests, lingering_tests));
             }
         }
 
@@ -416,8 +411,6 @@ where
 
         let remaining_tests = remaining_tests.into_iter().map(|(_, test)| test).collect();
         let lingering_tests = lingering_tests.into_values().collect();
-        on_test_event(TestEvent::Done(remaining_tests, lingering_tests))?;
+        return Ok((remaining_tests, lingering_tests));
     }
-
-    Ok(())
 }
