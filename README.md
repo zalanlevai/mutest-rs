@@ -8,11 +8,10 @@ Generate and analyze runtime-swappable code mutants of Rust programs using a dyn
 
 > `mutest` relies on the nightly compiler toolchain. `rustup` is configured to automatically install and use the right nightly version.
 
-Build the workspace using Cargo.
+Build the `mutest-runtime` crate in release mode.
 
 ```sh
-cargo clean
-cargo build
+cargo build --release -p mutest-runtime
 ```
 
 Install `mutest-driver` and the Cargo subcommand `cargo-mutest` locally.
@@ -21,6 +20,8 @@ Install `mutest-driver` and the Cargo subcommand `cargo-mutest` locally.
 cargo install --force --path mutest-driver
 cargo install --force --path cargo-mutest
 ```
+
+> The release build of `mutest-driver` looks for a release build of `mutest-runtime`. A local install with `cargo install` will produce a release build.
 
 ## Usage
 
@@ -33,7 +34,7 @@ cargo install --force --path cargo-mutest
 > Thus, a typical invocation, with the code checked out and built in `~/Developer/mutest-rs` and a library target will look as follows:
 >
 > ```sh
-> MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/debug cargo +nightly-2022-06-13 mutest --lib run
+> MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/release cargo +nightly-2022-06-13 mutest --lib run
 > ```
 
 Run the `cargo mutest` subcommand against a standard Cargo package directory or workspace containing your crate.

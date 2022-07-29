@@ -1,9 +1,12 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use rustc_feature::UnstableFeatures;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_interface::run_compiler;
 use rustc_lint_defs::Level as LintLevel;
-use rustc_session::config::{Input, OutputFilenames};
+use rustc_session::config::{ExternEntry, ExternLocation, Externs, Input, OutputFilenames};
 use rustc_session::search_paths::SearchPath;
+use rustc_session::utils::CanonicalizedPath;
 
 use crate::config::Config;
 use crate::passes::base_compiler_config;
@@ -27,8 +30,41 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     // Disable lints on generated crate code.
     compiler_config.opts.lint_cap = Some(LintLevel::Allow);
 
-    // The generated crate code relies on the `mutest_runtime` crate which must be loaded.
+    // The generated crate code relies on the `mutest_runtime` crate (and its dependencies), which must be loaded.
     compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&format!("crate={}", config.mutest_search_path.display()), Default::default()));
+    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&format!("dependency={}", config.mutest_search_path.join("deps").display()), Default::default()));
+    // The externs (paths to dependencies) of the `mutest_runtime` crate are baked into it at compile time. These must
+    // be propagated to any crate which depends on it.
+    let mut externs = BTreeMap::<String, ExternEntry>::new();
+    for (key, entry) in compiler_config.opts.externs.iter() {
+        externs.insert(key.clone(), entry.clone());
+    }
+    for (prefix, name, path) in mutest_runtime::build::externs() {
+        let mut is_private_dep = false;
+        let mut add_prelude = true;
+        let mut nounused_dep = false;
+        for option in prefix.iter().flat_map(|option| option.split(",").map(str::trim)) {
+            match option {
+                "priv" => is_private_dep = true,
+                "noprelude" => add_prelude = false,
+                "nounused" => nounused_dep = true,
+                _ => unreachable!("unknown extern option `{option}`"),
+            }
+        }
+
+        externs.insert(name.to_owned(), ExternEntry {
+            location: match path {
+                Some(path) => ExternLocation::ExactPaths(BTreeSet::from([
+                    CanonicalizedPath::new(&config.mutest_search_path.join(path)),
+                ])),
+                None => ExternLocation::FoundInLibrarySearchDirectories,
+            },
+            is_private_dep,
+            add_prelude,
+            nounused_dep,
+        });
+    }
+    compiler_config.opts.externs = Externs::new(externs);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
         let (linker, outputs) = compiler.enter(|queries| {

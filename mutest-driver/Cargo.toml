@@ -11,5 +11,6 @@ rustc_private = true
 [dependencies]
 mutest-emit = { path = "../mutest-emit" }
 mutest-operators = { path = "../mutest-operators" }
+mutest-runtime = { path = "../mutest-runtime" }
 
 clap = { version = "3", features = ["cargo"] }
