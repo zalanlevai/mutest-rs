@@ -3,6 +3,7 @@ pub use rustc_middle::ty::*;
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::ty;
 use rustc_middle::ty::print::Printer;
+use rustc_session::cstore::{ExternCrate, ExternCrateSource};
 use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::infer::InferCtxtExt;
 
@@ -35,6 +36,19 @@ pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty:
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScopedItemPaths {
+    FullyQualified,
+    Trimmed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefPathHandling {
+    PreferVisible(ScopedItemPaths),
+    ForceVisible(ScopedItemPaths),
+    FullyQualified,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpaqueTyHandling {
     Keep,
     Infer,
@@ -45,6 +59,7 @@ pub enum OpaqueTyHandling {
 struct AstTyPrinter<'tcx> {
     tcx: TyCtxt<'tcx>,
     sp: Span,
+    def_path_handling: DefPathHandling,
     opaque_ty_handling: OpaqueTyHandling,
 }
 
@@ -351,6 +366,25 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
         }
     }
 
+    fn print_def_path(
+        self,
+        def_id: hir::DefId,
+        substs: &'tcx [ty::GenericArg<'tcx>],
+    ) -> Result<Self::Path, Self::Error> {
+        if let DefPathHandling::PreferVisible(scoped_item_paths) | DefPathHandling::ForceVisible(scoped_item_paths) = self.def_path_handling {
+            if let Some(path) = self.try_print_visible_def_path(def_id, scoped_item_paths)? {
+                if substs.is_empty() { return Ok(path); }
+                return self.path_generic_args(|_| Ok(path), substs);
+            }
+
+            if let DefPathHandling::ForceVisible(_) = self.def_path_handling {
+                return Err("cannot find visible path for definition".to_owned());
+            }
+        }
+
+        self.default_print_def_path(def_id, substs)
+    }
+
     fn path_crate(self, cnum: hir::CrateNum) -> Result<Self::Path, Self::Error> {
         match cnum {
             LOCAL_CRATE => Ok(ast::mk::path_ident(self.sp, Ident::new(kw::Crate, self.sp))),
@@ -435,10 +469,129 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
     }
 }
 
-pub fn ast_repr<'tcx>(tcx: TyCtxt<'tcx>, sp: Span, ty: Ty<'tcx>, opaque_ty_handling: OpaqueTyHandling) -> Option<P<ast::Ty>> {
+trait PrinterExt<'tcx>: ty::print::Printer<'tcx> + Copy {
+    fn path_local_root(self) -> Result<Self::Path, Self::Error>;
+
+    fn try_print_visible_def_path(self, def_id: hir::DefId, scoped_item_paths: ScopedItemPaths) -> Result<Option<Self::Path>, Self::Error> {
+        fn try_print_visible_def_path_impl<'tcx, T: PrinterExt<'tcx>>(
+            printer: T,
+            def_id: hir::DefId,
+            scoped_item_paths: ScopedItemPaths,
+            callers: &mut Vec<hir::DefId>,
+        ) -> Result<Option<T::Path>, T::Error> {
+            if let Some(cnum) = def_id.as_crate_root() {
+                if cnum == LOCAL_CRATE {
+                    return Ok(Some(printer.path_crate(cnum)?));
+                }
+
+                match printer.tcx().extern_crate(def_id) {
+                    Some(&ExternCrate { src, dependency_of, span, .. }) => match (src, dependency_of) {
+                        // Crate loaded by implicitly injected `extern crate core` / `extern crate std`.
+                        (ExternCrateSource::Extern(_), LOCAL_CRATE) if span.is_dummy() => {
+                            return Ok(Some(printer.path_crate(cnum)?));
+                        }
+                        // Crate loaded by `extern crate` declaration.
+                        (ExternCrateSource::Extern(def_id), LOCAL_CRATE) => {
+                            return Ok(Some(printer.print_def_path(def_id, &[])?));
+                        }
+                        // Crate implicitly loaded by a path resolving through extern prelude.
+                        (ExternCrateSource::Path, LOCAL_CRATE) => {
+                            return Ok(Some(printer.path_crate(cnum)?));
+                        }
+                        _ => {}
+                    }
+                    None => {
+                        return Ok(Some(printer.path_crate(cnum)?));
+                    }
+                }
+            }
+
+            if def_id.is_local() {
+                if let Some(parent) = printer.tcx().opt_parent(def_id) {
+                    match printer.tcx().def_kind(parent) {
+                        | hir::def::DefKind::Const
+                        | hir::def::DefKind::Static(..)
+                        | hir::def::DefKind::Fn
+                        | hir::def::DefKind::AssocFn => {
+                            match scoped_item_paths {
+                                ScopedItemPaths::Trimmed => {
+                                    let disambiguated_data = printer.tcx().def_key(def_id).disambiguated_data;
+                                    let path = printer.path_append(|_| printer.path_local_root(), &disambiguated_data)?;
+                                    return Ok(Some(path));
+                                }
+                                ScopedItemPaths::FullyQualified => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                return Ok(None);
+            }
+
+            let visible_parent_map = printer.tcx().visible_parent_map(());
+            let mut cur_def_key = printer.tcx().def_key(def_id);
+
+            // Constructors are unnamed by themselves. We must use the name of their parent instead.
+            if let hir::definitions::DefPathData::Ctor = cur_def_key.disambiguated_data.data {
+                let parent = hir::DefId {
+                    krate: def_id.krate,
+                    index: cur_def_key.parent.expect("constructor without a parent"),
+                };
+
+                cur_def_key = printer.tcx().def_key(parent);
+            }
+
+            let Some(visible_parent) = visible_parent_map.get(&def_id).cloned() else { return Ok(None); };
+            let actual_parent = printer.tcx().opt_parent(def_id);
+
+            let mut data = cur_def_key.disambiguated_data.data;
+
+            match data {
+                hir::definitions::DefPathData::TypeNs(ref mut name) if Some(visible_parent) != actual_parent => {
+                    // Item might be re-exported several times, but filter for the ones that are public and whose
+                    // identifier is not `_`.
+                    let reexport = printer.tcx().module_children(visible_parent).iter()
+                        .filter(|child| child.res.opt_def_id() == Some(def_id))
+                        .find(|child| child.vis.is_public() && child.ident.name != kw::Underscore)
+                        .map(|child| child.ident.name);
+
+                    let Some(new_name) = reexport else { return Ok(None); };
+                    *name = new_name;
+                }
+                // Re-exported `extern crate`.
+                hir::definitions::DefPathData::CrateRoot => {
+                    data = hir::definitions::DefPathData::TypeNs(printer.tcx().crate_name(def_id.krate));
+                }
+                _ => {}
+            }
+
+            if callers.contains(&visible_parent) { return Ok(None); }
+            callers.push(visible_parent);
+            let Some(path) = try_print_visible_def_path_impl(printer, visible_parent, scoped_item_paths, callers)? else { return Ok(None); };
+            callers.pop();
+
+            let disambiguated_data = hir::definitions::DisambiguatedDefPathData { data, disambiguator: 0 };
+            let path = printer.path_append(|_| Ok(path), &disambiguated_data)?;
+            Ok(Some(path))
+        }
+
+        let mut callers = vec![];
+        try_print_visible_def_path_impl(self, def_id, scoped_item_paths, &mut callers)
+    }
+}
+
+impl<'tcx> PrinterExt<'tcx> for AstTyPrinter<'tcx> {
+    fn path_local_root(self) -> Result<Self::Path, Self::Error> {
+        Ok(ast::Path { span: self.sp, segments: vec![], tokens: None })
+    }
+}
+
+pub fn ast_repr<'tcx>(tcx: TyCtxt<'tcx>, sp: Span, ty: Ty<'tcx>, def_path_handling: DefPathHandling, opaque_ty_handling: OpaqueTyHandling) -> Option<P<ast::Ty>> {
     let printer = AstTyPrinter {
         tcx,
         sp,
+        def_path_handling,
         opaque_ty_handling,
     };
     printer.print_type(ty).ok()

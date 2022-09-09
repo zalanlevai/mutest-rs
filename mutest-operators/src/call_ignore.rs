@@ -87,7 +87,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
 
         // A type annotation with the originally resolved type has to be added to the ignoring
         // `let _ = $expr` statement to guarantee the same callee resolution.
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, def, expr_ty, ty::OpaqueTyHandling::Infer) else { return None; };
+        let Some(expr_ty_ast) = ty::ast_repr(tcx, def, expr_ty, ty::DefPathHandling::PreferVisible(ty::ScopedItemPaths::Trimmed), ty::OpaqueTyHandling::Infer) else { return None; };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), vec![]);
