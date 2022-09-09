@@ -22,7 +22,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
             let sess = compiler.session();
 
-            let mut _crate_ast = {
+            let mut crate_ast = {
                 // NOTE: We must register our custom tool attribute namespace before the relevant attribute validation
                 //       is performed during macro expansion. The mutable reference to the AST must be dropped before
                 //       any further queries are performed.
@@ -96,6 +96,9 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     mutest_emit::codegen::tests::generate_dummy_main(resolver, &mut generated_crate_ast);
 
                     mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
+
+                    mutest_emit::codegen::expansion::module::load_modules(sess, &mut crate_ast);
+                    mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
 
                     Flow::Continue(())
                 })?;

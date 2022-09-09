@@ -1,5 +1,6 @@
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
+#![feature(if_let_guard)]
 #![feature(is_some_with)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
@@ -19,6 +20,7 @@ extern crate rustc_hash;
 extern crate rustc_hir;
 extern crate rustc_infer;
 extern crate rustc_middle;
+extern crate rustc_parse;
 extern crate rustc_resolve;
 extern crate rustc_session;
 extern crate rustc_span;
