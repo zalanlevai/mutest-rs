@@ -21,6 +21,7 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(thread_local_internals)]
 #![feature(libstd_thread_internals)]
 
+#![feature(allocator_api)]
 #![feature(box_syntax)]
 #![feature(cfg_target_thread_local)]
 #![feature(core_intrinsics)]
