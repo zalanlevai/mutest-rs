@@ -90,15 +90,13 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     // HACK: See below.
                     mutest_emit::codegen::expansion::insert_generated_code_crate_refs(resolver, &mut generated_crate_ast);
 
-                    // Clean up the generated test harness's invalid AST.
-                    mutest_emit::codegen::tests::clean_up_test_cases(&tests, &mut generated_crate_ast);
-                    mutest_emit::codegen::tests::clean_entry_points(&mut generated_crate_ast);
-                    mutest_emit::codegen::tests::generate_dummy_main(resolver, &mut generated_crate_ast);
+                    mutest_emit::codegen::entry_point::clean_entry_points(&mut generated_crate_ast);
+                    mutest_emit::codegen::entry_point::generate_dummy_main(resolver, &mut generated_crate_ast);
+
+                    mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
+                    mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
 
                     mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
-
-                    mutest_emit::codegen::expansion::module::load_modules(sess, &mut crate_ast);
-                    mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
 
                     Flow::Continue(())
                 })?;

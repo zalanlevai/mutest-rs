@@ -312,15 +312,7 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                 }
 
                 // Copy attributes from original item.
-                item.attrs = original_item.attrs.iter().cloned()
-                    // FIXME: Make attribute filtering configurable or remove entirely, since it is not a core part of
-                    //        the reverting behaviour and any choice made here is arbitrary. Here, it is used to
-                    //        facilitate the current codegen behaviour around test cases, in which we retain their
-                    //        expanded form and want to avoid double expansion. Once this old codegen behaviour is
-                    //        removed, this workaround will finally become unnecessaary.
-                    // Remove #[test] marker attributes.
-                    .filter(|attr| !attr.has_name(sym::test))
-                    .collect();
+                item.attrs = original_item.attrs.clone();
 
                 match &original_item.kind {
                     ast::ItemKind::Mod(_, ast::ModKind::Unloaded) => panic!("encountered unloaded module"),
@@ -357,9 +349,6 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
             // TODO: Revert bang macro expansions.
             ExpnKind::Macro(MacroKind::Bang, _) => smallvec![item],
 
-            // FIXME: This special case exists because of the current codegen behaviour around test cases; see above.
-            ExpnKind::Macro(MacroKind::Attr, sym::test) => smallvec![item],
-
             | ExpnKind::Macro(MacroKind::Attr, _)
             | ExpnKind::Macro(MacroKind::Derive, _) => {
                 // Only remove the macro expansion if we can recover the attributes from the original item.
@@ -371,7 +360,7 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
             }
 
             ExpnKind::AstPass(AstPass::StdImports) => smallvec![item],
-            ExpnKind::AstPass(AstPass::TestHarness) => smallvec![item],
+            ExpnKind::AstPass(AstPass::TestHarness) => smallvec![],
             ExpnKind::AstPass(AstPass::ProcMacroHarness) => smallvec![item],
 
             // HIR and MIR expansions are not performed on the AST.
