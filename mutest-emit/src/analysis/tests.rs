@@ -1,3 +1,4 @@
+use std::fmt::{self, Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter;
 
@@ -6,7 +7,6 @@ use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::symbols::{Ident, sym};
 
-#[derive(Debug)]
 pub struct Test {
     pub path: Vec<Ident>,
     pub descriptor: P<ast::Item>,
@@ -32,6 +32,18 @@ impl PartialEq for Test {
 impl Hash for Test {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.path.hash(state);
+    }
+}
+
+impl Debug for Test {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Test(")?;
+        for (i, segment) in self.path.iter().enumerate() {
+            if i >= 1 { write!(f, "::")?; }
+            write!(f, "{}", segment.name.as_str())?;
+        }
+        write!(f, ")")?;
+        Ok(())
     }
 }
 
