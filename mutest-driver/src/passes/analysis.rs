@@ -1,6 +1,7 @@
-use mutest_emit::codegen::mutation::Unsafety;
+use mutest_emit::codegen::mutation::{Mutant, Target, UnsafeTargeting, Unsafety};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
+use rustc_middle::ty::TyCtxt;
 use rustc_span::edition::Edition;
 
 use crate::config::{self, Config};
@@ -8,6 +9,111 @@ use crate::passes::{Flow, base_compiler_config};
 
 pub struct AnalysisPassResult {
     pub generated_crate_code: String,
+}
+
+fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: UnsafeTargeting) {
+    let mut unsafe_targets_count = 0;
+    let mut tainted_targets_count = 0;
+
+    for target in targets {
+        let mut unsafe_marker = "";
+        match (target.unsafety.is_unsafe(unsafe_targeting), target.unsafety) {
+            (true, Unsafety::Tainted(_)) => {
+                unsafe_targets_count += 1;
+                tainted_targets_count += 1;
+                unsafe_marker = "[tainted] ";
+            }
+            (true, _) => {
+                unsafe_targets_count += 1;
+                unsafe_marker = "[unsafe] ";
+            }
+            (false, _) => {}
+        };
+
+        println!("tests -({distance})-> {unsafe_marker}{def_path} at {span:#?}",
+            distance = target.distance,
+            def_path = tcx.def_path_str(target.def_id.to_def_id()),
+            span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(target.def_id)),
+        );
+
+        for (&test, entry_point) in &target.reachable_from {
+            println!("  ({distance}) {tainted_marker}{test}",
+                distance = entry_point.distance,
+                tainted_marker = match target.is_tainted(test, unsafe_targeting) {
+                    true => "[tainted] ",
+                    false => "",
+                },
+                test = test.path_str(),
+            );
+        }
+
+        println!();
+    }
+
+    println!("targets: {total} total; {safe} safe; {unsafe} unsafe ({tainted} tainted)",
+        total = targets.len(),
+        safe = targets.len() - unsafe_targets_count,
+        r#unsafe = unsafe_targets_count,
+        tainted = tainted_targets_count,
+    );
+}
+
+fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: UnsafeTargeting) {
+    let mut total_mutations_count = 0;
+    let mut unsafe_mutations_count = 0;
+    let mut tainted_mutations_count = 0;
+
+    for mutant in mutants {
+        total_mutations_count += mutant.mutations.len();
+
+        match mutant.mutations.len() {
+            1 => println!("1 mutation"),
+            _ => println!("{} mutations", mutant.mutations.len()),
+        };
+
+        for mutation in &mutant.mutations {
+            let mut unsafe_marker = "";
+            match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
+                (true, Unsafety::Tainted(_)) => {
+                    unsafe_mutations_count += 1;
+                    tainted_mutations_count += 1;
+                    unsafe_marker = "[tainted] ";
+                }
+                (true, _) => {
+                    unsafe_mutations_count += 1;
+                    unsafe_marker = "[unsafe] ";
+                }
+                (false, _) => {}
+            };
+
+            println!("  - {unsafe_marker}{display_name} in {def_path} at {span:#?}",
+                display_name = mutation.display_name(),
+                def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
+                span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(mutation.target.def_id)),
+            );
+
+            for (&test, entry_point) in &mutation.target.reachable_from {
+                println!("    <-({distance})- {tainted_marker}{test}",
+                    distance = entry_point.distance,
+                    tainted_marker = match mutation.target.is_tainted(test, unsafe_targeting) {
+                        true => "[tainted] ",
+                        false => "",
+                    },
+                    test = test.path_str(),
+                );
+            }
+        }
+
+        println!();
+    }
+
+    println!("{mutants} mutants; {mutations} mutations; {safe} safe; {unsafe} unsafe ({tainted} tainted)",
+        mutants = mutants.len(),
+        mutations = total_mutations_count,
+        safe = total_mutations_count - unsafe_mutations_count,
+        r#unsafe = unsafe_mutations_count,
+        tainted = tainted_mutations_count,
+    );
 }
 
 pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
@@ -47,56 +153,14 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 resolver.borrow_mut().access(|resolver| {
                     let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, opts.mutation_depth);
                     if let config::Mode::PrintMutationTargets = opts.mode {
-                        for target in &targets {
-                            println!("tests -({distance})-> {unsafe_marker}{def_path} at {span:#?}",
-                                distance = target.distance,
-                                unsafe_marker = match (target.unsafety.is_unsafe(opts.unsafe_targeting), target.unsafety) {
-                                    (true, Unsafety::Tainted(_)) => "[tainted] ",
-                                    (true, _) => "[unsafe] ",
-                                    (false, _) => "",
-                                },
-                                def_path = tcx.def_path_str(target.def_id.to_def_id()),
-                                span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(target.def_id)),
-                            );
-
-                            for (&test, entry_point) in &target.reachable_from {
-                                println!("  ({distance}) {tainted_marker}{test}",
-                                    distance = entry_point.distance,
-                                    tainted_marker = match target.is_tainted(test, opts.unsafe_targeting) {
-                                        true => "[tainted] ",
-                                        false => "",
-                                    },
-                                    test = test.path_str(),
-                                );
-                            }
-                        }
-
+                        print_targets(tcx, &targets, opts.unsafe_targeting);
                         return Flow::Break;
                     }
 
                     let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
                     let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count, opts.unsafe_targeting);
                     if let config::Mode::PrintMutants = opts.mode {
-                        for mutant in &mutants {
-                            match mutant.mutations.len() {
-                                1 => println!("1 mutation"),
-                                _ => println!("{} mutations", mutant.mutations.len()),
-                            };
-
-                            for mutation in &mutant.mutations {
-                                println!("  - {unsafe_marker}{display_name} in {def_path} at {span:#?}",
-                                    unsafe_marker = match (mutation.is_unsafe(opts.unsafe_targeting), mutation.target.unsafety) {
-                                        (true, Unsafety::Tainted(_)) => "[tainted] ",
-                                        (true, _) => "[unsafe] ",
-                                        (false, _) => "",
-                                    },
-                                    display_name = mutation.display_name(),
-                                    def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
-                                    span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(mutation.target.def_id)),
-                                );
-                            }
-                        }
-
+                        print_mutants(tcx, &mutants, opts.unsafe_targeting);
                         return Flow::Break;
                     }
 
