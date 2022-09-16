@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 use mutest_driver::config::{self, Config};
+use mutest_emit::analysis::hir::Unsafety;
 use mutest_emit::codegen::mutation::UnsafeTargeting;
 use rustc_interface::Config as CompilerConfig;
 
@@ -129,9 +130,9 @@ pub fn main() {
 
         let unsafe_targeting = match () {
             _ if mutest_arg_matches.is_present("safe") => UnsafeTargeting::None,
-            _ if mutest_arg_matches.is_present("cautious") => UnsafeTargeting::UnsafeContext,
-            _ if mutest_arg_matches.is_present("unsafe") => UnsafeTargeting::Block,
-            _ => UnsafeTargeting::Context,
+            _ if mutest_arg_matches.is_present("cautious") => UnsafeTargeting::OnlyEnclosing(Unsafety::Unsafe),
+            _ if mutest_arg_matches.is_present("unsafe") => UnsafeTargeting::All,
+            _ => UnsafeTargeting::OnlyEnclosing(Unsafety::Normal),
         };
 
         let mutation_depth = mutest_arg_matches.value_of_t("depth").unwrap();

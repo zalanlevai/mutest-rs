@@ -27,13 +27,13 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
 
         ast::mk::expr_struct_field(sp, Ident::new(*sym::reachable_from, sp), {
             let args_token_trees = mutation.target.reachable_from.iter()
-                .flat_map(|(&test, &distance)| {
+                .flat_map(|(&test, entry_point)| {
                     let key_lit = ast::TokenKind::lit(ast::token::LitKind::Str, Symbol::intern(&test.path_str()), None);
                     let key_token = ast::mk::ts_token(sp, ast::Spacing::Alone, key_lit);
 
                     let arrow_token = ast::mk::ts_token(sp, ast::Spacing::Alone, ast::TokenKind::FatArrow);
 
-                    let value_lit = ast::TokenKind::lit(ast::token::LitKind::Integer, Symbol::intern(&distance.to_string()), None);
+                    let value_lit = ast::TokenKind::lit(ast::token::LitKind::Integer, Symbol::intern(&entry_point.distance.to_string()), None);
                     let value_token = ast::mk::ts_token(sp, ast::Spacing::Alone, value_lit);
 
                     let comma_token = ast::mk::ts_token(sp, ast::Spacing::Alone, ast::TokenKind::Comma);

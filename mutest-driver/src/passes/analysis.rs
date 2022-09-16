@@ -1,3 +1,4 @@
+use mutest_emit::codegen::mutation::Unsafety;
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_span::edition::Edition;
@@ -49,12 +50,22 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         for target in &targets {
                             println!("tests -({distance})-> {unsafe_marker}{def_path} at {span:#?}",
                                 distance = target.distance,
-                                unsafe_marker = target.is_unsafe(opts.unsafe_targeting).then_some(format!("[unsafe] ")).unwrap_or_default(),
+                                unsafe_marker = match (target.unsafety.is_unsafe(opts.unsafe_targeting), target.unsafety) {
+                                    (true, Unsafety::Tainted(_)) => "[tainted] ",
+                                    (true, _) => "[unsafe] ",
+                                    (false, _) => "",
+                                },
                                 def_path = tcx.def_path_str(target.def_id.to_def_id()),
                                 span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(target.def_id)),
                             );
-                            for (&test, &distance) in &target.reachable_from {
-                                println!("  ({distance}) {test}",
+
+                            for (&test, entry_point) in &target.reachable_from {
+                                println!("  ({distance}) {tainted_marker}{test}",
+                                    distance = entry_point.distance,
+                                    tainted_marker = match target.is_tainted(test, opts.unsafe_targeting) {
+                                        true => "[tainted] ",
+                                        false => "",
+                                    },
                                     test = test.path_str(),
                                 );
                             }
@@ -74,7 +85,11 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                             for mutation in &mutant.mutations {
                                 println!("  - {unsafe_marker}{display_name} in {def_path} at {span:#?}",
-                                    unsafe_marker = mutation.is_unsafe(opts.unsafe_targeting).then_some(format!("[unsafe] ")).unwrap_or_default(),
+                                    unsafe_marker = match (mutation.is_unsafe(opts.unsafe_targeting), mutation.target.unsafety) {
+                                        (true, Unsafety::Tainted(_)) => "[tainted] ",
+                                        (true, _) => "[unsafe] ",
+                                        (false, _) => "",
+                                    },
                                     display_name = mutation.display_name(),
                                     def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
                                     span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(mutation.target.def_id)),

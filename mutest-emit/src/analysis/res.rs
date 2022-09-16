@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use crate::analysis::hir;
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
@@ -102,26 +104,80 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Call<'tcx> {
+    pub def_id: hir::DefId,
+    pub substs: ty::SubstsRef<'tcx>,
+    pub unsafety: hir::Unsafety,
+}
+
 struct CalleeCollector<'tcx> {
     typeck: &'tcx ty::TypeckResults<'tcx>,
-    callees: Vec<(hir::DefId, ty::SubstsRef<'tcx>)>,
+    current_scope_unsafety: hir::Unsafety,
+    callees: Vec<Call<'tcx>>,
 }
 
 impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
+    fn visit_block(&mut self, block: &'tcx hir::Block<'tcx>) {
+        let previous_scope_unsafety = self.current_scope_unsafety;
+        self.current_scope_unsafety = match block.rules {
+            hir::BlockCheckMode::DefaultBlock => self.current_scope_unsafety,
+            hir::BlockCheckMode::UnsafeBlock(_) => hir::Unsafety::Unsafe,
+        };
+
+        hir::intravisit::walk_block(self, block);
+
+        self.current_scope_unsafety = previous_scope_unsafety;
+    }
+
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
-        if let Some(callee) = callee(self.typeck, expr) {
-            self.callees.push(callee);
+        if let Some((def_id, substs)) = callee(self.typeck, expr) {
+            self.callees.push(Call {
+                def_id,
+                substs,
+                unsafety: self.current_scope_unsafety,
+            });
         }
 
         hir::intravisit::walk_expr(self, expr);
     }
 }
 
-pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body) -> Vec<(hir::DefId, ty::SubstsRef<'tcx>)> {
+pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> Vec<Call<'tcx>> {
     let typeck = tcx.typeck_body(body.id());
+
+    let body_owner = tcx.hir().get(tcx.hir().body_owner(body.id()));
+    let body_unsafety = match body_owner {
+        hir::Node::Item(item) => {
+            match &item.kind {
+                hir::ItemKind::Fn(sig, _, _) => sig.header.unsafety,
+                _ => hir::Unsafety::Normal,
+            }
+        }
+        hir::Node::ForeignItem(item) => {
+            match &item.kind {
+                hir::ForeignItemKind::Fn(_, _, _) => hir::Unsafety::Unsafe,
+                _ => hir::Unsafety::Normal,
+            }
+        }
+        hir::Node::TraitItem(item) => {
+            match &item.kind {
+                hir::TraitItemKind::Fn(sig, _) => sig.header.unsafety,
+                _ => hir::Unsafety::Normal,
+            }
+        }
+        hir::Node::ImplItem(item) => {
+            match &item.kind {
+                hir::ImplItemKind::Fn(sig, _) => sig.header.unsafety,
+                _ => hir::Unsafety::Normal,
+            }
+        }
+        _ => hir::Unsafety::Normal,
+    };
 
     let mut collector = CalleeCollector {
         typeck,
+        current_scope_unsafety: body_unsafety,
         callees: vec![],
     };
     collector.visit_body(body);

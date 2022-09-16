@@ -35,7 +35,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
         && let Some(ty_default_impl_body_id) = tcx.hir().get_by_def_id(ty_default_impl_def_id).body_id()
     {
         let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
-            .flat_map(|(def_id, substs)| tcx.resolve_instance(tcx.param_env(def_id).and((def_id, substs))).ok().flatten());
+            .flat_map(|call| tcx.resolve_instance(tcx.param_env(call.def_id).and((call.def_id, call.substs))).ok().flatten());
 
         let ty_default_impl_refers_to_call = ty_default_impl_callees.any(|instance| instance.def_id() == f);
         if ty_default_impl_refers_to_call { return None; }

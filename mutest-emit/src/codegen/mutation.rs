@@ -196,7 +196,7 @@ impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
     }
 
     pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
-        self.is_in_unsafe_block || self.target.is_unsafe(unsafe_targeting)
+        self.is_in_unsafe_block || self.target.unsafety.is_unsafe(unsafe_targeting)
     }
 }
 
@@ -213,27 +213,30 @@ impl<'hir, 'trg, 'm> Hash for Mut<'hir, 'trg, 'm> {
     }
 }
 
-/// | Flag       | UnsafeTargeting | `unsafe fn` | `unsafe {}` | `{ unsafe {} }` | `{}` |
-/// | ---------- | --------------- | ----------- | ----------- | --------------- | ---- |
-/// | --safe     | None            |             |             |                 | M    |
-/// | (default)  | Context         |             |             | M               | M    |
-/// | --cautious | UnsafeContext   |             |             | unsafe M        | M    |
-/// | --unsafe   | Block           | unsafe M    | unsafe M    | M               | M    |
+/// | Flag       | UnsafeTargeting       | `unsafe {}` | `{ unsafe {} }` | `{}` |
+/// | ---------- | --------------------- | ----------- | --------------- | ---- |
+/// | --safe     | None                  |             |                 | M    |
+/// | --cautious | OnlyEnclosing(Unsafe) |             | unsafe M        | M    |
+/// | (default)  | OnlyEnclosing(Normal) |             | M               | M    |
+/// | --unsafe   | All                   | unsafe M    | M               | M    |
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnsafeTargeting {
     None,
-    Context,
-    UnsafeContext,
-    Block,
+    OnlyEnclosing(hir::Unsafety),
+    All,
 }
 
 impl UnsafeTargeting {
-    pub fn inner(&self) -> bool {
-        matches!(self, Self::Block)
+    pub fn any(&self) -> bool {
+        !matches!(self, Self::None)
     }
 
-    pub fn outer(&self) -> bool {
-        matches!(self, Self::Block | Self::Context | Self::UnsafeContext)
+    pub fn inside_unsafe(&self) -> bool {
+        matches!(self, Self::All)
+    }
+
+    pub fn enclosing_unsafe(&self) -> bool {
+        matches!(self, Self::All | Self::OnlyEnclosing(_))
     }
 }
 
@@ -360,7 +363,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         if !self.tcx.sess.source_map().is_local_span(block_ast.span) { return; };
         if attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
-        if !self.unsafe_targeting.inner() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
+        if !self.unsafe_targeting.inside_unsafe() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
 
         let is_in_unsafe_block = self.is_in_unsafe_block;
         if let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { self.is_in_unsafe_block = true; }
@@ -433,20 +436,31 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UnsafeSource {
+    EnclosingUnsafe,
+    Unsafe,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Unsafety {
     None,
-    Decl,
-    Body,
+    /// Safe code called from an unsafe context.
+    Tainted(UnsafeSource),
+    Unsafe(UnsafeSource),
 }
 
 impl Unsafety {
-    pub fn inner(&self) -> bool {
-        matches!(self, Self::Body)
+    pub fn any(&self) -> bool {
+        !matches!(self, Self::None)
     }
 
-    pub fn any(&self) -> bool {
-        matches!(self, Self::Decl | Self::Body)
+    pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
+        matches!((unsafe_targeting, self),
+            | (_, Unsafety::Unsafe(UnsafeSource::Unsafe) | Unsafety::Tainted(UnsafeSource::Unsafe))
+            | (UnsafeTargeting::None, Unsafety::Unsafe(_) | Unsafety::Tainted(_))
+            | (UnsafeTargeting::OnlyEnclosing(hir::Unsafety::Unsafe), Unsafety::Unsafe(UnsafeSource::EnclosingUnsafe) | Unsafety::Tainted(UnsafeSource::EnclosingUnsafe))
+        )
     }
 }
 
@@ -457,7 +471,7 @@ struct BodyUnsafetyChecker {
 impl<'ast> ast::visit::Visitor<'ast> for BodyUnsafetyChecker {
     fn visit_block(&mut self, block: &'ast ast::Block) {
         if let ast::BlockCheckMode::Unsafe(ast::UnsafeSource::UserProvided) = block.rules {
-            self.unsafety = Some(Unsafety::Body);
+            self.unsafety = Some(Unsafety::Unsafe(UnsafeSource::EnclosingUnsafe));
             return;
         }
 
@@ -465,10 +479,10 @@ impl<'ast> ast::visit::Visitor<'ast> for BodyUnsafetyChecker {
     }
 }
 
-fn check_target_unsafety<'ast>(item: AstDefItem<'ast>) -> Unsafety {
+fn check_item_unsafety<'ast>(item: AstDefItem<'ast>) -> Unsafety {
     let ast::ItemKind::Fn(target_fn) = item.kind() else { return Unsafety::None };
 
-    let ast::Unsafe::No = target_fn.sig.header.unsafety else { return Unsafety::Decl };
+    let ast::Unsafe::No = target_fn.sig.header.unsafety else { return Unsafety::Unsafe(UnsafeSource::Unsafe) };
 
     let Some(target_body) = target_fn.body else { return Unsafety::None };
     let mut checker = BodyUnsafetyChecker { unsafety: None };
@@ -476,25 +490,53 @@ fn check_target_unsafety<'ast>(item: AstDefItem<'ast>) -> Unsafety {
     checker.unsafety.unwrap_or(Unsafety::None)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntryPointAssociation {
+    pub distance: usize,
+    pub unsafe_call_path: Option<UnsafeSource>,
+}
+
+#[derive(Debug)]
 pub struct Target<'tst> {
     pub def_id: hir::LocalDefId,
     pub unsafety: Unsafety,
-    pub reachable_from: FxHashMap<&'tst Test, usize>,
+    pub reachable_from: FxHashMap<&'tst Test, EntryPointAssociation>,
     pub distance: usize,
 }
 
 impl<'tst> Target<'tst> {
-    pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
-        matches!((unsafe_targeting, self.unsafety),
-            | (_, Unsafety::Decl)
-            | (UnsafeTargeting::None, Unsafety::Body)
-            | (UnsafeTargeting::UnsafeContext, Unsafety::Body)
-        )
+    pub fn is_tainted(&self, entry_point: &Test, unsafe_targeting: UnsafeTargeting) -> bool {
+        self.reachable_from.get(entry_point).is_some_and(|entry_point| {
+            let unsafety = entry_point.unsafe_call_path.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
+            unsafety.is_unsafe(unsafe_targeting)
+        })
     }
 }
 
 pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
-    let mut previously_found_callees: FxHashMap<(hir::LocalDefId, ty::SubstsRef<'tcx>), Vec<&'tst Test>> = Default::default();
+    type Callee<'tcx> = (hir::LocalDefId, ty::SubstsRef<'tcx>);
+
+    /// A map from each entry point to the most severe unsafety source of any call path in its current call tree walk.
+    /// Safe items called from an unsafe context (dependencies) will be marked `Unsafety::Tainted` with their
+    /// corresponding unsafety source.
+    ///
+    /// ```ignore
+    /// [Safe] fn x { [None -> Safe]
+    ///     [Safe] fn y { [Some(EnclosingUnsafe) -> Unsafe(EnclosingUnsafe)]
+    ///         unsafe { [Some(Unsafe) -> Unsafe(Unsafe)]
+    ///             [Safe] fn z { [Some(Unsafe) -> Tainted(Unsafe)] }
+    ///         }
+    ///         [Safe] fn w { [Some(EnclosingUnsafe) -> Tainted(EnclosingUnsafe)] }
+    ///         [Unsafe(Unsafe)] unsafe fn u { [Some(Unsafe) -> Unsafe(Unsafe)]
+    ///             [Safe] fn v { [Some(Unsafe) -> Tainted(Unsafe)] }
+    ///             [Safe] fn w { [Some(Unsafe) -> Tainted(Unsafe)] }
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    type CallPaths<'tst> = FxHashMap<&'tst Test, Option<UnsafeSource>>;
+
+    let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
     for test in tests {
         let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
@@ -502,67 +544,88 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
-        for (callee, substs) in callees.drain() {
-            let Some(callee_def_id) = callee.as_local() else { continue; };
+        for call in callees.drain() {
+            let Some(local_def_id) = call.def_id.as_local() else { continue; };
 
-            let param_env = tcx.param_env(callee);
+            let param_env = tcx.param_env(call.def_id);
             // Using the concrete type substitutions of this call, we resolve the corresponding definition instance. The
             // type substitutions might take a different form at the resolved definition site, so we propagate them
             // instead.
-            let instance = tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten();
-            let (callee_def_id, substs) = instance.and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs))).unwrap_or((callee_def_id, substs));
+            let instance = tcx.resolve_instance(param_env.and((call.def_id, call.substs))).ok().flatten();
+            let (callee_def_id, substs) = instance
+                .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs)))
+                .unwrap_or((local_def_id, call.substs));
 
-            previously_found_callees.entry((callee_def_id, substs))
-                .and_modify(|reachable_from| reachable_from.push(test))
-                .or_insert_with(|| vec![test]);
+            let call_paths = previously_found_callees.entry((callee_def_id, substs)).or_insert_with(Default::default);
+            call_paths.insert(test, None);
         }
     }
 
     let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
 
     for distance in 0..depth {
-        let mut newly_found_callees: FxHashMap<(hir::LocalDefId, ty::SubstsRef<'tcx>), Vec<&'tst Test>> = Default::default();
+        let mut newly_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
-        for ((callee_def_id, outer_substs), reachable_from) in previously_found_callees.drain() {
-            let Some(body_id) = tcx.hir().get_by_def_id(callee_def_id).body_id() else { continue; };
+        for ((caller_def_id, outer_substs), call_paths) in previously_found_callees.drain() {
+            let Some(body_id) = tcx.hir().get_by_def_id(caller_def_id).body_id() else { continue; };
             let body = tcx.hir().body(body_id);
 
-            let Some(callee_def_item) = ast_lowering::find_def_in_ast(tcx, callee_def_id, krate) else { continue; };
+            let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, caller_def_id, krate) else { continue; };
 
-            if !attr::skip(tcx.hir().attrs(tcx.hir().local_def_id_to_hir_id(callee_def_id))) {
-                targets.entry(callee_def_id)
-                    .and_modify(|target| {
-                        for &test in &reachable_from {
-                            target.reachable_from.entry(test).or_insert(distance);
-                        }
-                    })
-                    .or_insert_with(|| Target {
-                        def_id: callee_def_id,
-                        unsafety: check_target_unsafety(callee_def_item),
-                        reachable_from: reachable_from.iter().map(|&test| (test, distance)).collect(),
+            if !attr::skip(tcx.hir().attrs(tcx.hir().local_def_id_to_hir_id(caller_def_id))) {
+                let target = targets.entry(caller_def_id).or_insert_with(|| {
+                    Target {
+                        def_id: caller_def_id,
+                        unsafety: check_item_unsafety(caller_def_item),
+                        reachable_from: Default::default(),
                         distance,
+                    }
+                });
+
+                for (&test, &unsafety) in &call_paths {
+                    let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
+                    target.unsafety = Ord::max(caller_tainting, target.unsafety);
+
+                    let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
+                        EntryPointAssociation {
+                            distance,
+                            unsafe_call_path: None,
+                        }
                     });
+
+                    entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
+                }
             }
 
             if distance < depth {
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
-                for (callee, substs) in callees.drain() {
-                    let Some(callee_def_id) = callee.as_local() else { continue; };
+                for call in callees.drain() {
+                    let Some(local_def_id) = call.def_id.as_local() else { continue; };
 
-                    let param_env = tcx.param_env(callee);
+                    let param_env = tcx.param_env(call.def_id);
                     // The type substitutions from the local, generic scope may still contain type parameters, so we
                     // fold the bound type substitutions of the concrete invocation of the enclosing function into it.
-                    let substs = res::fold_substs(tcx, substs, outer_substs);
+                    let substs = res::fold_substs(tcx, call.substs, outer_substs);
                     // Using the concrete type substitutions of this call, we resolve the corresponding definition
                     // instance. The type substitutions might take a different form at the resolved definition site, so
                     // we propagate them instead.
-                    let instance = tcx.resolve_instance(param_env.and((callee, substs))).ok().flatten();
-                    let (callee_def_id, substs) = instance.and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs))).unwrap_or((callee_def_id, substs));
+                    let instance = tcx.resolve_instance(param_env.and((call.def_id, substs))).ok().flatten();
+                    let (callee_def_id, substs) = instance
+                        .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs)))
+                        .unwrap_or((local_def_id, call.substs));
 
-                    newly_found_callees.entry((callee_def_id, substs))
-                        .and_modify(|previously_reachable_from| previously_reachable_from.extend(reachable_from.clone()))
-                        .or_insert_with(|| reachable_from.clone());
+                    let new_call_paths = newly_found_callees.entry((callee_def_id, substs)).or_insert_with(Default::default);
+
+                    for (&test, &unsafety) in &call_paths {
+                        let unsafe_source = match call.unsafety {
+                            hir::Unsafety::Normal => unsafety,
+                            hir::Unsafety::Unsafe => Some(UnsafeSource::Unsafe),
+                        };
+
+                        let new_unsafety = new_call_paths.entry(test).or_insert(unsafety);
+                        *new_unsafety = new_unsafety.or(unsafe_source);
+                    }
                 }
             }
         }
@@ -597,11 +660,11 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolve
     };
 
     for target in targets {
-        if unsafe_targeting == UnsafeTargeting::None && target.unsafety.any() { continue; }
-        if !unsafe_targeting.inner() && target.unsafety == Unsafety::Decl { continue; }
+        if !unsafe_targeting.any() && target.unsafety.any() { continue; }
+        if !unsafe_targeting.inside_unsafe() && let Unsafety::Unsafe(UnsafeSource::Unsafe) | Unsafety::Tainted(UnsafeSource::Unsafe) = target.unsafety { continue; }
 
         collector.target = Some(target);
-        collector.is_in_unsafe_block = target.unsafety == Unsafety::Decl;
+        collector.is_in_unsafe_block = target.unsafety == Unsafety::Unsafe(UnsafeSource::Unsafe);
 
         let Some(target_item) = ast_lowering::find_def_in_ast(tcx, target.def_id, krate) else { continue; };
 
