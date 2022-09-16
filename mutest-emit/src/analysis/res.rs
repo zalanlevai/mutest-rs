@@ -185,8 +185,11 @@ pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> 
     collector.callees
 }
 
-pub fn fold_substs<'tcx>(tcx: TyCtxt<'tcx>, substs: ty::SubstsRef<'tcx>, outer_substs: ty::SubstsRef<'tcx>) -> ty::SubstsRef<'tcx> {
-    ty::EarlyBinder(substs).subst(tcx, outer_substs)
+pub fn fold_substs<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, substs: ty::SubstsRef<'tcx>) -> T
+where
+    T: ty::TypeFoldable<'tcx>,
+{
+    ty::EarlyBinder(foldable).subst(tcx, substs)
 }
 
 macro interned {
