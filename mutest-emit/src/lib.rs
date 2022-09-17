@@ -4,6 +4,7 @@
 #![feature(is_some_with)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
+#![feature(label_break_value)]
 #![feature(let_chains)]
 #![feature(let_else)]
 #![feature(once_cell)]

@@ -701,30 +701,34 @@ pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
 pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize, unsafe_targeting: UnsafeTargeting) -> Vec<Mutant<'tcx, 'trg, 'm>> {
     let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
 
-    'mutation: for mutation in mutations {
-        'mutant: for mutant in &mut mutants {
-            if mutant.mutations.len() >= mutant_max_mutations_count { continue 'mutant; }
+    for mutation in mutations {
+        let mutant_candidate = 'mutant_candidate: {
+            // Unsafe mutations are isolated into their own mutant.
+            if mutation.is_unsafe(unsafe_targeting) { break 'mutant_candidate None; }
 
-            for subst in &mutation.substs {
-                if mutant.iter_substitutions().any(|s| conflicting_substs(s, subst)) {
-                    continue 'mutant;
+            mutants.iter_mut().find(|mutant| {
+                // Ensure the mutant has not already reached capacity.
+                if mutant.mutations.len() >= mutant_max_mutations_count { return false; }
+
+                // The substitutions that make up each mutation of a mutant cannot conflict with each other.
+                for subst in &mutation.substs {
+                    if mutant.iter_substitutions().any(|s| conflicting_substs(s, subst)) { return false; }
                 }
-            }
 
-            if mutation.is_unsafe(unsafe_targeting) { break 'mutant; }
-            if mutant.mutations.iter().any(|m| m.is_unsafe(unsafe_targeting)) { continue 'mutant; }
+                // Mutations cannot be added to a mutant of an unsafe mutation.
+                if mutant.mutations.iter().any(|m| m.is_unsafe(unsafe_targeting)) { return false; }
 
-            if mutant.mutations.iter().any(|m| conflicting_targets(m.target, mutation.target)) {
-                continue 'mutant;
-            }
+                // To discern results related to the various mutations of a mutant, they have to have distinct entry points.
+                if mutant.mutations.iter().any(|m| conflicting_targets(m.target, mutation.target)) { return false; }
 
-            mutant.mutations.push(mutation);
-            continue 'mutation;
+                return true;
+            })
+        };
+
+        match mutant_candidate {
+            Some(mutant) => mutant.mutations.push(mutation),
+            None => mutants.push(Mutant { mutations: vec![mutation] }),
         }
-
-        mutants.push(Mutant {
-            mutations: vec![mutation],
-        });
     }
 
     mutants
