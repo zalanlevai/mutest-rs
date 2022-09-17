@@ -190,7 +190,7 @@ impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
     }
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
-        let mut diagnostic = sess.struct_span_warn(self.location.span(), "the following mutation was not detected");
+        let mut diagnostic = sess.struct_span_warn(self.location.span(), "mutation was not detected");
         diagnostic.span_label(self.location.span(), &self.mutation.span_label());
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
