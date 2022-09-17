@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use rustc_feature::UnstableFeatures;
 use rustc_interface::interface::Result as CompilerResult;
@@ -13,6 +14,7 @@ use crate::passes::base_compiler_config;
 use crate::passes::analysis::AnalysisPassResult;
 
 pub struct CompilationPassResult {
+    pub duration: Duration,
     pub outputs: OutputFilenames,
 }
 
@@ -67,6 +69,8 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     compiler_config.opts.externs = Externs::new(externs);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
+        let t_start = Instant::now();
+
         let (linker, outputs) = compiler.enter(|queries| {
             queries.parse()?;
             queries.expansion()?;
@@ -87,6 +91,7 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
         linker.link()?;
 
         Ok(CompilationPassResult {
+            duration: t_start.elapsed(),
             outputs,
         })
     })?;

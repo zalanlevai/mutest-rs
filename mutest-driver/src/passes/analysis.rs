@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use mutest_emit::codegen::mutation::{Mutant, Target, UnsafeTargeting, Unsafety};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
@@ -8,6 +10,11 @@ use crate::config::{self, Config};
 use crate::passes::{Flow, base_compiler_config};
 
 pub struct AnalysisPassResult {
+    pub duration: Duration,
+    pub target_analysis_duration: Duration,
+    pub mutation_analysis_duration: Duration,
+    pub mutation_batching_duration: Duration,
+    pub codegen_duration: Duration,
     pub generated_crate_code: String,
 }
 
@@ -129,6 +136,12 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
             let sess = compiler.session();
 
+            let t_start = Instant::now();
+            let mut target_analysis_duration = Duration::ZERO;
+            let mut mutation_analysis_duration = Duration::ZERO;
+            let mut mutation_batching_duration = Duration::ZERO;
+            let mut codegen_duration = Duration::ZERO;
+
             let mut crate_ast = {
                 // NOTE: We must register our custom tool attribute namespace before the relevant attribute validation
                 //       is performed during macro expansion. The mutable reference to the AST must be dropped before
@@ -151,18 +164,43 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 tcx.analysis(())?;
 
                 resolver.borrow_mut().access(|resolver| {
+                    let t_target_analysis_start = Instant::now();
                     let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, opts.mutation_depth);
+                    target_analysis_duration = t_target_analysis_start.elapsed();
+
                     if let config::Mode::PrintMutationTargets = opts.mode {
                         print_targets(tcx, &targets, opts.unsafe_targeting);
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?})",
+                                total = t_start.elapsed(),
+                                targets = target_analysis_duration,
+                            );
+                        }
                         return Flow::Break;
                     }
 
+                    let t_mutation_analysis_start = Instant::now();
                     let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
+                    mutation_analysis_duration = t_mutation_analysis_start.elapsed();
+
+                    let t_mutation_batching_start = Instant::now();
                     let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count, opts.unsafe_targeting);
+                    mutation_batching_duration = t_mutation_batching_start.elapsed();
+
                     if let config::Mode::PrintMutants = opts.mode {
                         print_mutants(tcx, &mutants, opts.unsafe_targeting);
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
+                                total = t_start.elapsed(),
+                                targets = target_analysis_duration,
+                                mutations = mutation_analysis_duration,
+                                batching = mutation_batching_duration,
+                            );
+                        }
                         return Flow::Break;
                     }
+
+                    let t_codegen_start = Instant::now();
 
                     mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
 
@@ -176,6 +214,8 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
 
                     mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
+
+                    codegen_duration = t_codegen_start.elapsed();
 
                     Flow::Continue(())
                 })?;
@@ -200,6 +240,11 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
             );
 
             Flow::Continue(AnalysisPassResult {
+                duration: t_start.elapsed(),
+                target_analysis_duration,
+                mutation_analysis_duration,
+                mutation_batching_duration,
+                codegen_duration,
                 generated_crate_code,
             })
         });

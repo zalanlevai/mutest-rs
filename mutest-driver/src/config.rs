@@ -12,6 +12,7 @@ pub enum Mode {
 
 pub struct Options<'op, 'm> {
     pub mode: Mode,
+    pub report_timings: bool,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub mutation_depth: usize,

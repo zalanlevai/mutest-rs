@@ -128,6 +128,8 @@ pub fn main() {
             _ => unreachable!(),
         };
 
+        let report_timings = mutest_arg_matches.is_present("timings");
+
         let unsafe_targeting = match () {
             _ if mutest_arg_matches.is_present("safe") => UnsafeTargeting::None,
             _ if mutest_arg_matches.is_present("cautious") => UnsafeTargeting::OnlyEnclosing(Unsafety::Unsafe),
@@ -144,6 +146,7 @@ pub fn main() {
             mutest_search_path,
             opts: config::Options {
                 mode,
+                report_timings,
                 unsafe_targeting,
                 operators: &[
                     &mutest_operators::ArgDefaultShadow,
