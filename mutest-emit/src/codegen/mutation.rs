@@ -429,6 +429,18 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
             (ast::ExprKind::AssignOp(_, _lhs_ast, rhs_ast), hir::ExprKind::AssignOp(_, _lhs_hir, rhs_hir)) => {
                 ast_lowering::visit::visit_matching_expr(self, rhs_ast, rhs_hir);
             }
+            // The `else` branch of an `if` conditional must be either another `if` conditional or a block, so we do
+            // not mutate `else` blocks directly, instead visiting its contents.
+            (ast::ExprKind::If(cond_ast, then_ast, els_ast), hir::ExprKind::If(cond_hir, then_hir, els_hir)) => {
+                ast_lowering::visit::visit_matching_expr(self, cond_ast, cond_hir);
+                ast_lowering::visit::visit_block_expr(self, then_ast, then_hir);
+                if let Some(els_ast) = els_ast && let Some(els_hir) = els_hir {
+                    match &els_ast.kind {
+                        ast::ExprKind::Block(_, _) => ast_lowering::visit::walk_expr(self, els_ast, els_hir),
+                        _ => ast_lowering::visit::visit_matching_expr(self, els_ast, els_hir),
+                    }
+                }
+            }
             _ => ast_lowering::visit::walk_expr(self, expr_ast, expr_hir),
         }
 
