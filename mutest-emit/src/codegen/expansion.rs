@@ -1,6 +1,7 @@
-use std::mem;
+use std::{iter, mem};
 use std::path::{self, Path, PathBuf};
 
+use itertools::Itertools;
 use rustc_expand::base::ResolverExpand;
 use rustc_resolve::Resolver;
 use rustc_session::Session;
@@ -8,9 +9,10 @@ use rustc_session::parse::ParseSess;
 use smallvec::{SmallVec, smallvec};
 
 use crate::analysis::hir;
+use crate::analysis::tests::Test;
 use crate::codegen::ast::{self, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, sym};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 pub const GENERATED_CODE_PRELUDE: &str = r#"
@@ -376,4 +378,68 @@ pub fn revert_non_local_macro_expansions<'ast>(expanded_crate: &mut ast::Crate, 
     };
 
     reverter.visit_crate(expanded_crate);
+}
+
+fn dedupe_extern_crate_decls(items: &mut Vec<P<ast::Item>>, sym: Symbol) {
+    if let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| ast::inspect::is_extern_crate_decl(item, sym)) {
+        let mut i = first_extern_crate_index + 1;
+        while let Some(item) = items.get(i) {
+            if !ast::inspect::is_extern_crate_decl(item, sym) {
+                i += 1;
+                continue;
+            }
+
+            items.remove(i);
+        }
+    }
+}
+
+fn ensure_test_scope(items: &mut Vec<P<ast::Item>>) {
+    dedupe_extern_crate_decls(items, sym::test)
+}
+
+struct TestCaseCleaner<'tst> {
+    tests: &'tst [Test],
+}
+
+impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
+    fn visit_crate(&mut self, c: &mut ast::Crate) {
+        ast::mut_visit::noop_visit_crate(c, self);
+
+        ensure_test_scope(&mut c.items);
+    }
+
+    fn flat_map_item(&mut self, i: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
+        let mut item = i.into_inner();
+
+        if let ast::ItemKind::Mod(..) = item.kind {
+            ast::mut_visit::noop_visit_item_kind(&mut item.kind, self);
+
+            if let ast::ItemKind::Mod(_, ast::ModKind::Loaded(ref mut items, _, _)) = item.kind {
+                ensure_test_scope(items);
+            }
+        }
+
+        if let Some(_test) = self.tests.iter().find(|&test| test.descriptor.id == item.id) {
+            return smallvec![];
+        }
+
+        if let Some(_test) = self.tests.iter().find(|&test| test.item.id == item.id) {
+            // #[test]
+            let test_attr = ast::attr::mk_attr_outer(ast::attr::mk_word_item(Ident::new(sym::test, item.span)));
+
+            item.attrs = item.attrs.into_iter()
+                .filter(|attr| !attr.has_name(sym::rustc_test_marker))
+                .filter(|attr| !attr.has_name(sym::test))
+                .chain(iter::once(test_attr))
+                .collect();
+        }
+
+        smallvec![P(item)]
+    }
+}
+
+pub fn clean_up_test_cases(tests: &[Test], krate: &mut ast::Crate) {
+    let mut cleaner = TestCaseCleaner { tests };
+    cleaner.visit_crate(krate);
 }

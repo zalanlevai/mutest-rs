@@ -212,6 +212,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                     mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
                     mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
+                    mutest_emit::codegen::expansion::clean_up_test_cases(&tests, &mut generated_crate_ast);
 
                     mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
 
