@@ -39,7 +39,7 @@ pub fn command() -> clap::Command<'static> {
         .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "unsafe"]).multiple(false))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").validator(str::parse::<usize>).display_order(100))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").validator(str::parse::<usize>).display_order(100))
-        .arg(clap::arg!(--timings "Print timing information.").display_order(100))
+        .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
         // Information
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand."))
         .arg(clap::arg!(-V --version "Print version information."))

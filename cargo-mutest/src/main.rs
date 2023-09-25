@@ -155,6 +155,7 @@ fn main() {
 
     if let Some(passed_args) = passed_args {
         cmd.arg("--");
+        if matches.is_present("timings") { cmd.arg("--timings"); }
         cmd.args(&passed_args);
     }
 

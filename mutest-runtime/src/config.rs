@@ -16,4 +16,5 @@ pub enum TestTimeout {
 pub struct Options {
     pub test_ordering: TestOrdering,
     pub test_timeout: TestTimeout,
+    pub report_timings: bool,
 }

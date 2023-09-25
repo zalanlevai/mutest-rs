@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::process::{self, Termination};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::{self, Options};
 use crate::metadata::{MutantMeta, MutationMeta};
@@ -207,17 +207,22 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
     Ok(results)
 }
 
-pub fn mutest_main<S>(_args: &[String], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
+pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     let opts = Options {
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
+        report_timings: args.contains(&"--timings"),
     };
 
+    let t_start = Instant::now();
+
     println!("profiling reference test run");
+    let t_test_profiling_start = Instant::now();
     let mut profiled_tests = match profile_tests(tests) {
         Ok(tests) => tests,
         Err(_) => { process::exit(ERROR_EXIT_CODE); }
     };
+    let test_profiling_duration = t_test_profiling_start.elapsed();
 
     if profiled_tests.iter().any(|test| !matches!(test.result, test_runner::TestResult::Ignored | test_runner::TestResult::Ok)) {
         println!("not all tests passed");
@@ -259,6 +264,7 @@ pub fn mutest_main<S>(_args: &[String], tests: Vec<test::TestDescAndFn>, mutants
     let mut timed_out_mutations_count = 0;
     let mut crashed_mutations_count = 0;
 
+    let t_mutation_testing_start = Instant::now();
     for &mutant in mutants {
         active_mutant_handle.replace(Some(mutant));
 
@@ -302,6 +308,7 @@ pub fn mutest_main<S>(_args: &[String], tests: Vec<test::TestDescAndFn>, mutants
             Err(_) => { process::exit(ERROR_EXIT_CODE); }
         }
     }
+    let mutation_testing_duration = t_mutation_testing_start.elapsed();
 
     println!("mutations: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
         score = match total_mutations_count {
@@ -315,6 +322,14 @@ pub fn mutest_main<S>(_args: &[String], tests: Vec<test::TestDescAndFn>, mutants
         total = total_mutations_count,
     );
 
+    if opts.report_timings {
+        println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?})",
+            total = t_start.elapsed(),
+            profiling = test_profiling_duration,
+            tests = mutation_testing_duration,
+        );
+    }
+
     if !all_test_runs_failed_successfully {
         process::exit(ERROR_EXIT_CODE);
     }
@@ -322,6 +337,7 @@ pub fn mutest_main<S>(_args: &[String], tests: Vec<test::TestDescAndFn>, mutants
 
 pub fn mutest_main_static<S>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     let args = env::args().collect::<Vec<_>>();
+    let args = args.iter().map(String::as_ref).collect::<Vec<_>>();
     let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test(test)).collect();
 
     mutest_main(&args, owned_tests, mutants, active_mutant_handle)
