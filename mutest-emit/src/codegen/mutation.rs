@@ -698,7 +698,45 @@ pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
     !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
 }
 
-pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize, unsafe_targeting: UnsafeTargeting) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize, unsafe_targeting: UnsafeTargeting) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+    let conflicting_mutations = {
+        let mut mutation_conflicts: FxHashSet<(MutId, MutId)> = Default::default();
+
+        let mut iterator = mutations.iter();
+        while let Some(mutation) = iterator.next() {
+            for other in iterator.clone() {
+                let is_conflicting = false
+                    || mutation.is_unsafe(unsafe_targeting)
+                    || other.is_unsafe(unsafe_targeting)
+                    || conflicting_targets(&mutation.target, &other.target);
+
+                if is_conflicting {
+                    mutation_conflicts.insert((mutation.id, other.id));
+                }
+            }
+        }
+
+        move |a: MutId, b: MutId| mutation_conflicts.contains(&(a, b)) || mutation_conflicts.contains(&(b, a))
+    };
+
+    let mutation_conflict_heuristic = mutations.iter()
+        .map(|mutation| {
+            let mut conflict_heuristic = 0_usize;
+
+            for other in &mutations {
+                if mutation == other { continue; }
+
+                if conflicting_mutations(mutation.id, other.id) {
+                    conflict_heuristic += 1;
+                }
+            }
+
+            (mutation.id, conflict_heuristic)
+        })
+        .collect::<FxHashMap<_, _>>();
+
+    mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)).reverse());
+
     let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
 
     for mutation in mutations {
@@ -719,9 +757,9 @@ pub fn batch_mutations<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, muta
                 if mutant.mutations.iter().any(|m| m.is_unsafe(unsafe_targeting)) { return false; }
 
                 // To discern results related to the various mutations of a mutant, they have to have distinct entry points.
-                if mutant.mutations.iter().any(|m| conflicting_targets(m.target, mutation.target)) { return false; }
+                if mutant.mutations.iter().any(|m| conflicting_mutations(m.id, mutation.id)) { return false; }
 
-                return true;
+                true
             })
         };
 
