@@ -14,11 +14,11 @@ use crate::analysis::tests::Test;
 use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast::{self, P};
 use crate::codegen::ast::visit::Visitor;
-use crate::codegen::attr;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::substitution::conflicting_substs;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
+use crate::codegen::tool_attr;
 
 #[derive(Clone)]
 pub struct Lowered<A, H> {
@@ -347,7 +347,7 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
 
     fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {
         if !is_local_span(self.tcx.sess.source_map(), param_ast.span) { return; };
-        if attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
             // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
@@ -369,7 +369,7 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
 
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         if !is_local_span(self.tcx.sess.source_map(), block_ast.span) { return; };
-        if attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
         if !self.unsafe_targeting.inside_unsafe() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
 
         let is_in_unsafe_block = self.is_in_unsafe_block;
@@ -380,7 +380,7 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
 
     fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
         if !is_local_span(self.tcx.sess.source_map(), stmt_ast.span) { return; };
-        if attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
             // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
@@ -402,7 +402,7 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
 
     fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
         if !is_local_span(self.tcx.sess.source_map(), expr_ast.span) { return; };
-        if attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
             // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
@@ -591,7 +591,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowe
 
             let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, caller_def_id, krate) else { continue; };
 
-            if !attr::skip(tcx.hir().attrs(tcx.hir().local_def_id_to_hir_id(caller_def_id))) {
+            if !tool_attr::skip(tcx.hir().attrs(tcx.hir().local_def_id_to_hir_id(caller_def_id))) {
                 let target = targets.entry(caller_def_id).or_insert_with(|| {
                     Target {
                         def_id: caller_def_id,

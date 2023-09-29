@@ -148,7 +148,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 //       any further queries are performed.
                 let mut crate_ast_steal = queries.parse()?;
                 let crate_ast = crate_ast_steal.get_mut();
-                mutest_emit::codegen::attr::register(sess, crate_ast);
+                mutest_emit::codegen::tool_attr::register(sess, crate_ast);
                 crate_ast.clone()
             };
 
