@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::process::{self, Termination};
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use crate::config::{self, Options};
@@ -16,23 +17,23 @@ mod test {
 
 // TODO: Consider using `MaybeUninit<Mutant>` for the cell type if the harness never runs the
 //       program without any mutations applied.
-pub struct ActiveMutantHandle<S: 'static>(parking_lot::RwLock<Option<&'static MutantMeta<S>>>);
+pub struct ActiveMutantHandle<S: 'static>(RwLock<Option<&'static MutantMeta<S>>>);
 
 impl <S> ActiveMutantHandle<S> {
     pub const fn empty() -> Self {
-        Self(parking_lot::const_rwlock(None))
+        Self(RwLock::new(None))
     }
 
     pub const fn with(v: &'static MutantMeta<S>) -> Self {
-        Self(parking_lot::const_rwlock(Some(v)))
+        Self(RwLock::new(Some(v)))
     }
 
     pub fn borrow(&self) -> Option<&'static MutantMeta<S>> {
-        *self.0.read()
+        *self.0.read().unwrap()
     }
 
     pub fn replace(&self, v: Option<&'static MutantMeta<S>>) {
-        *self.0.write() = v;
+        *self.0.write().unwrap() = v;
     }
 }
 
@@ -74,7 +75,7 @@ fn profile_tests(tests: Vec<test::TestDescAndFn>) -> Result<Vec<ProfiledTest>, I
         match event {
             test_runner::TestEvent::Result(test) => {
                 let test_desc_and_fn = remaining_tests
-                    .drain_filter(|t| t.desc.name == test.desc.name)
+                    .extract_if(|t| t.desc.name == test.desc.name)
                     .next().expect("completed test not found amongst remaining tests");
 
                 profiled_tests.push(ProfiledTest {

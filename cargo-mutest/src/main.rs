@@ -1,5 +1,3 @@
-#![feature(is_some_with)]
-
 use std::env;
 use std::process::{self, Command};
 

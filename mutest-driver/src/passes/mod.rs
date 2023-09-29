@@ -1,10 +1,10 @@
 use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
 
+use rustc_hash::FxHashMap;
 use rustc_interface::Config as CompilerConfig;
 use rustc_interface::interface::Result as CompilerResult;
-use rustc_session::DiagnosticOutput;
-use rustc_session::config::{CheckCfg, Input};
+use rustc_session::config::{CheckCfg, ExpectedValues, Input};
 use rustc_session::parse::ParseSess;
 use rustc_span::Symbol;
 use rustc_span::source_map::RealFileLoader;
@@ -69,9 +69,18 @@ impl<T, E, F: From<E>> From<Flow<T, E>> for Result<Option<T>, F> {
 
 pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
     let crate_check_cfg = CheckCfg {
-        names_valid: config.crate_check_cfg.names_valid.clone(),
-        well_known_values: config.crate_check_cfg.well_known_values,
-        values_valid: config.crate_check_cfg.values_valid.clone(),
+        exhaustive_names: config.crate_check_cfg.exhaustive_names,
+        exhaustive_values: config.crate_check_cfg.exhaustive_values,
+        expecteds: {
+            let mut expecteds: FxHashMap<String, ExpectedValues<String>> = Default::default();
+            for (key, value) in config.crate_check_cfg.expecteds.iter() {
+                expecteds.insert(key.clone(), match value {
+                    ExpectedValues::Some(v) => ExpectedValues::Some(v.clone()),
+                    ExpectedValues::Any => ExpectedValues::Any,
+                });
+            }
+            expecteds
+        },
     };
 
     let input = match &config.input {
@@ -84,17 +93,18 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
         crate_cfg: config.crate_cfg.clone(),
         crate_check_cfg,
         input,
-        input_path: config.input_path.clone(),
         output_file: config.output_file.clone(),
         output_dir: config.output_dir.clone(),
+        ice_file: config.ice_file.clone(),
         file_loader: Some(Box::new(RealFileLoader)),
-        diagnostic_output: DiagnosticOutput::Default,
+        locale_resources: config.locale_resources,
         lint_caps: config.lint_caps.clone(),
         parse_sess_created: None,
         register_lints: None,
         override_queries: None,
         make_codegen_backend: None,
         registry: rustc_driver::diagnostics_registry(),
+        expanded_args: config.expanded_args.clone(),
     }
 }
 
@@ -107,7 +117,7 @@ impl rustc_driver::Callbacks for RustcConfigCallbacks {
         self.config = Some(copy_compiler_settings(config));
     }
 
-    fn after_parsing<'tcx>(
+    fn after_crate_root_parsing<'tcx>(
         &mut self,
         _compiler: &rustc_interface::interface::Compiler,
         _queries: &'tcx rustc_interface::Queries<'tcx>,

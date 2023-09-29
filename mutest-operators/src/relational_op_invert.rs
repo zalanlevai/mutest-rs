@@ -30,7 +30,7 @@ impl<'a> Operator<'a> for RelationalOpInvert {
     type Mutation = RelationalOpInvertMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx: _, resolver: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx: _, resolutions: _, def_site: def, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
 

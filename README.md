@@ -34,7 +34,7 @@ cargo install --force --path cargo-mutest
 > Thus, a typical invocation, with the code checked out and built in `~/Developer/mutest-rs` and a library target will look as follows:
 >
 > ```sh
-> MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/release cargo +nightly-2022-06-13 mutest --lib run
+> MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/release cargo +nightly-2023-09-26 mutest --lib run
 > ```
 
 Run the `cargo mutest` subcommand against a standard Cargo package directory or workspace containing your crate.

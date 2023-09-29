@@ -50,12 +50,11 @@ mod inlined {
 }
 
 pub mod mk {
-    use std::iter;
-
     use rustc_ast as ast;
     use rustc_ast::ptr::P;
-    use rustc_span::{Span, Symbol};
+    use rustc_span::{Span, Symbol, sym};
     use rustc_span::symbol::{Ident, kw};
+    use thin_vec::{ThinVec, thin_vec};
 
     pub fn angle_bracketed_args(sp: Span, args: Vec<ast::GenericArg>) -> Option<P<ast::GenericArgs>> {
         if args.is_empty() { return None; }
@@ -64,7 +63,7 @@ pub mod mk {
         Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: sp, args })))
     }
 
-    pub fn parenthesized_args(sp: Span, inputs: Vec<P<ast::Ty>>, output: Option<P<ast::Ty>>) -> P<ast::GenericArgs> {
+    pub fn parenthesized_args(sp: Span, inputs: ThinVec<P<ast::Ty>>, output: Option<P<ast::Ty>>) -> P<ast::GenericArgs> {
         P(ast::GenericArgs::Parenthesized(ast::ParenthesizedArgs {
             span: sp,
             inputs,
@@ -89,7 +88,7 @@ pub mod mk {
         assert!(!idents.is_empty());
 
         let add_root = global && !idents[0].is_path_segment_keyword();
-        let mut segments = Vec::with_capacity(idents.len() + add_root as usize);
+        let mut segments = ThinVec::with_capacity(idents.len() + add_root as usize);
         if add_root {
             // NOTE: A path segment with an empty identifier is used instead of `ast::PathSegment::path_root`, because
             //       `ast::PathSegment::path_root` uses the `{{root}}` symbol which is improperly printed in token
@@ -165,16 +164,16 @@ pub mod mk {
         ast::MutTy { ty, mutbl }
     }
 
-    pub fn ty_path(q_self: Option<ast::QSelf>, path: ast::Path) -> P<ast::Ty> {
+    pub fn ty_path(q_self: Option<P<ast::QSelf>>, path: ast::Path) -> P<ast::Ty> {
         self::ty(path.span, ast::TyKind::Path(q_self, path))
     }
 
-    pub fn ty_ident(sp: Span, q_self: Option<ast::QSelf>, ident: Ident) -> P<ast::Ty> {
+    pub fn ty_ident(sp: Span, q_self: Option<P<ast::QSelf>>, ident: Ident) -> P<ast::Ty> {
         self::ty_path(q_self, self::path_ident(sp, ident))
     }
 
     pub fn ty_rptr(sp: Span, ty: P<ast::Ty>, lifetime: Option<ast::Lifetime>, mutbl: ast::Mutability) -> P<ast::Ty> {
-        self::ty(sp, ast::TyKind::Rptr(lifetime, self::ty_mut(ty, mutbl)))
+        self::ty(sp, ast::TyKind::Ref(lifetime, self::ty_mut(ty, mutbl)))
     }
 
     pub fn ty_ref(sp: Span, ty: P<ast::Ty>, lifetime: Option<ast::Lifetime>) -> P<ast::Ty> {
@@ -197,7 +196,7 @@ pub mod mk {
         self::ty(sp, ast::TyKind::Slice(ty))
     }
 
-    pub fn ty_tuple(sp: Span, tys: Vec<P<ast::Ty>>) -> P<ast::Ty> {
+    pub fn ty_tuple(sp: Span, tys: ThinVec<P<ast::Ty>>) -> P<ast::Ty> {
         self::ty(sp, ast::TyKind::Tup(tys))
     }
 
@@ -224,7 +223,7 @@ pub mod mk {
     pub fn poly_trait_ref(sp: Span, path: ast::Path) -> ast::PolyTraitRef {
         ast::PolyTraitRef {
             span: sp,
-            bound_generic_params: Vec::new(),
+            bound_generic_params: ThinVec::new(),
             trait_ref: self::trait_ref(path),
         }
     }
@@ -328,27 +327,27 @@ pub mod mk {
         self::pat(sp, ast::PatKind::Lit(expr))
     }
 
-    pub fn pat_ident_binding_mode(sp: Span, ident: Ident, binding: ast::BindingMode) -> P<ast::Pat> {
+    pub fn pat_ident_binding_mode(sp: Span, ident: Ident, binding: ast::BindingAnnotation) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::Ident(binding, ident.with_span_pos(sp), None))
     }
 
     pub fn pat_ident(sp: Span, ident: Ident) -> P<ast::Pat> {
-        self::pat_ident_binding_mode(sp, ident, ast::BindingMode::ByValue(ast::Mutability::Not))
+        self::pat_ident_binding_mode(sp, ident, ast::BindingAnnotation::NONE)
     }
 
     pub fn pat_path(sp: Span, path: ast::Path) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::Path(None, path))
     }
 
-    pub fn pat_tuple(sp: Span, pats: Vec<P<ast::Pat>>) -> P<ast::Pat> {
+    pub fn pat_tuple(sp: Span, pats: ThinVec<P<ast::Pat>>) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::Tuple(pats))
     }
 
-    pub fn pat_tuple_struct(sp: Span, path: ast::Path, pats: Vec<P<ast::Pat>>) -> P<ast::Pat> {
+    pub fn pat_tuple_struct(sp: Span, path: ast::Path, pats:ThinVec<P<ast::Pat>>) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::TupleStruct(None, path, pats))
     }
 
-    pub fn pat_struct(sp: Span, path: ast::Path, field_pats: Vec<ast::PatField>, rest: bool) -> P<ast::Pat> {
+    pub fn pat_struct(sp: Span, path: ast::Path, field_pats: ThinVec<ast::PatField>, rest: bool) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::Struct(None, path, field_pats, rest))
     }
 
@@ -364,7 +363,7 @@ pub mod mk {
         }
     }
 
-    pub fn expr_match(span: Span, expr: P<ast::Expr>, arms: Vec<ast::Arm>) -> P<ast::Expr> {
+    pub fn expr_match(span: Span, expr: P<ast::Expr>, arms: ThinVec<ast::Arm>) -> P<ast::Expr> {
         self::expr(span, ast::ExprKind::Match(expr, arms))
     }
 
@@ -372,24 +371,28 @@ pub mod mk {
         self::expr(sp, ast::ExprKind::If(cond, then, els.map(self::expr_block)))
     }
 
-    pub fn expr_call(sp: Span, expr: P<ast::Expr>, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_call(sp: Span, expr: P<ast::Expr>, args: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr(sp, ast::ExprKind::Call(expr, args))
     }
 
-    pub fn expr_call_ident(sp: Span, ident: Ident, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_call_ident(sp: Span, ident: Ident, args: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr(sp, ast::ExprKind::Call(self::expr_ident(sp, ident), args))
     }
 
-    pub fn expr_call_path(sp: Span, path: ast::Path, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_call_path(sp: Span, path: ast::Path, args: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr(sp, ast::ExprKind::Call(self::expr_path(path), args))
     }
 
-    pub fn expr_method_call(sp: Span, receiver: P<ast::Expr>, path: ast::PathSegment, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
-        let expr = iter::once(receiver).chain(args.into_iter()).collect::<Vec<_>>();
-        self::expr(sp, ast::ExprKind::MethodCall(path, expr, sp))
+    pub fn expr_method_call(sp: Span, receiver: P<ast::Expr>, path: ast::PathSegment, args: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::MethodCall(Box::new(ast::MethodCall {
+            seg: path,
+            receiver,
+            args,
+            span: sp,
+        })))
     }
 
-    pub fn expr_method_call_path_ident(sp: Span, receiver: ast::Path, ident: Ident, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_method_call_path_ident(sp: Span, receiver: ast::Path, ident: Ident, args: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr_method_call(sp, self::expr_path(receiver), self::path_segment(sp, ident, vec![]), args)
     }
 
@@ -402,7 +405,7 @@ pub mod mk {
     }
 
     pub fn expr_index(sp: Span, expr: P<ast::Expr>, index: P<ast::Expr>) -> P<ast::Expr> {
-        self::expr(sp, ast::ExprKind::Index(expr, index))
+        self::expr(sp, ast::ExprKind::Index(expr, index, sp))
     }
 
     pub fn expr_block(block: P<ast::Block>) -> P<ast::Expr> {
@@ -410,7 +413,7 @@ pub mod mk {
     }
 
     pub fn expr_noop(sp: Span) -> P<ast::Expr> {
-        self::expr_block(self::block(sp, vec![]))
+        self::expr_block(self::block(sp, ThinVec::new()))
     }
 
     pub fn param(sp: Span, pat: P<ast::Pat>, ty: P<ast::Ty>) -> ast::Param {
@@ -435,7 +438,7 @@ pub mod mk {
         }
     }
 
-    pub fn fn_decl(inputs: Vec<ast::Param>, output: ast::FnRetTy) -> P<ast::FnDecl> {
+    pub fn fn_decl(inputs: ThinVec<ast::Param>, output: ast::FnRetTy) -> P<ast::FnDecl> {
         P(ast::FnDecl { inputs, output })
     }
 
@@ -447,14 +450,17 @@ pub mod mk {
             ast::FnRetTy::Default(sp),
         );
 
-        self::expr(sp, ast::ExprKind::Closure(
-            ast::CaptureBy::Ref,
-            ast::Async::No,
-            ast::Movability::Movable,
+        self::expr(sp, ast::ExprKind::Closure(Box::new(ast::Closure {
+            binder: ast::ClosureBinder::NotPresent,
+            capture_clause: ast::CaptureBy::Ref,
+            constness: ast::Const::No,
+            asyncness: ast::Async::No,
+            movability: ast::Movability::Movable,
             fn_decl,
             body,
-            sp,
-        ))
+            fn_decl_span: sp,
+            fn_arg_span: sp,
+        })))
     }
 
     pub fn expr_struct_field(sp: Span, ident: Ident, expr: P<ast::Expr>) -> ast::ExprField {
@@ -480,7 +486,7 @@ pub mod mk {
         }
     }
 
-    pub fn expr_struct(sp: Span, path: ast::Path, fields: Vec<ast::ExprField>) -> P<ast::Expr> {
+    pub fn expr_struct(sp: Span, path: ast::Path, fields: ThinVec<ast::ExprField>) -> P<ast::Expr> {
         self::expr(sp, ast::ExprKind::Struct(P(ast::StructExpr {
             qself: None,
             path,
@@ -489,20 +495,26 @@ pub mod mk {
         })))
     }
 
-    pub fn expr_struct_ident(sp: Span, ident: Ident, fields: Vec<ast::ExprField>) -> P<ast::Expr> {
+    pub fn expr_struct_ident(sp: Span, ident: Ident, fields: ThinVec<ast::ExprField>) -> P<ast::Expr> {
         self::expr_struct(sp, self::path_ident(sp, ident), fields)
     }
 
-    pub fn expr_lit(sp: Span, kind: ast::LitKind) -> P<ast::Expr> {
-        self::expr(sp, ast::ExprKind::Lit(ast::Lit::from_lit_kind(kind, sp)))
+    pub fn expr_lit(sp: Span, kind: ast::token::LitKind, symbol: Symbol, suffix: Option<Symbol>) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::Lit(ast::token::Lit::new(kind, symbol, suffix)))
     }
 
     pub fn expr_bool(sp: Span, value: bool) -> P<ast::Expr> {
-        self::expr_lit(sp, ast::LitKind::Bool(value))
+        let symbol = match value {
+            true => kw::True,
+            false => kw::False,
+        };
+
+        self::expr_lit(sp, ast::token::LitKind::Bool, symbol, None)
     }
 
     pub fn expr_int(sp: Span, i: isize) -> P<ast::Expr> {
-        let abs = self::expr_lit(sp, ast::LitKind::Int(i.abs() as u128, ast::LitIntType::Unsuffixed));
+        let abs_symbol = Symbol::intern(&i.abs().to_string());
+        let abs = self::expr_lit(sp, ast::token::LitKind::Integer, abs_symbol, None);
 
         match i {
             0.. => abs,
@@ -510,27 +522,47 @@ pub mod mk {
         }
     }
 
+    pub fn expr_int_exact(sp: Span, i: isize, suffix: Symbol) -> P<ast::Expr> {
+        let abs_symbol = Symbol::intern(&i.abs().to_string());
+        let abs = self::expr_lit(sp, ast::token::LitKind::Integer, abs_symbol, Some(suffix));
+
+        match i {
+            0.. => abs,
+            _ => self::expr_unary(sp, ast::UnOp::Neg, abs)
+        }
+    }
+
+    pub fn expr_float_exact(sp: Span, v: f64, suffix: Symbol) -> P<ast::Expr> {
+        let abs_symbol = Symbol::intern(&v.abs().to_string());
+        let abs = self::expr_lit(sp, ast::token::LitKind::Float, abs_symbol, Some(suffix));
+
+        match v {
+            0_f64.. => abs,
+            _ => self::expr_unary(sp, ast::UnOp::Neg, abs)
+        }
+    }
+
     pub fn expr_usize(sp: Span, i: usize) -> P<ast::Expr> {
-        self::expr_lit(sp, ast::LitKind::Int(i as u128, ast::LitIntType::Unsigned(ast::UintTy::Usize)))
+        self::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&i.to_string()), Some(sym::usize))
     }
 
     pub fn expr_u32(sp: Span, i: u32) -> P<ast::Expr> {
-        self::expr_lit(sp, ast::LitKind::Int(i as u128, ast::LitIntType::Unsigned(ast::UintTy::U32)))
+        self::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&i.to_string()), Some(sym::u32))
     }
 
     pub fn expr_str(sp: Span, str: &str) -> P<ast::Expr> {
-        self::expr_lit(sp, ast::LitKind::Str(Symbol::intern(str), ast::StrStyle::Cooked))
+        self::expr_lit(sp, ast::token::LitKind::Str, Symbol::intern(str), None)
     }
 
-    pub fn expr_tuple(sp: Span, exprs: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_tuple(sp: Span, exprs: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr(sp, ast::ExprKind::Tup(exprs))
     }
 
-    pub fn expr_array(sp: Span, exprs: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_array(sp: Span, exprs: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr(sp, ast::ExprKind::Array(exprs))
     }
 
-    pub fn expr_slice(sp: Span, exprs: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+    pub fn expr_slice(sp: Span, exprs: ThinVec<P<ast::Expr>>) -> P<ast::Expr> {
         self::expr_ref(sp, self::expr_array(sp, exprs))
     }
 
@@ -538,7 +570,7 @@ pub mod mk {
         self::expr(sp, ast::ExprKind::Cast(expr, ty))
     }
 
-    pub fn block_check_mode(sp: Span, stmts: Vec<ast::Stmt>, block_check_mode: ast::BlockCheckMode) -> P<ast::Block> {
+    pub fn block_check_mode(sp: Span, stmts: ThinVec<ast::Stmt>, block_check_mode: ast::BlockCheckMode) -> P<ast::Block> {
         P(ast::Block {
             id: ast::DUMMY_NODE_ID,
             span: sp,
@@ -549,16 +581,16 @@ pub mod mk {
         })
     }
 
-    pub fn block(sp: Span, stmts: Vec<ast::Stmt>) -> P<ast::Block> {
+    pub fn block(sp: Span, stmts: ThinVec<ast::Stmt>) -> P<ast::Block> {
         self::block_check_mode(sp, stmts, ast::BlockCheckMode::Default)
     }
 
-    pub fn block_unsafe(sp: Span, stmts: Vec<ast::Stmt>, unsafe_source: ast::UnsafeSource) -> P<ast::Block> {
+    pub fn block_unsafe(sp: Span, stmts: ThinVec<ast::Stmt>, unsafe_source: ast::UnsafeSource) -> P<ast::Block> {
         self::block_check_mode(sp, stmts, ast::BlockCheckMode::Unsafe(unsafe_source))
     }
 
     pub fn block_expr(expr: P<ast::Expr>) -> P<ast::Block> {
-        self::block(expr.span, vec![self::stmt_expr(expr)])
+        self::block(expr.span, thin_vec![self::stmt_expr(expr)])
     }
 
     pub fn vis(sp: Span, kind: ast::VisibilityKind) -> ast::Visibility {
@@ -577,10 +609,11 @@ pub mod mk {
         self::vis(sp, ast::VisibilityKind::Restricted {
             id: ast::DUMMY_NODE_ID,
             path: P(self::path_ident(sp, Ident::new(kw::Crate, sp))),
+            shorthand: true,
         })
     }
 
-    pub fn item(sp: Span, attrs: Vec<ast::Attribute>, vis: ast::Visibility, ident: Ident, kind: ast::ItemKind) -> P<ast::Item> {
+    pub fn item(sp: Span, attrs: ThinVec<ast::Attribute>, vis: ast::Visibility, ident: Ident, kind: ast::ItemKind) -> P<ast::Item> {
         P(ast::Item {
             id: ast::DUMMY_NODE_ID,
             span: sp,
@@ -593,27 +626,44 @@ pub mod mk {
     }
 
     pub fn item_static(sp: Span, vis: ast::Visibility, mutbl: ast::Mutability, ident: Ident, ty: P<ast::Ty>, expr: P<ast::Expr>) -> P<ast::Item> {
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Static(ty, mutbl, Some(expr)))
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Static(Box::new(ast::StaticItem {
+            ty,
+            mutability: mutbl,
+            expr: Some(expr),
+        })))
     }
 
     pub fn item_const(sp: Span, vis: ast::Visibility, ident: Ident, ty: P<ast::Ty>, expr: P<ast::Expr>) -> P<ast::Item> {
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Const(ast::Defaultness::Final, ty, Some(expr)))
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Const(Box::new(ast::ConstItem {
+            defaultness: ast::Defaultness::Final,
+            generics: ast::Generics {
+                params: ThinVec::new(),
+                where_clause: ast::WhereClause {
+                    has_where_token: false,
+                    predicates: ThinVec::new(),
+                    span: sp,
+                },
+                span: sp,
+            },
+            ty,
+            expr: Some(expr),
+        })))
     }
 
-    pub fn item_mod(sp: Span, vis: ast::Visibility, ident: Ident, items: Vec<P<ast::Item>>) -> P<ast::Item> {
+    pub fn item_mod(sp: Span, vis: ast::Visibility, ident: Ident, items: ThinVec<P<ast::Item>>) -> P<ast::Item> {
         let mod_kind = ast::ModKind::Loaded(items, ast::Inline::Yes, ast::ModSpans { inner_span: sp, inject_use_span: sp });
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Mod(ast::Unsafe::No, mod_kind))
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Mod(ast::Unsafe::No, mod_kind))
     }
 
     pub fn item_extern_crate(sp: Span, krate: Symbol, ident: Option<Ident>) -> P<ast::Item> {
         match ident {
-            Some(ident) => self::item(sp, vec![], self::vis_default(sp), ident, ast::ItemKind::ExternCrate(Some(krate))),
-            None => self::item(sp, vec![], self::vis_default(sp), Ident::new(krate, sp), ast::ItemKind::ExternCrate(None)),
+            Some(ident) => self::item(sp, ThinVec::new(), self::vis_default(sp), ident, ast::ItemKind::ExternCrate(Some(krate))),
+            None => self::item(sp, ThinVec::new(), self::vis_default(sp), Ident::new(krate, sp), ast::ItemKind::ExternCrate(None)),
         }
     }
 
-    pub fn item_fn(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, header: Option<ast::FnHeader>, inputs: Vec<ast::Param>, output: Option<P<ast::Ty>>, body: Option<P<ast::Block>>) -> P<ast::Item> {
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Fn(Box::new(ast::Fn {
+    pub fn item_fn(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, header: Option<ast::FnHeader>, inputs: ThinVec<ast::Param>, output: Option<P<ast::Ty>>, body: Option<P<ast::Block>>) -> P<ast::Item> {
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Fn(Box::new(ast::Fn {
             defaultness: ast::Defaultness::Final,
             generics: generics.unwrap_or_default(),
             sig: ast::FnSig {
@@ -637,22 +687,22 @@ pub mod mk {
         }
     }
 
-    pub fn item_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: Vec<ast::FieldDef>) -> P<ast::Item> {
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Struct(
+    pub fn item_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: ThinVec<ast::FieldDef>) -> P<ast::Item> {
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
             ast::VariantData::Struct(fields, false),
             generics.unwrap_or_default(),
         ))
     }
 
-    pub fn item_tuple_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: Vec<ast::FieldDef>) -> P<ast::Item> {
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Struct(
+    pub fn item_tuple_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: ThinVec<ast::FieldDef>) -> P<ast::Item> {
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
             ast::VariantData::Tuple(fields, ast::DUMMY_NODE_ID),
             generics.unwrap_or_default(),
         ))
     }
 
     pub fn item_unit_struct(sp: Span, vis: ast::Visibility, ident: Ident) -> P<ast::Item> {
-        self::item(sp, vec![], vis, ident, ast::ItemKind::Struct(
+        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
             ast::VariantData::Unit(ast::DUMMY_NODE_ID),
             Default::default(),
         ))
@@ -668,7 +718,7 @@ pub mod mk {
 
     pub fn stmt_local(sp: Span, mutbl: bool, ident: Ident, ty: Option<P<ast::Ty>>, kind: ast::LocalKind) -> ast::Stmt {
         let pat = match mutbl {
-            true => self::pat_ident_binding_mode(sp, ident, ast::BindingMode::ByValue(ast::Mutability::Mut)),
+            true => self::pat_ident_binding_mode(sp, ident, ast::BindingAnnotation::MUT),
             false => self::pat_ident(sp, ident),
         };
 
@@ -699,23 +749,51 @@ pub mod mk {
         self::stmt(sp, ast::StmtKind::Item(item))
     }
 
+    pub fn attr_inner_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
+        ast::attr::mk_attr(g, ast::AttrStyle::Inner, path, args, sp)
+    }
+
+    pub fn attr_outer_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
+        ast::attr::mk_attr(g, ast::AttrStyle::Outer, path, args, sp)
+    }
+
+    pub fn attr_inner(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
+        ast::attr::mk_attr(g, ast::AttrStyle::Inner, ast::Path::from_ident(ident), args, sp)
+    }
+
+    pub fn attr_outer(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
+        ast::attr::mk_attr(g, ast::AttrStyle::Outer, ast::Path::from_ident(ident), args, sp)
+    }
+
+    pub fn attr_args_delimited(sp: Span, delimiter: ast::token::Delimiter, tokens: ast::tokenstream::TokenStream) -> ast::AttrArgs {
+        ast::AttrArgs::Delimited(ast::DelimArgs {
+            dspan: ast::tokenstream::DelimSpan::from_single(sp),
+            delim: delimiter,
+            tokens,
+        })
+    }
+
     pub fn token(sp: Span, kind: ast::token::TokenKind) -> ast::token::Token {
         ast::token::Token { span: sp, kind }
     }
 
-    pub fn tt_token(sp: Span, kind: ast::token::TokenKind) -> ast::tokenstream::TokenTree {
-        ast::tokenstream::TokenTree::Token(self::token(sp, kind))
+    pub fn tt_token_alone(sp: Span, kind: ast::token::TokenKind) -> ast::tokenstream::TokenTree {
+        ast::tokenstream::TokenTree::Token(self::token(sp, kind), ast::tokenstream::Spacing::Alone)
     }
 
-    pub fn ts_token(sp: Span, spacing: ast::tokenstream::Spacing, kind: ast::token::TokenKind) -> ast::tokenstream::TreeAndSpacing {
-        (self::tt_token(sp, kind), spacing)
+    pub fn tt_token_joint(sp: Span, kind: ast::token::TokenKind) -> ast::tokenstream::TokenTree {
+        ast::tokenstream::TokenTree::Token(self::token(sp, kind), ast::tokenstream::Spacing::Joint)
     }
 
-    pub fn ts_path(sp: Span, mut path: ast::Path) -> Vec<ast::tokenstream::TreeAndSpacing> {
+    pub fn tt_delimited(sp: Span, delimiter: ast::token::Delimiter, token_stream: ast::tokenstream::TokenStream) -> ast::tokenstream::TokenTree {
+        ast::tokenstream::TokenTree::Delimited(ast::tokenstream::DelimSpan::from_single(sp), delimiter, token_stream)
+    }
+
+    pub fn ts_path(sp: Span, mut path: ast::Path) -> Vec<ast::tokenstream::TokenTree> {
         assert!(path.segments.last().is_some_and(|s| s.args.is_none()));
 
-        let path_sep_token = |sp: Span| self::ts_token(sp, ast::tokenstream::Spacing::Joint, ast::token::TokenKind::ModSep);
-        let segment_token = |sp: Span, segment: ast::PathSegment| self::ts_token(sp, ast::tokenstream::Spacing::Joint, ast::token::TokenKind::Ident(segment.ident.name, false));
+        let path_sep_token = |sp: Span| self::tt_token_joint(sp, ast::token::TokenKind::ModSep);
+        let segment_token = |sp: Span, segment: ast::PathSegment| self::tt_token_joint(sp, ast::token::TokenKind::Ident(segment.ident.name, false));
 
         let is_global = !path.segments[0].ident.is_path_segment_keyword();
         let mut tokens = Vec::with_capacity(2 * path.segments.len() - 1 + is_global as usize);
@@ -732,7 +810,7 @@ pub mod mk {
         tokens
     }
 
-    pub fn token_stream(token_trees: Vec<ast::tokenstream::TreeAndSpacing>) -> ast::tokenstream::TokenStream {
+    pub fn token_stream(token_trees: Vec<ast::tokenstream::TokenTree>) -> ast::tokenstream::TokenStream {
         ast::tokenstream::TokenStream::new(token_trees)
     }
 }
@@ -744,8 +822,8 @@ pub mod inspect {
     use rustc_span::Symbol;
 
     pub fn match_attr_name(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
-        let ast::AttrKind::Normal(attr_item, _) = &attr.kind else { return false; };
-        match (tool, &attr_item.path.segments[..]) {
+        let ast::AttrKind::Normal(attr_item) = &attr.kind else { return false; };
+        match (tool, &attr_item.item.path.segments[..]) {
             (None, [path_name]) => path_name.ident.name == name,
             (Some(tool), [path_tool, path_name]) => path_tool.ident.name == tool && path_name.ident.name == name,
             _ => false,
@@ -757,7 +835,7 @@ pub mod inspect {
         match_attr_name(attr, tool, word)
     }
 
-    pub fn is_name_value_attr(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::Lit) -> bool {
+    pub fn is_name_value_attr(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::MetaItemLit) -> bool {
         let Some(ast::MetaItemKind::NameValue(lit)) = attr.meta_kind() else { return false; };
         match_attr_name(attr, tool, name) && lit.kind == value.kind
     }

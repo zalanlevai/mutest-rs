@@ -3,7 +3,7 @@ use std::hash::Hash;
 use crate::analysis::hir;
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
-use crate::analysis::ty::{self, Subst, TyCtxt};
+use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::symbols::Symbol;
 
 pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
@@ -14,7 +14,7 @@ pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
                     .find(|item| item.ident.name == symbol)
                     .map(|child| child.res.expect_non_local())
             }
-            DefKind::Impl => {
+            DefKind::Impl { of_trait: _ } => {
                 tcx.associated_item_def_ids(def_id).iter().copied()
                     .find(|assoc_def_id| tcx.item_name(*assoc_def_id) == symbol)
                     .map(|assoc_def_id| Res::Def(tcx.def_kind(assoc_def_id), assoc_def_id))
@@ -89,16 +89,16 @@ pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::
     }
 }
 
-pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<(hir::DefId, ty::SubstsRef<'tcx>)> {
+pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> Option<(hir::DefId, ty::GenericArgsRef<'tcx>)> {
     match expr.kind {
         hir::ExprKind::Call(expr, _) => {
-            let &ty::TyKind::FnDef(def_id, substs) = typeck.node_type(expr.hir_id).kind() else { return None; };
-            Some((def_id, substs))
+            let &ty::TyKind::FnDef(def_id, generic_args) = typeck.node_type(expr.hir_id).kind() else { return None; };
+            Some((def_id, generic_args))
         }
-        hir::ExprKind::MethodCall(_, _, _) => {
+        hir::ExprKind::MethodCall(_, _, _, _) => {
             let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) else { return None; };
-            let substs = typeck.node_substs(expr.hir_id);
-            Some((def_id, substs))
+            let generic_args = typeck.node_args(expr.hir_id);
+            Some((def_id, generic_args))
         }
         _ => None,
     }
@@ -107,7 +107,7 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Call<'tcx> {
     pub def_id: hir::DefId,
-    pub substs: ty::SubstsRef<'tcx>,
+    pub generic_args: ty::GenericArgsRef<'tcx>,
     pub unsafety: hir::Unsafety,
 }
 
@@ -131,10 +131,10 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
     }
 
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
-        if let Some((def_id, substs)) = callee(self.typeck, expr) {
+        if let Some((def_id, generic_args)) = callee(self.typeck, expr) {
             self.callees.push(Call {
                 def_id,
-                substs,
+                generic_args,
                 unsafety: self.current_scope_unsafety,
             });
         }
@@ -185,11 +185,11 @@ pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> 
     collector.callees
 }
 
-pub fn fold_substs<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, substs: ty::SubstsRef<'tcx>) -> T
+pub fn instantiate_generic_args<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, generic_args: ty::GenericArgsRef<'tcx>) -> T
 where
-    T: ty::TypeFoldable<'tcx>,
+    T: ty::TypeFoldable<TyCtxt<'tcx>>,
 {
-    ty::EarlyBinder(foldable).subst(tcx, substs)
+    ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
 }
 
 macro interned {
@@ -198,9 +198,9 @@ macro interned {
     (@ITEM_IMPL, $kind_fn:ident, $kind_display_name:expr, $ident:ident, ::$($path:ident)::+) => {
         mod $ident {
             use super::*;
-            use std::lazy::SyncOnceCell;
+            use std::sync::OnceLock;
 
-            pub(super) static CELL: SyncOnceCell<hir::DefId> = SyncOnceCell::new();
+            pub(super) static CELL: OnceLock<hir::DefId> = OnceLock::new();
         }
 
         #[doc = concat!("`", interned!(@STRINGIFY_PATH, ::$($path)::+), "`")]

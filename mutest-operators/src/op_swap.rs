@@ -23,11 +23,11 @@ impl OpKind {
 }
 
 fn impls_matching_op<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, lhs_ty: Ty<'tcx>, rhs_ty: Ty<'tcx>, expr_ty: Ty<'tcx>, op_trait: hir::DefId, op_kind: OpKind) -> bool {
-    if !ty::impls_trait_with_env(tcx, param_env, lhs_ty, op_trait, &[rhs_ty.into()]) { return false; }
+    if !ty::impls_trait_with_env(tcx, param_env, lhs_ty, op_trait, vec![rhs_ty.into()]) { return false; }
 
     match op_kind {
         OpKind::Standalone => {
-            ty::impl_assoc_ty(tcx, param_env, lhs_ty, op_trait, &[rhs_ty.into()], sym::Output)
+            ty::impl_assoc_ty(tcx, param_env, lhs_ty, op_trait, vec![rhs_ty.into()], sym::Output)
                 .map(|ty| ty == expr_ty).unwrap_or(false)
         }
         OpKind::Assign => true,
@@ -70,7 +70,7 @@ macro define_op_swap_operator(
         type Mutation = $mutation;
 
         fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-            let MutCtxt { tcx, resolver: _, def_site: def, ref location } = *mcx;
+            let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
 
             let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
 

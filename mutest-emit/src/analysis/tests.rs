@@ -51,7 +51,7 @@ fn is_test_case(item: &ast::Item) -> bool {
     item.attrs.iter().any(|attr| attr.has_name(sym::rustc_test_marker))
 }
 
-fn extract_expanded_tests(path: &Vec<Ident>, items: &Vec<P<ast::Item>>) -> Vec<Test> {
+fn extract_expanded_tests(path: &Vec<Ident>, items: &[P<ast::Item>]) -> Vec<Test> {
     let mut tests = vec![];
 
     let mut item_iterator = items.iter();

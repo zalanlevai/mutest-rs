@@ -5,6 +5,7 @@ use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
 use mutest_emit::codegen::ast::{self, P};
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, path, kw};
+use mutest_emit::thin_vec::thin_vec;
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
 fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
@@ -12,7 +13,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     // default constructor functions.
     let call_args_count = match expr.kind {
         hir::ExprKind::Call(_, args) => args.len(),
-        hir::ExprKind::MethodCall(_, args, _) => args.len(),
+        hir::ExprKind::MethodCall(_, _, args, _) => 1 + args.len(),
         _ => unreachable!(),
     };
     if call_args_count == 0 { return None; }
@@ -21,7 +22,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
 
     let expr_ty = typeck.expr_ty(expr);
     if expr_ty == tcx.types.unit || expr_ty == tcx.types.never { return None; }
-    if !ty::impls_trait(tcx, expr_ty, res::traits::Default(tcx), &[]) { return None; }
+    if !ty::impls_trait(tcx, expr_ty, res::traits::Default(tcx), vec![]) { return None; }
 
     let Some((callee, _)) = res::callee(typeck, expr) else { return None; };
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
@@ -29,13 +30,13 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
 
     // Avoid replacing the call if the type's `Default::default` implementation refers back to this function (the
     // function this call expression is in). This avoids a case of infinite recursion, resulting in a stack overflow.
-    let ty_default = (res::fns::default(tcx), tcx.mk_substs_trait(expr_ty, &[]));
+    let ty_default = (res::fns::default(tcx), tcx.mk_args_trait(expr_ty, vec![]));
     if let Some(ty_default_impl) = tcx.resolve_instance(tcx.param_env(f).and(ty_default)).ok().flatten()
         && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
         && let Some(ty_default_impl_body_id) = tcx.hir().get_by_def_id(ty_default_impl_def_id).body_id()
     {
         let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
-            .flat_map(|call| tcx.resolve_instance(tcx.param_env(call.def_id).and((call.def_id, call.substs))).ok().flatten());
+            .flat_map(|call| tcx.resolve_instance(tcx.param_env(call.def_id).and((call.def_id, call.generic_args))).ok().flatten());
 
         let ty_default_impl_refers_to_call = ty_default_impl_callees.any(|instance| instance.def_id() == f);
         if ty_default_impl_refers_to_call { return None; }
@@ -71,7 +72,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
     type Mutation = CallValueDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolver: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
 
@@ -90,9 +91,9 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let Some(expr_ty_ast) = ty::ast_repr(tcx, def, expr_ty, ty::DefPathHandling::PreferVisible(ty::ScopedItemPaths::Trimmed), ty::OpaqueTyHandling::Infer) else { return None; };
 
         // Default::default()
-        let default = ast::mk::expr_call_path(def, path::default(def), vec![]);
+        let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
         // { let _: $ty = $expr; Default::default() }
-        let shadow_scope = ast::mk::expr_block(ast::mk::block(def, vec![
+        let shadow_scope = ast::mk::expr_block(ast::mk::block(def, thin_vec![
             ast::mk::stmt_let(def, false, Ident::new(kw::Underscore, def), Some(expr_ty_ast), P(expr.ast.clone())),
             ast::mk::stmt_expr(default),
         ]));
@@ -136,7 +137,7 @@ impl<'a> Operator<'a> for CallDelete {
     type Mutation = CallDeleteMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolver: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
 
@@ -151,7 +152,7 @@ impl<'a> Operator<'a> for CallDelete {
         ) else { return None; };
 
         // Default::default()
-        let default = ast::mk::expr_call_path(def, path::default(def), vec![]);
+        let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
 
         let mutation = Self::Mutation {
             callee_path: tcx.def_path_str(callee),

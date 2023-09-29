@@ -10,13 +10,8 @@ edition = "2021"
 [lib]
 crate-type = ["rlib"]
 
-# FIXME: Switch to using `paring_lot` from crates.io once proper dependency resolution in generated
-#        code is implemented. Currently we conflict with the version used internally by rustc.
-[package.metadata.rust-analyzer]
-rustc_private = true
-
 [dependencies]
-phf = { version = "0.10", features = ["macros"], default-features = false }
+phf = { version = "0.11.2", features = ["macros"], default-features = false }
 
 [build-dependencies]
 cargo_metadata = "0.14"

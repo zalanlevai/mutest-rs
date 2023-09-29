@@ -1,11 +1,9 @@
 use std::hash::{Hash, Hasher};
 
-use rustc_ast_lowering::ResolverAstLowering;
-use rustc_expand::base::ResolverExpand;
 use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::hir::nested_filter::OnlyBodies;
-use rustc_resolve::Resolver;
 use rustc_session::Session;
+use rustc_span::source_map::SourceMap;
 use smallvec::SmallVec;
 
 use crate::analysis::ast_lowering::{self, AstDefItem};
@@ -17,6 +15,7 @@ use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast::{self, P};
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::attr;
+use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::substitution::conflicting_substs;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
@@ -89,9 +88,9 @@ impl<'hir> OwnedMutLoc<'hir> {
     }
 }
 
-pub struct MutCtxt<'ast, 'tcx, 'r, 'op> {
+pub struct MutCtxt<'ast, 'tcx, 'op> {
     pub tcx: TyCtxt<'tcx>,
-    pub resolver: &'op Resolver<'r>,
+    pub resolutions: &'op ast_lowering::Resolutions,
     pub def_site: Span,
     pub location: MutLoc<'ast, 'tcx>,
 }
@@ -191,7 +190,7 @@ impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
         let mut diagnostic = sess.struct_span_warn(self.location.span(), "mutation was not detected");
-        diagnostic.span_label(self.location.span(), &self.mutation.span_label());
+        diagnostic.span_label(self.location.span(), self.mutation.span_label());
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
 
@@ -240,10 +239,10 @@ impl UnsafeTargeting {
     }
 }
 
-struct MutationCollector<'ast, 'tcx, 'r, 'op, 'trg, 'm> {
+struct MutationCollector<'ast, 'tcx, 'op, 'trg, 'm> {
     pub operators: Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
-    pub resolver: &'op Resolver<'r>,
+    pub resolutions: &'op ast_lowering::Resolutions,
     pub def_site: Span,
     pub unsafe_targeting: UnsafeTargeting,
     pub target: Option<&'trg Target<'trg>>,
@@ -280,30 +279,32 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     }
 }
 
-impl<'ast, 'tcx, 'r, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'r, 'op, 'trg, 'm> {
+
+impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'op, 'trg, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
         let ast::visit::FnKind::Fn(ref ctx, ref ident, sig, vis, generics, body) = kind else { return; };
 
         let fn_ast = ast::InlinedFn { id, span, ctx: *ctx, ident: *ident, vis, generics, sig, body };
 
-        let fn_hir = match self.tcx.hir().get_by_def_id(self.resolver.local_def_id(fn_ast.id)) {
-            hir::Node::Item(&hir::Item { def_id, span, vis_span, ident, ref kind }) => {
+        let Some(fn_def_id) = self.resolutions.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
+        let fn_hir = match self.tcx.hir().get_by_def_id(fn_def_id) {
+            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ident, ref kind }) => {
                 let hir::ItemKind::Fn(sig, generics, body) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header);
-                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
+                hir::InlinedFn { def_id: owner_id.def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
             }
-            hir::Node::TraitItem(&hir::TraitItem { def_id, span, ident, ref generics, ref kind }) => {
+            hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness }) => {
                 let hir::TraitItemKind::Fn(sig, hir::TraitFn::Provided(body)) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
-                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body }
+                hir::InlinedFn { def_id: owner_id.def_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body }
             }
-            hir::Node::ImplItem(&hir::ImplItem { def_id, span, vis_span, ident, ref generics, ref kind }) => {
+            hir::Node::ImplItem(&hir::ImplItem { owner_id, span, vis_span, ident, ref generics, ref kind, defaultness }) => {
                 let hir::ImplItemKind::Fn(sig, body) = kind else { unreachable!(); };
                 let body = self.tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
-                hir::InlinedFn { def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
+                hir::InlinedFn { def_id: owner_id.def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
             }
             _ => unreachable!(),
         };
@@ -312,7 +313,7 @@ impl<'ast, 'tcx, 'r, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollec
 
         register_mutations!(self, MutCtxt {
             tcx: self.tcx,
-            resolver: self.resolver,
+            resolutions: self.resolutions,
             def_site: self.def_site,
             location: MutLoc::Fn(lowered_fn.clone()),
         });
@@ -331,7 +332,13 @@ impl<'ast, 'tcx, 'r, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollec
     }
 }
 
-impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'ast, 'hir, 'r, 'op, 'trg, 'm> {
+fn is_local_span(source_map: &SourceMap, sp: Span) -> bool {
+    let local_begin = source_map.lookup_byte_offset(sp.lo());
+    let local_end = source_map.lookup_byte_offset(sp.hi());
+    local_begin.sf.src.is_some() && local_end.sf.src.is_some()
+}
+
+impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'ast, 'hir, 'op, 'trg, 'm> {
     type NestedFilter = OnlyBodies;
 
     fn nested_visit_map(&mut self) -> Self::Map {
@@ -339,7 +346,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     }
 
     fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {
-        if !self.tcx.sess.source_map().is_local_span(param_ast.span) { return; };
+        if !is_local_span(self.tcx.sess.source_map(), param_ast.span) { return; };
         if attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
@@ -351,7 +358,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
             register_mutations!(self, MutCtxt {
                 tcx: self.tcx,
-                resolver: self.resolver,
+                resolutions: self.resolutions,
                 def_site: self.def_site,
                 location: MutLoc::FnParam(lowered_param, lowered_fn.clone()),
             });
@@ -361,7 +368,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     }
 
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
-        if !self.tcx.sess.source_map().is_local_span(block_ast.span) { return; };
+        if !is_local_span(self.tcx.sess.source_map(), block_ast.span) { return; };
         if attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
         if !self.unsafe_targeting.inside_unsafe() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
 
@@ -372,7 +379,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     }
 
     fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
-        if !self.tcx.sess.source_map().is_local_span(stmt_ast.span) { return; };
+        if !is_local_span(self.tcx.sess.source_map(), stmt_ast.span) { return; };
         if attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
@@ -384,7 +391,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
             register_mutations!(self, MutCtxt {
                 tcx: self.tcx,
-                resolver: self.resolver,
+                resolutions: self.resolutions,
                 def_site: self.def_site,
                 location: MutLoc::FnBodyStmt(lowered_stmt, lowered_fn.clone()),
             });
@@ -394,7 +401,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
     }
 
     fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
-        if !self.tcx.sess.source_map().is_local_span(expr_ast.span) { return; };
+        if !is_local_span(self.tcx.sess.source_map(), expr_ast.span) { return; };
         if attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
 
         if let Some(lowered_fn) = &self.current_fn {
@@ -411,14 +418,14 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
 
             register_mutations!(self, MutCtxt {
                 tcx: self.tcx,
-                resolver: self.resolver,
+                resolutions: self.resolutions,
                 def_site: self.def_site,
                 location: MutLoc::FnBodyExpr(lowered_expr, lowered_fn.clone()),
             });
         }
 
         let current_closure = self.current_closure;
-        if let hir::ExprKind::Closure(_, _, body, _, _) = expr_hir.kind { self.current_closure = Some(body); }
+        if let hir::ExprKind::Closure(&hir::Closure { body, ..  }) = expr_hir.kind { self.current_closure = Some(body); }
 
         match (&expr_ast.kind, &expr_hir.kind) {
             // The left-hand side of assignment expressions only supports a strict subset of expressions, not including
@@ -444,7 +451,7 @@ impl<'ast, 'hir, 'r, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hi
             _ => ast_lowering::visit::walk_expr(self, expr_ast, expr_hir),
         }
 
-        if let hir::ExprKind::Closure(_, _, _, _, _) = expr_hir.kind { self.current_closure = current_closure; }
+        if let hir::ExprKind::Closure(_) = expr_hir.kind { self.current_closure = current_closure; }
     }
 }
 
@@ -525,8 +532,8 @@ impl<'tst> Target<'tst> {
     }
 }
 
-pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
-    type Callee<'tcx> = (hir::LocalDefId, ty::SubstsRef<'tcx>);
+pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowering::Resolutions, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
+    type Callee<'tcx> = (hir::LocalDefId, ty::GenericArgsRef<'tcx>);
 
     /// A map from each entry point to the most severe unsafety source of any call path in its current call tree walk.
     /// Safe items called from an unsafe context (dependencies) will be marked `Unsafety::Tainted` with their
@@ -551,7 +558,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
     for test in tests {
-        let Some(def_id) = resolver.opt_local_def_id(test.item.id) else { continue; };
+        let Some(def_id) = resolutions.node_id_to_def_id.get(&test.item.id).copied() else { continue; };
         let body = tcx.hir().body(tcx.hir().get_by_def_id(def_id).body_id().unwrap());
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
@@ -560,15 +567,15 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
             let Some(local_def_id) = call.def_id.as_local() else { continue; };
 
             let param_env = tcx.param_env(call.def_id);
-            // Using the concrete type substitutions of this call, we resolve the corresponding definition instance. The
-            // type substitutions might take a different form at the resolved definition site, so we propagate them
+            // Using the concrete type arguments of this call, we resolve the corresponding definition instance. The
+            // type arguments might take a different form at the resolved definition site, so we propagate them
             // instead.
-            let instance = tcx.resolve_instance(param_env.and((call.def_id, call.substs))).ok().flatten();
-            let (callee_def_id, substs) = instance
-                .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs)))
-                .unwrap_or((local_def_id, call.substs));
+            let instance = tcx.resolve_instance(param_env.and((call.def_id, call.generic_args))).ok().flatten();
+            let (callee_def_id, generic_args) = instance
+                .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.args)))
+                .unwrap_or((local_def_id, call.generic_args));
 
-            let call_paths = previously_found_callees.entry((callee_def_id, substs)).or_insert_with(Default::default);
+            let call_paths = previously_found_callees.entry((callee_def_id, generic_args)).or_insert_with(Default::default);
             call_paths.insert(test, None);
         }
     }
@@ -578,7 +585,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     for distance in 0..depth {
         let mut newly_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
-        for ((caller_def_id, outer_substs), call_paths) in previously_found_callees.drain() {
+        for ((caller_def_id, outer_generic_args), call_paths) in previously_found_callees.drain() {
             let Some(body_id) = tcx.hir().get_by_def_id(caller_def_id).body_id() else { continue; };
             let body = tcx.hir().body(body_id);
 
@@ -616,18 +623,18 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
                     let Some(local_def_id) = call.def_id.as_local() else { continue; };
 
                     let param_env = tcx.param_env(call.def_id);
-                    // The type substitutions from the local, generic scope may still contain type parameters, so we
-                    // fold the bound type substitutions of the concrete invocation of the enclosing function into it.
-                    let substs = res::fold_substs(tcx, call.substs, outer_substs);
-                    // Using the concrete type substitutions of this call, we resolve the corresponding definition
-                    // instance. The type substitutions might take a different form at the resolved definition site, so
+                    // The type arguments from the local, generic scope may still contain type parameters, so we
+                    // fold the bound type arguments of the concrete invocation of the enclosing function into it.
+                    let generic_args = res::instantiate_generic_args(tcx, call.generic_args, outer_generic_args);
+                    // Using the concrete type arguments of this call, we resolve the corresponding definition
+                    // instance. The type arguments might take a different form at the resolved definition site, so
                     // we propagate them instead.
-                    let instance = tcx.resolve_instance(param_env.and((call.def_id, substs))).ok().flatten();
-                    let (callee_def_id, substs) = instance
-                        .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.substs)))
-                        .unwrap_or((local_def_id, call.substs));
+                    let instance = tcx.resolve_instance(param_env.and((call.def_id, generic_args))).ok().flatten();
+                    let (callee_def_id, generic_args) = instance
+                        .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.args)))
+                        .unwrap_or((local_def_id, call.generic_args));
 
-                    let new_call_paths = newly_found_callees.entry((callee_def_id, substs)).or_insert_with(Default::default);
+                    let new_call_paths = newly_found_callees.entry((callee_def_id, generic_args)).or_insert_with(Default::default);
 
                     for (&test, &unsafety) in &call_paths {
                         let unsafe_source = match call.unsafety {
@@ -648,19 +655,18 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolver: &mut Resolve
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolver: &mut Resolver, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting) -> Vec<Mut<'tcx, 'trg, 'm>> {
-    let expn_id = resolver.expansion_for_ast_pass(
-        DUMMY_SP,
+pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowering::Resolutions, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting) -> Vec<Mut<'tcx, 'trg, 'm>> {
+    let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
+        DUMMY_SP,
         &[sym::rustc_attrs],
-        None,
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
     let mut collector = MutationCollector {
         operators: ops,
         tcx,
-        resolver,
+        resolutions,
         def_site,
         unsafe_targeting,
         target: None,

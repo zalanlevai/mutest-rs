@@ -26,7 +26,7 @@ impl<'a> Operator<'a> for RangeLimitSwap {
     type Mutation = RangeLimitSwapMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolver: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
 

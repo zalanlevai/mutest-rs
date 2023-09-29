@@ -119,7 +119,7 @@ pub struct CompletedTest {
 fn run_test_in_process(
     id: test::TestId,
     desc: test::TestDesc,
-    test_fn: Box<dyn FnOnce() + Send>,
+    test_fn: Box<dyn FnOnce() -> Result<(), String> + Send>,
     monitor_ch: mpsc::Sender<CompletedTest>,
     test_timeout: Option<Duration>,
     no_capture: bool,
@@ -130,8 +130,19 @@ fn run_test_in_process(
         io::set_output_capture(Some(io_buffer.clone()));
     }
 
+    fn fold_err<T, E>(result: Result<Result<T, E>, Box<dyn Any + Send>>) -> Result<T, Box<dyn Any + Send>>
+    where
+        E: Send + 'static,
+    {
+        match result {
+            Ok(Err(e)) => Err(Box::new(e)),
+            Ok(Ok(v)) => Ok(v),
+            Err(e) => Err(e),
+        }
+    }
+
     let start = Instant::now();
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(test_fn));
+    let result = fold_err(panic::catch_unwind(panic::AssertUnwindSafe(test_fn)));
     let exec_time = start.elapsed();
 
     io::set_output_capture(None);
@@ -155,18 +166,17 @@ fn run_test_in_process(
 
 /// Fixed frame used to clean the backtrace with `RUST_BACKTRACE=1`.
 #[inline(never)]
-fn __rust_begin_short_backtrace<F: FnOnce()>(f: F) {
-    f();
+fn __rust_begin_short_backtrace<T, F: FnOnce() -> T>(f: F) -> T {
+    let result = f();
 
     // Prevent this frame from being tail-call optimized away.
-    test::black_box(());
+    test::black_box(result)
 }
 
 fn run_test(
     id: test::TestId,
     test: test::TestDescAndFn,
     monitor_ch: mpsc::Sender<CompletedTest>,
-    concurrency: test::Concurrent,
     test_timeout: Option<Duration>,
     no_capture: bool,
 ) -> Option<thread::JoinHandle<()>> {
@@ -189,9 +199,8 @@ fn run_test(
     fn run_test_impl(
         id: test::TestId,
         desc: test::TestDesc,
-        test_fn: Box<dyn FnOnce() + Send>,
+        test_fn: Box<dyn FnOnce() -> Result<(), String> + Send>,
         monitor_ch: mpsc::Sender<CompletedTest>,
-        concurrency: test::Concurrent,
         test_timeout: Option<Duration>,
         no_capture: bool,
     ) -> Option<thread::JoinHandle<()>> {
@@ -200,46 +209,42 @@ fn run_test(
 
         let supports_threads = !cfg!(target_os = "emscripten") && !cfg!(target_family = "wasm");
 
-        match concurrency {
-            test::Concurrent::Yes if supports_threads => {
-                let thread = thread::Builder::new().name(name.as_slice().to_owned());
+        if supports_threads {
+            let thread = thread::Builder::new().name(name.as_slice().to_owned());
 
-                let mut run_test = Arc::new(Mutex::new(Some(run_test)));
-                let run_test_on_thread = run_test.clone();
+            let mut run_test = Arc::new(Mutex::new(Some(run_test)));
+            let run_test_on_thread = run_test.clone();
 
-                match thread.spawn(move || run_test_on_thread.lock().unwrap().take().unwrap()()) {
-                    Ok(handle) => Some(handle),
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        // `ErrorKind::WouldBlock` means hitting the thread limit on some platforms, so run the test
-                        // synchronously on this thread instead.
-                        Arc::get_mut(&mut run_test).unwrap().get_mut().unwrap().take().unwrap()();
-                        None
-                    }
-                    Err(e) => panic!("failed to spawn thread for test run: {e}"),
+            match thread.spawn(move || run_test_on_thread.lock().unwrap().take().unwrap()()) {
+                Ok(handle) => Some(handle),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // `ErrorKind::WouldBlock` means hitting the thread limit on some platforms, so run the test
+                    // synchronously on this thread instead.
+                    Arc::get_mut(&mut run_test).unwrap().get_mut().unwrap().take().unwrap()();
+                    None
                 }
+                Err(e) => panic!("failed to spawn thread for test run: {e}"),
             }
-
-            test::Concurrent::Yes => {
-                panic!("concurrent test execution was requested but thread support is not available");
-            }
-
-            test::Concurrent::No => {
-                run_test();
-                None
-            }
+        } else {
+            run_test();
+            None
         }
     }
 
     match testfn {
         test::TestFn::StaticTestFn(f) => {
             let test_fn = Box::new(move || __rust_begin_short_backtrace(f));
-            run_test_impl(id, desc, test_fn, monitor_ch, concurrency, test_timeout, no_capture)
+            run_test_impl(id, desc, test_fn, monitor_ch, test_timeout, no_capture)
         }
 
         test::TestFn::DynTestFn(_) => {
             panic!("dynamic tests are not supported");
         }
-        test::TestFn::StaticBenchFn(_) | test::TestFn::DynBenchFn(_) => {
+
+        | test::TestFn::StaticBenchFn(_)
+        | test::TestFn::StaticBenchAsTestFn(_)
+        | test::TestFn::DynBenchFn(_)
+        | test::TestFn::DynBenchAsTestFn(_) => {
             panic!("benchmarks are not supported");
         }
     }
@@ -312,9 +317,16 @@ where
             event!(TestEvent::Queue(1, remaining_tests.len()));
             event!(TestEvent::Wait(test.desc.clone()));
 
-            let join_handle = run_test(id, test, tx.clone(), test::Concurrent::No, test_timeout, no_capture);
-            assert!(join_handle.is_none());
-            let completed_test = rx.recv().unwrap();
+            let join_handle = run_test(id, test, tx.clone(), test_timeout, no_capture);
+            let mut completed_test = rx.recv().unwrap();
+
+            if let Some(join_handle) = join_handle {
+                if let Err(_) = join_handle.join() {
+                    if let TestResult::Ok = completed_test.result {
+                        completed_test.result = TestResult::FailedMsg("panicked after reporting success".to_owned());
+                    }
+                }
+            }
 
             event!(TestEvent::Result(completed_test));
         }
@@ -343,7 +355,7 @@ where
 
                 let desc = test.desc.clone();
 
-                let join_handle = run_test(id, test, tx.clone(), test::Concurrent::Yes, test_timeout, no_capture);
+                let join_handle = run_test(id, test, tx.clone(), test_timeout, no_capture);
                 running_tests.insert(id, RunningTest { desc, start_time: Instant::now(), join_handle });
             }
 
@@ -400,7 +412,7 @@ where
             if let Some(join_handle) = running_test.join_handle {
                 if let Err(_) = join_handle.join() {
                     if let TestResult::Ok = completed_test.result {
-                        completed_test.result = TestResult::FailedMsg("panicked after reporting success".to_string());
+                        completed_test.result = TestResult::FailedMsg("panicked after reporting success".to_owned());
                     }
                 }
             }

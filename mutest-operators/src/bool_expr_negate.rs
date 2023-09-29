@@ -25,11 +25,11 @@ impl<'a> Operator<'a> for BoolExprNegate {
     type Mutation = BoolExprNegateMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolver: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
 
-        if let ast::ExprKind::Let(_, _, _) = expr.ast.kind { return None; };
+        if let ast::ExprKind::Let(_, _, _, _) = expr.ast.kind { return None; };
 
         let typeck = tcx.typeck_body(f.hir.body.id());
 

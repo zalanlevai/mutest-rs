@@ -1,6 +1,5 @@
 #![feature(decl_macro)]
 #![feature(let_chains)]
-#![feature(let_else)]
 
 #![feature(rustc_private)]
 

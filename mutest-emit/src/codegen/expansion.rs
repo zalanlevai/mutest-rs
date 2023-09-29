@@ -2,11 +2,13 @@ use std::{iter, mem};
 use std::path::{self, Path, PathBuf};
 
 use itertools::Itertools;
-use rustc_expand::base::ResolverExpand;
-use rustc_resolve::Resolver;
+use rustc_middle::ty::TyCtxt;
+use rustc_query_system::ich::StableHashingContext;
 use rustc_session::Session;
 use rustc_session::parse::ParseSess;
+use rustc_span::{ExpnData, LocalExpnId};
 use smallvec::{SmallVec, smallvec};
+use thin_vec::ThinVec;
 
 use crate::analysis::hir;
 use crate::analysis::tests::Test;
@@ -15,41 +17,65 @@ use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
+pub trait TcxExpansionExt {
+    fn expansion_for_ast_pass(
+        &self,
+        ast_pass: AstPass,
+        call_site: Span,
+        features: &[Symbol],
+    ) -> LocalExpnId;
+}
+
+impl<'tcx> TcxExpansionExt for TyCtxt<'tcx> {
+    fn expansion_for_ast_pass(
+        &self,
+        ast_pass: AstPass,
+        call_site: Span,
+        features: &[Symbol],
+    ) -> LocalExpnId {
+        let expn_data = ExpnData::allow_unstable(
+            ExpnKind::AstPass(ast_pass),
+            call_site,
+            self.sess.edition(),
+            features.into(),
+            None,
+            None,
+        );
+        LocalExpnId::fresh(expn_data, StableHashingContext::new(self.sess, self.untracked()))
+    }
+}
+
 pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![allow(unused_features)]
 #![allow(unused_imports)]
 
 #![feature(rustc_attrs)]
-#![feature(int_error_internals)]
 #![feature(fmt_internals)]
+#![feature(fmt_helpers_for_derive)]
 #![feature(str_internals)]
 #![feature(sort_internals)]
 #![feature(print_internals)]
 #![feature(allocator_internals)]
-#![feature(char_error_internals)]
 #![feature(libstd_sys_internals)]
 #![feature(thread_local_internals)]
-#![feature(libstd_thread_internals)]
 
 #![feature(allocator_api)]
-#![feature(box_syntax)]
 #![feature(cfg_target_thread_local)]
 #![feature(core_intrinsics)]
 #![feature(core_panic)]
 #![feature(derive_clone_copy)]
 #![feature(derive_eq)]
-#![feature(no_coverage)]
+#![feature(coverage_attribute)]
 #![feature(rustc_private)]
 #![feature(structural_match)]
 #![feature(thread_local)]
 "#;
 
-pub fn insert_generated_code_crate_refs(resolver: &mut Resolver, krate: &mut ast::Crate) {
-    let expn_id = resolver.expansion_for_ast_pass(
-        DUMMY_SP,
+pub fn insert_generated_code_crate_refs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
+    let expn_id = tcx.expansion_for_ast_pass(
         AstPass::StdImports,
+        DUMMY_SP,
         &[sym::rustc_attrs],
-        None,
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
@@ -189,7 +215,7 @@ struct ExternalMod {
     pub dir_path: PathBuf,
     pub dir_ownership: DirOwnership,
     pub spans: ast::ModSpans,
-    pub items: Vec<P<ast::Item>>,
+    pub items: ThinVec<P<ast::Item>>,
 }
 
 fn parse_external_mod(
@@ -198,7 +224,7 @@ fn parse_external_mod(
     dir_ownership: DirOwnership,
     ident: Ident,
     span: Span,
-    attrs: &mut Vec<ast::Attribute>,
+    attrs: &mut ThinVec<ast::Attribute>,
 ) -> ExternalMod {
     let module_path = mod_file_path(sess, dir_path, dir_ownership, ident, attrs);
 
@@ -333,8 +359,8 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                     | ast::ItemKind::Impl(_) => smallvec![item],
 
                     // TODO: Descend into bodies and handle nested items.
-                    | ast::ItemKind::Static(_, _, _)
-                    | ast::ItemKind::Const(_, _, _)
+                    | ast::ItemKind::Static(_)
+                    | ast::ItemKind::Const(_)
                     | ast::ItemKind::Fn(_) => smallvec![item],
 
                     _ => ast::mut_visit::noop_flat_map_item(item, self),
@@ -366,7 +392,7 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
             ExpnKind::AstPass(AstPass::ProcMacroHarness) => smallvec![item],
 
             // HIR and MIR expansions are not performed on the AST.
-            ExpnKind::Desugaring(_) | ExpnKind::Inlined => smallvec![item],
+            ExpnKind::Desugaring(_) => smallvec![item],
         }
     }
 }
@@ -380,7 +406,7 @@ pub fn revert_non_local_macro_expansions<'ast>(expanded_crate: &mut ast::Crate, 
     reverter.visit_crate(expanded_crate);
 }
 
-fn dedupe_extern_crate_decls(items: &mut Vec<P<ast::Item>>, sym: Symbol) {
+fn dedupe_extern_crate_decls(items: &mut ThinVec<P<ast::Item>>, sym: Symbol) {
     if let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| ast::inspect::is_extern_crate_decl(item, sym)) {
         let mut i = first_extern_crate_index + 1;
         while let Some(item) = items.get(i) {
@@ -394,15 +420,16 @@ fn dedupe_extern_crate_decls(items: &mut Vec<P<ast::Item>>, sym: Symbol) {
     }
 }
 
-fn ensure_test_scope(items: &mut Vec<P<ast::Item>>) {
+fn ensure_test_scope(items: &mut ThinVec<P<ast::Item>>) {
     dedupe_extern_crate_decls(items, sym::test)
 }
 
-struct TestCaseCleaner<'tst> {
+struct TestCaseCleaner<'tcx, 'tst> {
+    sess: &'tcx Session,
     tests: &'tst [Test],
 }
 
-impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
+impl<'tcx, 'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tcx, 'tst> {
     fn visit_crate(&mut self, c: &mut ast::Crate) {
         ast::mut_visit::noop_visit_crate(c, self);
 
@@ -425,8 +452,10 @@ impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
         }
 
         if let Some(_test) = self.tests.iter().find(|&test| test.item.id == item.id) {
+            let g = &self.sess.parse_sess.attr_id_generator;
+
             // #[test]
-            let test_attr = ast::attr::mk_attr_outer(ast::attr::mk_word_item(Ident::new(sym::test, item.span)));
+            let test_attr = ast::mk::attr_outer(g, item.span, Ident::new(sym::test, item.span), ast::AttrArgs::Empty);
 
             item.attrs = item.attrs.into_iter()
                 .filter(|attr| !attr.has_name(sym::rustc_test_marker))
@@ -439,7 +468,7 @@ impl<'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tst> {
     }
 }
 
-pub fn clean_up_test_cases(tests: &[Test], krate: &mut ast::Crate) {
-    let mut cleaner = TestCaseCleaner { tests };
+pub fn clean_up_test_cases(sess: &Session, tests: &[Test], krate: &mut ast::Crate) {
+    let mut cleaner = TestCaseCleaner { sess, tests };
     cleaner.visit_crate(krate);
 }

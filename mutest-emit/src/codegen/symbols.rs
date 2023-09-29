@@ -96,7 +96,7 @@ pub mod path {
         ACTIVE_MUTANT_HANDLE (crate::mutest_generated::ACTIVE_MUTANT_HANDLE),
         ActiveMutantHandle (::mutest_runtime::ActiveMutantHandle),
         active_mutant_handle_init_empty (::mutest_runtime::ActiveMutantHandle::empty),
-        harness (::mutest_generated::harness),
+        harness (crate::mutest_generated::harness),
         MutantMeta (::mutest_runtime::MutantMeta),
         MUTANTS (crate::mutest_generated::MUTANTS),
         mutations (crate::mutest_generated::mutations),

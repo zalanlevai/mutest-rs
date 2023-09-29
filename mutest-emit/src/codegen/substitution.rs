@@ -1,10 +1,12 @@
-use rustc_expand::base::ResolverExpand;
 use rustc_hash::FxHashMap;
-use rustc_resolve::Resolver;
+use rustc_middle::ty::TyCtxt;
+use rustc_session::Session;
+use thin_vec::{ThinVec, thin_vec};
 
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
+use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 use crate::codegen::mutation::{Mutant, MutId, Subst, SubstDef, SubstLoc};
@@ -44,14 +46,14 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
         .map(|(mut_id, subst)| {
             // Some(subst) if subst.mutation.id == crate::mutest_generated::mutations::$mut_id.id => $subst,
             let subst_ident = Ident::new(Symbol::intern("subst"), sp);
-            let pat_some_subst = ast::mk::pat_tuple_struct(sp, path::Some(sp), vec![ast::mk::pat_ident(sp, subst_ident)]);
+            let pat_some_subst = ast::mk::pat_tuple_struct(sp, path::Some(sp), thin_vec![ast::mk::pat_ident(sp, subst_ident)]);
             let guard = ast::mk::expr_binary(sp, ast::BinOpKind::Eq,
                 ast::mk::expr_field_deep(sp, ast::mk::expr_ident(sp, subst_ident), vec![Ident::new(*sym::mutation, sp), Ident::new(*sym::id, sp)]),
                 ast::mk::expr_field(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)])), Ident::new(*sym::id, sp)),
             );
             ast::mk::arm(sp, pat_some_subst, Some(guard), subst)
         })
-        .collect::<Vec<_>>();
+        .collect::<ThinVec<_>>();
 
     // _ => $default
     arms.push(ast::mk::arm(sp, ast::mk::pat_wild(sp), None, match default {
@@ -61,7 +63,7 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
 
     // crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow()
     let borrow = Ident::new(*sym::borrow, sp);
-    let mutant_handle_borrow_expr = ast::mk::expr_method_call_path_ident(sp, path::ACTIVE_MUTANT_HANDLE(sp), borrow, vec![]);
+    let mutant_handle_borrow_expr = ast::mk::expr_method_call_path_ident(sp, path::ACTIVE_MUTANT_HANDLE(sp), borrow, ThinVec::new());
     // m.substitutions.$subst_loc_id.as_ref()
     let mutant_lookup_expr = ast::mk::expr_method_call(sp,
         ast::mk::expr_field_deep(sp,
@@ -72,13 +74,13 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
             ]
         ),
         ast::mk::path_segment(sp, Ident::new(*sym::as_ref, sp), vec![]),
-        vec![],
+        ThinVec::new(),
     );
     // crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|m| m.substitutions.$subst_loc_id.as_ref())
     let subst_lookup_expr = ast::mk::expr_method_call(sp,
         mutant_handle_borrow_expr,
         ast::mk::path_segment(sp, Ident::new(*sym::and_then, sp), vec![]),
-        vec![ast::mk::expr_closure(sp, vec![Ident::new(*sym::mutant, sp)], mutant_lookup_expr)],
+        thin_vec![ast::mk::expr_closure(sp, vec![Ident::new(*sym::mutant, sp)], mutant_lookup_expr)],
     );
 
     // match crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|m| m.substitutions.$subst.as_ref()) { ... }
@@ -90,7 +92,7 @@ pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, original: Option<P
         .map(|(mut_id, subst)| {
             let subst_expr = match subst {
                 Subst::AstExpr(expr) => P(expr.clone()),
-                Subst::AstStmt(stmt) => ast::mk::expr_block(ast::mk::block(sp, vec![stmt.clone()])),
+                Subst::AstStmt(stmt) => ast::mk::expr_block(ast::mk::block(sp, thin_vec![stmt.clone()])),
                 Subst::AstLocal(..) => panic!("invalid substitution: local substitutions cannot be made in expression positions"),
             };
 
@@ -128,25 +130,30 @@ pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, original: Option<a
     }
 
     if !non_binding_substs.is_empty() {
-        let original_expr = original.map(|v| ast::mk::expr_block(ast::mk::block(sp, vec![v])));
+        let original_expr = original.map(|v| ast::mk::expr_block(ast::mk::block(sp, thin_vec![v])));
         stmts.push(ast::mk::stmt_expr(expand_subst_match_expr(sp, subst_loc, original_expr, non_binding_substs)));
     }
 
     stmts
 }
 
-struct SubstWriter<'op> {
+struct SubstWriter<'tcx, 'op> {
+    pub sess: &'tcx Session,
     pub substitutions: FxHashMap<SubstLoc, Vec<(MutId, &'op Subst)>>,
     pub def_site: Span,
 }
 
-impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
+impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
     fn visit_crate(&mut self, krate: &mut ast::Crate) {
+        let g = &self.sess.parse_sess.attr_id_generator;
+
         // #[allow(unused_parens)]
-        let allow_unused_parens_attr = ast::attr::mk_attr_inner(ast::attr::mk_list_item(
+        let allow_unused_parens_attr = ast::mk::attr_inner(g, self.def_site,
             Ident::new(sym::allow, self.def_site),
-            vec![ast::attr::mk_nested_word_item(Ident::new(*sym::unused_parens, self.def_site))],
-        ));
+            ast::mk::attr_args_delimited(self.def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                ast::mk::tt_token_joint(self.def_site, ast::TokenKind::Ident(*sym::unused_parens, false)),
+            ])),
+        );
 
         krate.attrs.push(allow_unused_parens_attr);
 
@@ -229,7 +236,7 @@ impl<'op> ast::mut_visit::MutVisitor for SubstWriter<'op> {
     }
 }
 
-pub fn write_substitutions(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
+pub fn write_substitutions<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
     let mut substitutions: FxHashMap<SubstLoc, Vec<(MutId, &Subst)>> = Default::default();
     for mutant in mutants {
         for mutation in &mutant.mutations {
@@ -243,15 +250,14 @@ pub fn write_substitutions(resolver: &mut Resolver, mutants: &Vec<Mutant>, krate
         }
     }
 
-    let expn_id = resolver.expansion_for_ast_pass(
-        DUMMY_SP,
+    let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
+        DUMMY_SP,
         &[sym::rustc_attrs],
-        None,
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
     // TODO: Warn if any substitutions have not been written to the AST. (e.g. they were defined for nodes which are not substitutable)
-    let mut subst_writer = SubstWriter { substitutions, def_site };
+    let mut subst_writer = SubstWriter { sess: tcx.sess, substitutions, def_site };
     subst_writer.visit_crate(krate);
 }

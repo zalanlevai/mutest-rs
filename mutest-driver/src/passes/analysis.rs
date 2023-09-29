@@ -146,107 +146,108 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 // NOTE: We must register our custom tool attribute namespace before the relevant attribute validation
                 //       is performed during macro expansion. The mutable reference to the AST must be dropped before
                 //       any further queries are performed.
-                let mut crate_ast = queries.parse()?.peek_mut();
-                mutest_emit::codegen::attr::register(&mut crate_ast);
+                let mut crate_ast_steal = queries.parse()?;
+                let crate_ast = crate_ast_steal.get_mut();
+                mutest_emit::codegen::attr::register(sess, crate_ast);
                 crate_ast.clone()
             };
 
-            let (expanded_crate_ast, resolver, _lint_store) = queries.expansion()?.peek().clone();
+            queries.global_ctxt()?.enter(|tcx| {
+                let (mut generated_crate_ast, resolutions) = {
+                    let (resolver, expanded_crate_ast) = &*tcx.resolver_for_lowering(()).borrow();
+                    let resolutions = mutest_emit::analysis::ast_lowering::Resolutions::from_resolver(resolver);
 
-            let tests = mutest_emit::analysis::tests::collect_tests(&expanded_crate_ast);
+                    // TODO: Generate code based on the original, unexpanded AST instead of the
+                    //       expanded AST which may contain invalid code that is not equivalent due
+                    //       to macro hygiene.
+                    let generated_crate_ast = (**expanded_crate_ast).clone();
 
-            // TODO: Generate code based on the original, unexpanded AST instead of the
-            //       expanded AST which may contain invalid code that is not equivalent due
-            //       to macro hygiene.
-            let mut generated_crate_ast = (*expanded_crate_ast).clone();
+                    (generated_crate_ast, resolutions)
+                };
 
-            queries.global_ctxt()?.peek_mut().enter(|tcx| {
+                let tests = mutest_emit::analysis::tests::collect_tests(&generated_crate_ast);
+
                 tcx.analysis(())?;
 
-                resolver.borrow_mut().access(|resolver| {
-                    let t_target_analysis_start = Instant::now();
-                    let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, resolver, &generated_crate_ast, &tests, opts.mutation_depth);
-                    target_analysis_duration = t_target_analysis_start.elapsed();
+                let t_target_analysis_start = Instant::now();
+                let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, &resolutions, &generated_crate_ast, &tests, opts.mutation_depth);
+                target_analysis_duration = t_target_analysis_start.elapsed();
 
-                    if let config::Mode::PrintMutationTargets = opts.mode {
-                        print_targets(tcx, &targets, opts.unsafe_targeting);
-                        if opts.report_timings {
-                            println!("\nfinished in {total:.2?} (targets {targets:.2?})",
-                                total = t_start.elapsed(),
-                                targets = target_analysis_duration,
-                            );
-                        }
-                        return Flow::Break;
+                if let config::Mode::PrintMutationTargets = opts.mode {
+                    print_targets(tcx, &targets, opts.unsafe_targeting);
+                    if opts.report_timings {
+                        println!("\nfinished in {total:.2?} (targets {targets:.2?})",
+                            total = t_start.elapsed(),
+                            targets = target_analysis_duration,
+                        );
                     }
+                    return Flow::Break;
+                }
 
-                    let t_mutation_analysis_start = Instant::now();
-                    let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, resolver, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
-                    mutation_analysis_duration = t_mutation_analysis_start.elapsed();
+                let t_mutation_analysis_start = Instant::now();
+                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &resolutions, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
+                mutation_analysis_duration = t_mutation_analysis_start.elapsed();
 
-                    let t_mutation_batching_start = Instant::now();
-                    let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count, opts.unsafe_targeting);
-                    mutation_batching_duration = t_mutation_batching_start.elapsed();
+                let t_mutation_batching_start = Instant::now();
+                let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count, opts.unsafe_targeting);
+                mutation_batching_duration = t_mutation_batching_start.elapsed();
 
-                    if let config::Mode::PrintMutants = opts.mode {
-                        print_mutants(tcx, &mutants, opts.unsafe_targeting);
-                        if opts.report_timings {
-                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
-                                total = t_start.elapsed(),
-                                targets = target_analysis_duration,
-                                mutations = mutation_analysis_duration,
-                                batching = mutation_batching_duration,
-                            );
-                        }
-                        return Flow::Break;
+                if let config::Mode::PrintMutants = opts.mode {
+                    print_mutants(tcx, &mutants, opts.unsafe_targeting);
+                    if opts.report_timings {
+                        println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
+                            total = t_start.elapsed(),
+                            targets = target_analysis_duration,
+                            mutations = mutation_analysis_duration,
+                            batching = mutation_batching_duration,
+                        );
                     }
+                    return Flow::Break;
+                }
 
-                    let t_codegen_start = Instant::now();
+                let t_codegen_start = Instant::now();
 
-                    mutest_emit::codegen::substitution::write_substitutions(resolver, &mutants, &mut generated_crate_ast);
+                mutest_emit::codegen::substitution::write_substitutions(tcx, &mutants, &mut generated_crate_ast);
 
-                    // HACK: See below.
-                    mutest_emit::codegen::expansion::insert_generated_code_crate_refs(resolver, &mut generated_crate_ast);
+                // HACK: See below.
+                mutest_emit::codegen::expansion::insert_generated_code_crate_refs(tcx, &mut generated_crate_ast);
 
-                    mutest_emit::codegen::entry_point::clean_entry_points(&mut generated_crate_ast);
-                    mutest_emit::codegen::entry_point::generate_dummy_main(resolver, &mut generated_crate_ast);
+                mutest_emit::codegen::entry_point::clean_entry_points(sess, &mut generated_crate_ast);
+                mutest_emit::codegen::entry_point::generate_dummy_main(tcx, &mut generated_crate_ast);
 
-                    mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
-                    mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
-                    mutest_emit::codegen::expansion::clean_up_test_cases(&tests, &mut generated_crate_ast);
+                mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
+                mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
+                mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
 
-                    mutest_emit::codegen::harness::generate_harness(sess, resolver, &mutants, &mut generated_crate_ast);
+                mutest_emit::codegen::harness::generate_harness(tcx, &mutants, &mut generated_crate_ast);
 
-                    codegen_duration = t_codegen_start.elapsed();
+                codegen_duration = t_codegen_start.elapsed();
 
-                    Flow::Continue(())
-                })?;
+                // HACK: The generated code is currently based on the expanded AST and contains references to the internals
+                //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
+                //       set of crate references (above).
+                let generated_crate_code = format!("{prelude}\n{code}",
+                    prelude = mutest_emit::codegen::expansion::GENERATED_CODE_PRELUDE,
+                    code = rustc_ast_pretty::pprust::print_crate(
+                        sess.source_map(),
+                        &generated_crate_ast,
+                        source_name,
+                        "".to_owned(),
+                        &rustc_ast_pretty::pprust::state::NoAnn,
+                        true,
+                        Edition::Edition2021,
+                        &sess.parse_sess.attr_id_generator,
+                    ),
+                );
 
-                Flow::Continue(())
-            })?;
-
-            // HACK: The generated code is currently based on the expanded AST and contains references to the internals
-            //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
-            //       set of crate references (above).
-            let generated_crate_code = format!("{prelude}\n{code}",
-                prelude = mutest_emit::codegen::expansion::GENERATED_CODE_PRELUDE,
-                code = rustc_ast_pretty::pprust::print_crate(
-                    sess.source_map(),
-                    &generated_crate_ast,
-                    source_name,
-                    "".to_owned(),
-                    &rustc_ast_pretty::pprust::state::NoAnn,
-                    true,
-                    Edition::Edition2021,
-                ),
-            );
-
-            Flow::Continue(AnalysisPassResult {
-                duration: t_start.elapsed(),
-                target_analysis_duration,
-                mutation_analysis_duration,
-                mutation_batching_duration,
-                codegen_duration,
-                generated_crate_code,
+                Flow::Continue(AnalysisPassResult {
+                    duration: t_start.elapsed(),
+                    target_analysis_duration,
+                    mutation_analysis_duration,
+                    mutation_batching_duration,
+                    codegen_duration,
+                    generated_crate_code,
+                })
             })
         });
 
