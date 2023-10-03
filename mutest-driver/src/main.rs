@@ -128,17 +128,17 @@ pub fn main() {
             _ => unreachable!(),
         };
 
-        let report_timings = mutest_arg_matches.is_present("timings");
+        let report_timings = mutest_arg_matches.get_flag("timings");
 
         let unsafe_targeting = match () {
-            _ if mutest_arg_matches.is_present("safe") => UnsafeTargeting::None,
-            _ if mutest_arg_matches.is_present("cautious") => UnsafeTargeting::OnlyEnclosing(Unsafety::Unsafe),
-            _ if mutest_arg_matches.is_present("unsafe") => UnsafeTargeting::All,
+            _ if mutest_arg_matches.get_flag("safe") => UnsafeTargeting::None,
+            _ if mutest_arg_matches.get_flag("cautious") => UnsafeTargeting::OnlyEnclosing(Unsafety::Unsafe),
+            _ if mutest_arg_matches.get_flag("unsafe") => UnsafeTargeting::All,
             _ => UnsafeTargeting::OnlyEnclosing(Unsafety::Normal),
         };
 
-        let mutation_depth = mutest_arg_matches.value_of_t("depth").unwrap();
-        let mutant_max_mutations_count = mutest_arg_matches.value_of_t("mutant-batch-size").unwrap();
+        let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
+        let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
         let config = Config {
             compiler_config,

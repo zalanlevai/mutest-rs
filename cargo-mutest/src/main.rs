@@ -30,14 +30,11 @@ fn main() {
         .subcommand(clap::Command::new("run")
             .display_order(0)
             .about("Build and run the test harness.")
-            // Information
-            .arg(clap::arg!(-h --help "Print help information."))
-            .arg(clap::arg!(-V --version "Print version information."))
             // Passed arguments
-            .arg(clap::Arg::new("PASSED_ARGS").takes_value(true).multiple_values(true).allow_hyphen_values(true))
+            .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
         // Cargo
-        .next_help_heading("CARGO OPTIONS")
+        .next_help_heading("Cargo options")
         .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
         .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts."))
         .arg(clap::arg!(--workspace "Test all packages in the workspace."))
@@ -60,7 +57,7 @@ fn main() {
         Some(("print-code", _)) => ("check", &["--profile", "test"], "print-code", None),
         Some(("build", _)) => ("test", &["--no-run"], "build", None),
         Some(("run", matches)) => {
-            let passed_args = matches.values_of("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
+            let passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
             ("test", &[], "build", Some(passed_args))
         }
         _ => unreachable!(),
@@ -76,32 +73,32 @@ fn main() {
 
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
 
-    if let Some(manifest_path) = matches.value_of("manifest-path") {
+    if let Some(manifest_path) = matches.get_one::<String>("manifest-path") {
         metadata_cmd.manifest_path(manifest_path);
         cmd.args(["--manifest-path", manifest_path]);
         strip_arg(&mut mutest_args, true, None, Some("manifest-path"));
     }
-    if let Some(workspace) = matches.value_of("workspace") {
-        cmd.args(["--workspace", workspace]);
-        strip_arg(&mut mutest_args, true, None, Some("workspace"));
+    if matches.get_flag("workspace") {
+        cmd.arg("--workspace");
+        strip_arg(&mut mutest_args, false, None, Some("workspace"));
     }
 
-    if let Some(package) = matches.value_of("package") {
+    if let Some(package) = matches.get_one::<String>("package") {
         cmd.args(["--package", package]);
         strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
     }
 
-    if let Some(features) = matches.values_of("features") {
+    if let Some(features) = matches.get_many::<String>("features") {
         metadata_cmd.features(cargo_metadata::CargoOpt::SomeFeatures(features.clone().map(ToOwned::to_owned).collect()));
         for feature in features { cmd.args(["--features", feature]); }
         strip_arg(&mut mutest_args, true, Some("F"), Some("features"));
     }
-    if matches.is_present("all-features") {
+    if matches.get_flag("all-features") {
         metadata_cmd.features(cargo_metadata::CargoOpt::AllFeatures);
         cmd.arg("--all-features");
         strip_arg(&mut mutest_args, false, None, Some("all-features"));
     }
-    if matches.is_present("no-default-features") {
+    if matches.get_flag("no-default-features") {
         metadata_cmd.features(cargo_metadata::CargoOpt::NoDefaultFeatures);
         cmd.arg("--no-default-features");
         strip_arg(&mut mutest_args, false, None, Some("no-default-features"));
@@ -109,37 +106,37 @@ fn main() {
 
     let metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
 
-    let target_dir = matches.value_of("target-dir").map(ToOwned::to_owned)
+    let target_dir = matches.get_one::<String>("target-dir").map(ToOwned::to_owned)
         .unwrap_or(metadata.target_directory.join("mutest").into_string());
     cmd.args(["--target-dir", &target_dir]);
 
-    if matches.is_present("release") {
+    if matches.get_flag("release") {
         cmd.arg("--release");
         strip_arg(&mut mutest_args, false, Some("r"), Some("release"));
     }
-    if let Some(profile) = matches.value_of("profile") {
+    if let Some(profile) = matches.get_one::<String>("profile") {
         cmd.args(["--profile", profile]);
         strip_arg(&mut mutest_args, true, None, Some("profile"));
     }
 
-    if matches.is_present("lib") {
+    if matches.get_flag("lib") {
         cmd.arg("--lib");
         strip_arg(&mut mutest_args, false, None, Some("lib"));
     }
-    if let Some(bin) = matches.value_of("bin") {
+    if let Some(bin) = matches.get_one::<String>("bin") {
         cmd.args(["--bin", bin]);
         strip_arg(&mut mutest_args, true, None, Some("bin"));
     }
-    if matches.is_present("bins") {
+    if matches.get_flag("bins") {
         cmd.arg("--bins");
         strip_arg(&mut mutest_args, false, None, Some("bins"));
     }
-    if matches.is_present("all-targets") {
+    if matches.get_flag("all-targets") {
         cmd.arg("--all-targets");
         strip_arg(&mut mutest_args, false, None, Some("all-targets"));
     }
 
-    if matches.is_present("offline") {
+    if matches.get_flag("offline") {
         cmd.arg("--offline");
         strip_arg(&mut mutest_args, false, None, Some("offline"));
     }
@@ -153,7 +150,7 @@ fn main() {
 
     if let Some(passed_args) = passed_args {
         cmd.arg("--");
-        if matches.is_present("timings") { cmd.arg("--timings"); }
+        if matches.get_flag("timings") { cmd.arg("--timings"); }
         cmd.args(&passed_args);
     }
 

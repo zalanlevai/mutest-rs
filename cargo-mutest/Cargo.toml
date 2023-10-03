@@ -10,5 +10,5 @@ edition = "2021"
 mutest-driver = { path = "../mutest-driver" }
 mutest-operators = { path = "../mutest-operators" }
 
-cargo_metadata = "0.14"
-clap = { version = "3", features = ["cargo"] }
+cargo_metadata = "0.18"
+clap = { version = "4", features = ["cargo"] }
