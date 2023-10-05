@@ -2,10 +2,12 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic;
+use std::process::{self, Command};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::thread;
@@ -16,12 +18,31 @@ mod test {
     pub use ::test::test::*;
 }
 
+#[derive(Clone)]
+pub enum TestRunStrategy {
+    InProcess,
+    InIsolatedChildProcess(Arc<dyn Fn(&mut process::Command) + Send + Sync>),
+}
+
+impl fmt::Debug for TestRunStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InProcess => write!(f, "InProcess"),
+            Self::InIsolatedChildProcess(_) => {
+                f.debug_tuple("InIsolatedChildProcess")
+                    .field(&format_args!("_")).finish()
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TestResult {
     Ok,
     Ignored,
     Failed,
     FailedMsg(String),
+    CrashedMsg(String),
     TimedOut,
 }
 
@@ -84,15 +105,26 @@ impl TestResult {
         result
     }
 
-    pub fn from_exit_code(
-        exit_code: i32,
+    pub fn from_exit_status(
+        exit_status: process::ExitStatus,
         test_timeout: Option<Duration>,
         task_exec_time: Option<Duration>,
     ) -> Self {
+        #[cfg(not(unix))]
+        let exit_code = exit_status.code().expect("received no exit code");
+        #[cfg(unix)]
+        let Some(exit_code) = exit_status.code() else {
+            use std::os::unix::process::ExitStatusExt;
+            match exit_status.signal() {
+                Some(signal) => return TestResult::CrashedMsg(format!("received signal {signal}")),
+                None => return TestResult::CrashedMsg("received unknown signal".to_owned()),
+            }
+        };
+
         let result = match exit_code {
             TR_OK => TestResult::Ok,
             TR_FAILED => TestResult::Failed,
-            _ => TestResult::FailedMsg(format!("got unexpected exit code {exit_code}")),
+            _ => TestResult::CrashedMsg(format!("got unexpected exit code {exit_code}")),
         };
 
         if result != TestResult::Ok { return result; }
@@ -114,6 +146,11 @@ pub struct CompletedTest {
     pub result: TestResult,
     pub exec_time: Option<Duration>,
     pub stdout: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlMsg {
+    KillChildProcess,
 }
 
 fn run_test_in_process(
@@ -164,6 +201,90 @@ fn run_test_in_process(
     };
 }
 
+pub static TEST_SUBPROCESS_INVOCATION: &str = "__ISOLATED_TEST_CASE";
+
+fn spawn_test_subprocess(
+    id: test::TestId,
+    desc: test::TestDesc,
+    cmd_hook: Arc<dyn Fn(&mut process::Command) + Send + Sync>,
+    control_ch: Option<mpsc::Receiver<ControlMsg>>,
+    monitor_ch: mpsc::Sender<CompletedTest>,
+    test_timeout: Option<Duration>,
+    no_capture: bool,
+) {
+    let current_exe = env::current_exe().expect("cannot resolve test executable path");
+
+    let mut cmd = Command::new(current_exe);
+    cmd.env(TEST_SUBPROCESS_INVOCATION, desc.name.as_slice());
+
+    if no_capture {
+        cmd.stdout(process::Stdio::inherit());
+        cmd.stderr(process::Stdio::inherit());
+    } else {
+        cmd.stdout(process::Stdio::piped());
+        cmd.stderr(process::Stdio::piped());
+    }
+
+    // Allow caller to customize the test subprocess command.
+    cmd_hook(&mut cmd);
+
+    let (test_result, exec_time, output) = 'test_exec: {
+        let mut child = cmd.spawn().expect("failed to spawn subprocess for test");
+
+        let start = Instant::now();
+        if let Some(test_timeout) = test_timeout {
+            loop {
+                if let Some(control_ch) = &control_ch {
+                    match control_ch.try_recv() {
+                        // Kill test subprocess if the test run is stopped early.
+                        Ok(ControlMsg::KillChildProcess) => {
+                            child.kill().expect("failed to kill test subprocess");
+                            let output = child.wait_with_output().expect("failed to get output of killed test subprocess");
+                            break 'test_exec (TestResult::Ignored, start.elapsed(), output);
+                        }
+
+                        Err(mpsc::TryRecvError::Disconnected) => panic!("test subprocess left dangling: control channel disconnected"),
+
+                        // No control messages, continue normally.
+                        Err(mpsc::TryRecvError::Empty) => {}
+                    }
+                }
+
+                let exit_status = match child.try_wait() {
+                    Ok(exit_status) => exit_status,
+                    Err(e) => {
+                        let err = format!("failed to poll test subprocess: {e:?}");
+                        child.kill().expect("failed to kill test subprocess");
+                        let output = child.wait_with_output().expect("failed to get output of killed test subprocess");
+                        break 'test_exec (TestResult::FailedMsg(err), start.elapsed(), output);
+                    }
+                };
+
+                if let Some(_exit_status) = exit_status { break; }
+
+                if start.elapsed() > test_timeout {
+                    child.kill().expect("failed to kill test subprocess");
+                    let output = child.wait_with_output().expect("failed to get output of killed test subprocess");
+                    break 'test_exec (TestResult::TimedOut, start.elapsed(), output);
+                }
+            }
+        } else {
+            child.wait().expect("failed to wait for test subprocess");
+        }
+        let exec_time = start.elapsed();
+
+        let output = child.wait_with_output().expect("failed to get output of killed test subprocess");
+        let test_result = TestResult::from_exit_status(output.status, test_timeout, Some(exec_time));
+        break 'test_exec (test_result, exec_time, output);
+    };
+
+    let mut stdout = output.stdout;
+    stdout.extend_from_slice(&output.stderr);
+
+    let completed_test = CompletedTest { id, desc, result: test_result, exec_time: Some(exec_time), stdout };
+    monitor_ch.send(completed_test).expect("test subprocess left dangling: monitor channel disconnected");
+}
+
 /// Fixed frame used to clean the backtrace with `RUST_BACKTRACE=1`.
 #[inline(never)]
 fn __rust_begin_short_backtrace<T, F: FnOnce() -> T>(f: F) -> T {
@@ -173,10 +294,58 @@ fn __rust_begin_short_backtrace<T, F: FnOnce() -> T>(f: F) -> T {
     test::black_box(result)
 }
 
+pub fn run_test_in_spawned_subprocess(test: test::TestDescAndFn) -> ! {
+    let builtin_panic_hook = panic::take_hook();
+
+    let exit_with_result = Arc::new(move |panic_info: Option<&panic::PanicInfo<'_>>| -> ! {
+        let task_result = match panic_info {
+            Some(info) => Err(info.payload()),
+            None => Ok(()),
+        };
+        let test_result = TestResult::from_task(test.desc.should_panic, task_result, None, None);
+
+        if let TestResult::FailedMsg(msg) = &test_result {
+            eprintln!("{msg}");
+        }
+        if let Some(info) = panic_info {
+            builtin_panic_hook(info);
+        }
+
+        match test_result {
+            TestResult::Ok => process::exit(TR_OK),
+            TestResult::Failed | TestResult::FailedMsg(_) => process::exit(TR_FAILED),
+            TestResult::CrashedMsg(_) | TestResult::TimedOut | TestResult::Ignored => unreachable!(),
+        }
+    });
+
+    panic::set_hook({
+        let exit_with_result_panic = exit_with_result.clone();
+        Box::new(move |panic_info| exit_with_result_panic(Some(panic_info)))
+    });
+
+    let result = match test.testfn {
+        test::TestFn::StaticTestFn(f)
+        => __rust_begin_short_backtrace(f),
+
+        | test::TestFn::DynTestFn(_)
+        | test::TestFn::StaticBenchFn(_)
+        | test::TestFn::StaticBenchAsTestFn(_)
+        | test::TestFn::DynBenchFn(_)
+        | test::TestFn::DynBenchAsTestFn(_)
+        => unreachable!(),
+    };
+
+    if let Err(e) = result { panic!("{e}"); }
+
+    exit_with_result(None);
+}
+
 fn run_test(
     id: test::TestId,
     test: test::TestDescAndFn,
+    control_ch: Option<mpsc::Receiver<ControlMsg>>,
     monitor_ch: mpsc::Sender<CompletedTest>,
+    test_run_strategy: TestRunStrategy,
     test_timeout: Option<Duration>,
     no_capture: bool,
 ) -> Option<thread::JoinHandle<()>> {
@@ -200,12 +369,22 @@ fn run_test(
         id: test::TestId,
         desc: test::TestDesc,
         test_fn: Box<dyn FnOnce() -> Result<(), String> + Send>,
+        test_run_strategy: TestRunStrategy,
+        control_ch: Option<mpsc::Receiver<ControlMsg>>,
         monitor_ch: mpsc::Sender<CompletedTest>,
         test_timeout: Option<Duration>,
         no_capture: bool,
     ) -> Option<thread::JoinHandle<()>> {
         let name = desc.name.clone();
-        let run_test = move || run_test_in_process(id, desc, test_fn, monitor_ch, test_timeout, no_capture);
+        let run_test = move || {
+            match test_run_strategy {
+                TestRunStrategy::InProcess
+                => run_test_in_process(id, desc, test_fn, monitor_ch, test_timeout, no_capture),
+
+                TestRunStrategy::InIsolatedChildProcess(cmd_hook)
+                => spawn_test_subprocess(id, desc, cmd_hook, control_ch, monitor_ch, test_timeout, no_capture),
+            }
+        };
 
         let supports_threads = !cfg!(target_os = "emscripten") && !cfg!(target_family = "wasm");
 
@@ -234,7 +413,7 @@ fn run_test(
     match testfn {
         test::TestFn::StaticTestFn(f) => {
             let test_fn = Box::new(move || __rust_begin_short_backtrace(f));
-            run_test_impl(id, desc, test_fn, monitor_ch, test_timeout, no_capture)
+            run_test_impl(id, desc, test_fn, test_run_strategy, control_ch, monitor_ch, test_timeout, no_capture)
         }
 
         test::TestFn::DynTestFn(_) => {
@@ -254,6 +433,7 @@ fn run_test(
 pub struct RunningTest {
     pub desc: test::TestDesc,
     pub start_time: Instant,
+    pub control_tx: mpsc::Sender<ControlMsg>,
     pub join_handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -273,6 +453,7 @@ pub enum Flow {
 pub fn run_tests<E, F>(
     tests: Vec<test::TestDescAndFn>,
     mut on_test_event: F,
+    test_run_strategy: TestRunStrategy,
     test_timeout: Option<Duration>,
     no_capture: bool,
 ) -> Result<(Vec<test::TestDescAndFn>, Vec<RunningTest>), E>
@@ -296,10 +477,11 @@ where
     // Reverse the list of remaining tests so that we can `pop` from the queue in order.
     remaining_tests.reverse();
 
-    let mut running_tests: HashMap<test::TestId, RunningTest, BuildHasherDefault<DefaultHasher>> = Default::default();
-    let mut lingering_tests: HashMap<test::TestId, RunningTest, BuildHasherDefault<DefaultHasher>> = Default::default();
+    type RunningTestMap = HashMap<test::TestId, RunningTest, BuildHasherDefault<DefaultHasher>>;
+    let mut running_tests: RunningTestMap = Default::default();
+    let mut lingering_tests: RunningTestMap = Default::default();
 
-    let (tx, rx) = mpsc::channel::<CompletedTest>();
+    let (test_tx, test_rx) = mpsc::channel::<CompletedTest>();
 
     if concurrency == 1 {
         macro event($event:expr) {
@@ -317,8 +499,8 @@ where
             event!(TestEvent::Queue(1, remaining_tests.len()));
             event!(TestEvent::Wait(test.desc.clone()));
 
-            let join_handle = run_test(id, test, tx.clone(), test_timeout, no_capture);
-            let mut completed_test = rx.recv().unwrap();
+            let join_handle = run_test(id, test, None, test_tx.clone(), test_run_strategy.clone(), test_timeout, no_capture);
+            let mut completed_test = test_rx.recv().unwrap();
 
             if let Some(join_handle) = join_handle {
                 if let Err(_) = join_handle.join() {
@@ -336,8 +518,36 @@ where
         let remaining_tests = remaining_tests.into_iter().map(|(_, test)| test).collect();
         return Ok((remaining_tests, vec![]));
     } else {
+        fn cleanup_isolated_tests(running_tests: &mut RunningTestMap, test_rx: &mpsc::Receiver<CompletedTest>) {
+            for (_, test) in &*running_tests {
+                match test.control_tx.send(ControlMsg::KillChildProcess) {
+                    Ok(()) => {}
+                    // Send errors will only occur if the test execution completed during cleanup.
+                    // This is fine, since the completed test will have been sent through the test monitor channel.
+                    // As such, send errors are explicitly ignored here.
+                    Err(mpsc::SendError(_)) => {}
+                };
+            }
+
+            for (_, running_test) in running_tests.drain() {
+                let mut completed_test = test_rx.recv().expect("test monitor channel disconnected");
+
+                if let Some(join_handle) = running_test.join_handle {
+                    if let Err(_) = join_handle.join() {
+                        if let TestResult::Ok = completed_test.result {
+                            completed_test.result = TestResult::FailedMsg("panicked after reporting success".to_owned());
+                        }
+                    }
+                }
+            }
+        }
+
         macro event($event:expr) {
             if let Flow::Stop = on_test_event($event, &mut remaining_tests)? {
+                if let TestRunStrategy::InIsolatedChildProcess(_) = &test_run_strategy {
+                    cleanup_isolated_tests(&mut running_tests, &test_rx);
+                }
+
                 lingering_tests.extend(running_tests.drain());
 
                 let remaining_tests = remaining_tests.into_iter().map(|(_, test)| test).collect();
@@ -355,11 +565,12 @@ where
 
                 let desc = test.desc.clone();
 
-                let join_handle = run_test(id, test, tx.clone(), test_timeout, no_capture);
-                running_tests.insert(id, RunningTest { desc, start_time: Instant::now(), join_handle });
+                let (control_tx, control_rx) = mpsc::channel::<ControlMsg>();
+                let join_handle = run_test(id, test, Some(control_rx), test_tx.clone(), test_run_strategy.clone(), test_timeout, no_capture);
+                running_tests.insert(id, RunningTest { desc, start_time: Instant::now(), control_tx, join_handle });
             }
 
-            if let Some(test_timeout) = test_timeout {
+            if let (Some(test_timeout), TestRunStrategy::InProcess) = (test_timeout, &test_run_strategy) {
                 let running_test_ids = running_tests.keys().cloned().collect::<Vec<_>>();
                 for test_id in running_test_ids {
                     let running_test = running_tests.get(&test_id).unwrap();
@@ -391,16 +602,16 @@ where
             if running_tests.is_empty() { break; }
 
             let deadline = test_timeout.and_then(|test_timeout| running_tests.values().map(|test| test.start_time + test_timeout).reduce(Ord::min));
-            let mut completed_test = match deadline {
-                Some(deadline) => {
-                    match rx.recv_deadline(deadline) {
+            let mut completed_test = match (deadline, &test_run_strategy) {
+                (Some(deadline), TestRunStrategy::InProcess) => {
+                    match test_rx.recv_deadline(deadline) {
                         Err(mpsc::RecvTimeoutError::Timeout) => { continue; }
                         Err(mpsc::RecvTimeoutError::Disconnected) => panic!("test monitor channel disconnected"),
                         Ok(completed_test) => completed_test,
                     }
                 }
-                None => {
-                    match rx.recv() {
+                _ => {
+                    match test_rx.recv() {
                         Err(mpsc::RecvError) => panic!("test monitor channel disconnected"),
                         Ok(completed_test) => completed_test,
                     }

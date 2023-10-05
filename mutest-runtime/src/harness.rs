@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::process::{self, Termination};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::MutationSafety;
 use crate::config::{self, Options};
 use crate::metadata::{MutantMeta, MutationMeta};
 use crate::test_runner;
@@ -90,7 +91,7 @@ fn profile_tests(tests: Vec<test::TestDescAndFn>) -> Result<Vec<ProfiledTest>, I
         Ok(test_runner::Flow::Continue)
     };
 
-    test_runner::run_tests(tests, on_test_event, None, false)?;
+    test_runner::run_tests(tests, on_test_event, test_runner::TestRunStrategy::InProcess, None, false)?;
 
     Ok(profiled_tests)
 }
@@ -144,15 +145,15 @@ pub enum MutationTestResult {
     Crashed,
 }
 
-fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static MutationMeta], test_timeout: Option<Duration>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
-    let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutations.len());
+fn run_tests<S>(mut tests: Vec<test::TestDescAndFn>, mutant: &MutantMeta<S>, test_timeout: Option<Duration>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
+    let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutant.mutations.len());
 
-    for &mutation in mutations {
+    for &mutation in mutant.mutations {
         results.insert(mutation.id, MutationTestResult::Undetected);
     }
 
-    tests.retain(|test| mutations.iter().any(|m| m.reachable_from.contains_key(test.desc.name.as_slice())));
-    maximize_mutation_parallelism(&mut tests, mutations);
+    tests.retain(|test| mutant.mutations.iter().any(|m| m.reachable_from.contains_key(test.desc.name.as_slice())));
+    maximize_mutation_parallelism(&mut tests, mutant.mutations);
 
     let total_tests_count = tests.len();
     let mut completed_tests_count = 0;
@@ -162,7 +163,7 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
             test_runner::TestEvent::Result(test) => {
                 completed_tests_count += 1;
 
-                let mutation = mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
+                let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
                     .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
 
                 match test.result {
@@ -174,6 +175,10 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
                     | test_runner::TestResult::Failed
                     | test_runner::TestResult::FailedMsg(_) => {
                         results.insert(mutation.id, MutationTestResult::Detected);
+                    }
+
+                    test_runner::TestResult::CrashedMsg(_) => {
+                        results.insert(mutation.id, MutationTestResult::Crashed);
                     }
 
                     test_runner::TestResult::TimedOut => {
@@ -193,7 +198,17 @@ fn run_tests(mut tests: Vec<test::TestDescAndFn>, mutations: &'static [&'static 
         Ok(test_runner::Flow::Continue)
     };
 
-    test_runner::run_tests(tests, on_test_event, test_timeout, false)?;
+    let test_run_strategy = match mutant.is_unsafe() {
+        false => test_runner::TestRunStrategy::InProcess,
+        true => test_runner::TestRunStrategy::InIsolatedChildProcess({
+            let mutant_id = mutant.id;
+            Arc::new(move |cmd| {
+                cmd.env(MUTEST_ISOLATED_WORKER_MUTANT_ID, mutant_id.to_string());
+            })
+        }),
+    };
+
+    test_runner::run_tests(tests, on_test_event, test_run_strategy, test_timeout, false)?;
 
     println!("ran {completed} out of {total} {descr}",
         completed = completed_tests_count,
@@ -261,9 +276,13 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
 
     let mut all_test_runs_failed_successfully = true;
     let mut total_mutations_count = 0;
+    let mut total_safe_mutations_count = 0;
     let mut undetected_mutations_count = 0;
+    let mut undetected_safe_mutations_count = 0;
     let mut timed_out_mutations_count = 0;
+    let mut timed_out_safe_mutations_count = 0;
     let mut crashed_mutations_count = 0;
+    let mut crashed_safe_mutations_count = 0;
 
     let t_mutation_testing_start = Instant::now();
     for &mutant in mutants {
@@ -271,7 +290,15 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
 
         println!("applying mutant with the following mutations:");
         for mutation in mutant.mutations {
-            println!("- {} at {}", mutation.display_name, mutation.display_location);
+            println!("- {unsafe_marker}{display_name} at {display_location}",
+                unsafe_marker = match mutation.safety {
+                    MutationSafety::Safe => "",
+                    MutationSafety::Tainted => "[tainted] ",
+                    MutationSafety::Unsafe => "[unsafe] ",
+                },
+                display_name = mutation.display_name,
+                display_location = mutation.display_location,
+            );
         }
         println!();
 
@@ -281,11 +308,14 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        match run_tests(tests, mutant.mutations, test_timeout) {
+        match run_tests(tests, mutant, test_timeout) {
             Ok(results) => {
-                total_mutations_count += mutant.mutations.len();
-
                 for &mutation in mutant.mutations {
+                    total_mutations_count += 1;
+                    if let MutationSafety::Safe = mutation.safety {
+                        total_safe_mutations_count += 1;
+                    }
+
                     let Some(result) = results.get(&mutation.id) else { unreachable!() };
 
                     match result {
@@ -293,15 +323,26 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
                             all_test_runs_failed_successfully = false;
 
                             undetected_mutations_count += 1;
+                            if let MutationSafety::Safe = mutation.safety {
+                                undetected_safe_mutations_count += 1;
+                            }
+
                             print!("{}", mutation.undetected_diagnostic);
                         }
 
                         MutationTestResult::Detected => {}
                         MutationTestResult::TimedOut => {
                             timed_out_mutations_count += 1;
+                            if let MutationSafety::Safe = mutation.safety {
+                                timed_out_safe_mutations_count += 1;
+                            }
+
                         }
                         MutationTestResult::Crashed => {
                             crashed_mutations_count += 1;
+                            if let MutationSafety::Safe = mutation.safety {
+                                crashed_safe_mutations_count += 1;
+                            }
                         }
                     }
                 }
@@ -322,6 +363,28 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         undetected = undetected_mutations_count,
         total = total_mutations_count,
     );
+    println!("     safe: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
+        score = match total_safe_mutations_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%",(total_safe_mutations_count - undetected_safe_mutations_count) as f64 / total_safe_mutations_count as f64 * 100_f64),
+        },
+        detected = total_safe_mutations_count - undetected_safe_mutations_count,
+        timed_out = timed_out_safe_mutations_count,
+        crashed = crashed_safe_mutations_count,
+        undetected = undetected_safe_mutations_count,
+        total = total_safe_mutations_count,
+    );
+    println!("   unsafe: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
+        score = match total_mutations_count - total_safe_mutations_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%",((total_mutations_count - total_safe_mutations_count) - (undetected_mutations_count - undetected_safe_mutations_count)) as f64 / (total_mutations_count - total_safe_mutations_count) as f64 * 100_f64),
+        },
+        detected = (total_mutations_count - total_safe_mutations_count) - (undetected_mutations_count - undetected_safe_mutations_count),
+        timed_out = timed_out_mutations_count - timed_out_safe_mutations_count,
+        crashed = crashed_mutations_count - crashed_safe_mutations_count,
+        undetected = undetected_mutations_count - undetected_safe_mutations_count,
+        total = total_mutations_count - total_safe_mutations_count,
+    );
 
     if opts.report_timings {
         println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?})",
@@ -336,7 +399,32 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
     }
 }
 
+const MUTEST_ISOLATED_WORKER_MUTANT_ID: &str = "__MUTEST_ISOLATED_WORKER_MUTANT_ID";
+
+fn mutest_isolated_worker<S>(test: test::TestDescAndFn, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) -> ! {
+    let mutant_id = env::var(MUTEST_ISOLATED_WORKER_MUTANT_ID).unwrap()
+        .parse::<u32>().expect(&format!("{MUTEST_ISOLATED_WORKER_MUTANT_ID} must be a number"));
+
+    let Some(mutant) = mutants.iter().find(|m| m.id == mutant_id) else {
+        panic!("{MUTEST_ISOLATED_WORKER_MUTANT_ID} must be a valid id");
+    };
+
+    active_mutant_handle.replace(Some(mutant));
+
+    test_runner::run_test_in_spawned_subprocess(test);
+}
+
 pub fn mutest_main_static<S>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
+    if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
+        env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION);
+
+        let test = tests.iter().find(|test| test.desc.name.as_slice() == test_name)
+            .expect(&format!("cannot find test with name `{test_name}`"));
+        let test = make_owned_test(test);
+
+        mutest_isolated_worker(test, mutants, active_mutant_handle);
+    }
+
     let args = env::args().collect::<Vec<_>>();
     let args = args.iter().map(String::as_ref).collect::<Vec<_>>();
     let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test(test)).collect();

@@ -696,7 +696,17 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, res
     collector.mutations
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct MutantId(u32);
+
+impl MutantId {
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+}
+
 pub struct Mutant<'tcx, 'trg, 'm> {
+    pub id: MutantId,
     pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
 }
 
@@ -756,6 +766,7 @@ pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, 
     mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)).reverse());
 
     let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
+    let mut next_mutant_index = 1;
 
     for mutation in mutations {
         let mutant_candidate = 'mutant_candidate: {
@@ -783,7 +794,10 @@ pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, 
 
         match mutant_candidate {
             Some(mutant) => mutant.mutations.push(mutation),
-            None => mutants.push(Mutant { mutations: vec![mutation] }),
+            None => {
+                mutants.push(Mutant { id: MutantId(next_mutant_index), mutations: vec![mutation] });
+                next_mutant_index += 1;
+            }
         }
     }
 

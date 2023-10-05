@@ -10,14 +10,22 @@ use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::expansion::TcxExpansionExt;
-use crate::codegen::mutation::{Mut, Mutant, SubstLoc};
+use crate::codegen::mutation::{Mut, Mutant, SubstLoc, UnsafeTargeting, Unsafety};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
-pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
+pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session, unsafe_targeting: UnsafeTargeting) -> P<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutationMeta(sp)), thin_vec![
         ast::mk::expr_struct_field(sp, Ident::new(*sym::id, sp), {
             ast::mk::expr_u32(sp, mutation.id.index())
+        }),
+
+        ast::mk::expr_struct_field(sp, Ident::new(sym::safety, sp), {
+            match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
+                (true, Unsafety::Tainted(_)) => ast::mk::expr_path(ast::mk::path_local(path::MutationSafetyTainted(sp))),
+                (true, _) => ast::mk::expr_path(ast::mk::path_local(path::MutationSafetyUnsafe(sp))),
+                (false, _) => ast::mk::expr_path(ast::mk::path_local(path::MutationSafetySafe(sp))),
+            }
         }),
 
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_name, sp), {
@@ -60,8 +68,11 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session) -> P<ast::Expr> {
     ])
 }
 
-pub fn bake_mutant(_mutant: &Mutant, sp: Span, _sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
+pub fn bake_mutant(mutant: &Mutant, sp: Span, _sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutantMeta(sp)), thin_vec![
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::id, sp), {
+            ast::mk::expr_u32(sp, mutant.id.index())
+        }),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::mutations, sp), mutations_expr),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::substitutions, sp), subst_map_expr),
     ])
@@ -86,7 +97,7 @@ fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
     ast::mk::item_struct(sp, vis, ident, None, fields)
 }
 
-fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>) -> P<ast::Item> {
+fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>, unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
     let g = &sess.parse_sess.attr_id_generator;
 
     let items = iter::once(ast::mk::item_extern_crate(sp, *sym::mutest_runtime, None))
@@ -95,7 +106,7 @@ fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>) -> P<ast::I
             let vis = ast::mk::vis_pub(sp);
             let ident = Ident::new(mutation.id.into_symbol(), sp);
             let ty = ast::mk::ty_path(None, ast::mk::path_local(path::MutationMeta(sp)));
-            let expr = bake_mutation(mutation, sp, sess);
+            let expr = bake_mutation(mutation, sp, sess, unsafe_targeting);
             ast::mk::item_const(sp, vis, ident, ty, expr)
         }))
         .collect::<ThinVec<_>>();
@@ -212,6 +223,7 @@ fn mk_harness_fn(sp: Span) -> P<ast::Item> {
 
 struct HarnessGenerator<'tcx, 'trg, 'm> {
     sess: &'tcx Session,
+    unsafe_targeting: UnsafeTargeting,
     mutants: &'m [Mutant<'tcx, 'trg, 'm>],
     def_site: Span,
 }
@@ -266,7 +278,7 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
                 extern_crate_test,
                 extern_crate_mutest_runtime,
                 mk_subst_map_struct(def, &subst_locs),
-                mk_mutations_mod(def, self.sess, &mutations),
+                mk_mutations_mod(def, self.sess, &mutations, self.unsafe_targeting),
                 mk_mutants_slice_const(def, self.sess, self.mutants, &subst_locs),
                 mk_active_mutant_handle_static(def),
                 mk_harness_fn(def),
@@ -277,7 +289,7 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
     }
 }
 
-pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate: &mut ast::Crate) {
+pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate: &mut ast::Crate, unsafe_targeting: UnsafeTargeting) {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
         DUMMY_SP,
@@ -285,6 +297,6 @@ pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate: &
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut generator = HarnessGenerator { sess: tcx.sess, mutants, def_site };
+    let mut generator = HarnessGenerator { sess: tcx.sess, unsafe_targeting, mutants, def_site };
     generator.visit_crate(krate);
 }
