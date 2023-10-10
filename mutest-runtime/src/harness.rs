@@ -1,9 +1,10 @@
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::process::{self, Termination};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::MutationSafety;
@@ -18,25 +19,32 @@ mod test {
 
 // TODO: Consider using `MaybeUninit<Mutant>` for the cell type if the harness never runs the
 //       program without any mutations applied.
-pub struct ActiveMutantHandle<S: 'static>(RwLock<Option<&'static MutantMeta<S>>>);
+pub struct ActiveMutantHandle<S: 'static>(Cell<Option<&'static MutantMeta<S>>>);
 
-impl <S> ActiveMutantHandle<S> {
+impl<S> ActiveMutantHandle<S> {
     pub const fn empty() -> Self {
-        Self(RwLock::new(None))
+        Self(Cell::new(None))
     }
 
     pub const fn with(v: &'static MutantMeta<S>) -> Self {
-        Self(RwLock::new(Some(v)))
+        Self(Cell::new(Some(v)))
     }
 
     pub fn borrow(&self) -> Option<&'static MutantMeta<S>> {
-        *self.0.read().unwrap()
+        self.0.get()
     }
 
-    pub fn replace(&self, v: Option<&'static MutantMeta<S>>) {
-        *self.0.write().unwrap() = v;
+    /// # Safety
+    ///
+    /// The caller must ensure that no other thread is reading from the handle.
+    pub(crate) unsafe fn replace(&self, v: Option<&'static MutantMeta<S>>) {
+        self.0.replace(v);
     }
 }
+
+// SAFETY: While access to the handle data is not synchronized, the handle can only be mutated using
+//         unsafe, crate-private functions, see above.
+unsafe impl<S> Sync for ActiveMutantHandle<S> {}
 
 // NOTE: `mutest_runtime::wrap` is currently a no-op test wrapper. The codegen for it was left intact if we ever need
 //       such functionality in the future.
@@ -317,7 +325,12 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
 
     let t_mutation_testing_start = Instant::now();
     for &mutant in mutants {
-        active_mutant_handle.replace(Some(mutant));
+        // SAFETY: Ideally, since the previous test runs all completed, no other thread is running, no one else is
+        //         reading from the handle.
+        //         As for lingering test cases from previous test runs, their behaviour will change accordingly, but we
+        //         have already marked them as timed out and abandoned them by this point. The behaviour in such cases
+        //         stays the same, regardless of whether the handle performs locking or not.
+        unsafe { active_mutant_handle.replace(Some(mutant)); }
 
         println!("applying mutant with the following mutations:");
         for mutation in mutant.mutations {
@@ -440,7 +453,8 @@ fn mutest_isolated_worker<S>(test: test::TestDescAndFn, mutants: &'static [&'sta
         panic!("{MUTEST_ISOLATED_WORKER_MUTANT_ID} must be a valid id");
     };
 
-    active_mutant_handle.replace(Some(mutant));
+    // SAFETY: No other thread is running yet, no one else is reading from the handle yet.
+    unsafe { active_mutant_handle.replace(Some(mutant)); }
 
     test_runner::run_test_in_spawned_subprocess(test);
 }
