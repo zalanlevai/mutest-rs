@@ -50,16 +50,31 @@ where
 
 const ERROR_EXIT_CODE: i32 = 101;
 
-fn make_owned_test(test: &test::TestDescAndFn) -> test::TestDescAndFn {
-    match test.testfn {
-        test::TestFn::StaticTestFn(f) => test::TestDescAndFn { testfn: test::TestFn::StaticTestFn(f), desc: test.desc.clone() },
-        test::TestFn::StaticBenchFn(f) => test::TestDescAndFn { testfn: test::TestFn::StaticBenchFn(f), desc: test.desc.clone() },
+fn make_owned_test_fn(test_fn: &test::TestFn) -> test::TestFn {
+    match test_fn {
+        test::TestFn::StaticTestFn(f) => test::TestFn::StaticTestFn(*f),
+        test::TestFn::StaticBenchFn(f) => test::TestFn::StaticBenchFn(*f),
         _ => panic!("non-static tests passed to mutest_runtime::mutest_main"),
     }
 }
 
-fn clone_tests(tests: &Vec<test::TestDescAndFn>) -> Vec<test::TestDescAndFn> {
-    tests.iter().map(make_owned_test).collect()
+fn make_owned_test_def(test: &test::TestDescAndFn) -> test::TestDescAndFn {
+    test::TestDescAndFn {
+        desc: test.desc.clone(),
+        testfn: make_owned_test_fn(&test.testfn),
+    }
+}
+
+fn clone_tests(tests: &[test_runner::Test]) -> Vec<test_runner::Test> {
+    tests.iter()
+        .map(|test| {
+            test_runner::Test {
+                desc: test.desc.clone(),
+                test_fn: make_owned_test_fn(&test.test_fn),
+                timeout: test.timeout,
+            }
+        })
+        .collect()
 }
 
 struct ProfiledTest {
@@ -69,10 +84,20 @@ struct ProfiledTest {
 }
 
 fn profile_tests(tests: Vec<test::TestDescAndFn>) -> Result<Vec<ProfiledTest>, Infallible> {
-    let mut remaining_tests = clone_tests(&tests);
-    let mut profiled_tests = Vec::<ProfiledTest>::with_capacity(tests.len());
+    let tests_to_run = tests.iter()
+        .map(|test| {
+            test_runner::Test {
+                desc: test.desc.clone(),
+                test_fn: make_owned_test_fn(&test.testfn),
+                timeout: None,
+            }
+        })
+        .collect::<Vec<_>>();
 
-    let on_test_event = |event, _remaining_tests: &mut Vec<(test::TestId, test::TestDescAndFn)>| -> Result<_, Infallible> {
+    let mut profiled_tests = Vec::<ProfiledTest>::with_capacity(tests.len());
+    let mut remaining_tests = tests;
+
+    let on_test_event = |event, _remaining_tests: &mut Vec<(test::TestId, test_runner::Test)>| -> Result<_, Infallible> {
         match event {
             test_runner::TestEvent::Result(test) => {
                 let test_desc_and_fn = remaining_tests
@@ -91,7 +116,7 @@ fn profile_tests(tests: Vec<test::TestDescAndFn>) -> Result<Vec<ProfiledTest>, I
         Ok(test_runner::Flow::Continue)
     };
 
-    test_runner::run_tests(tests, on_test_event, test_runner::TestRunStrategy::InProcess, None, false)?;
+    test_runner::run_tests(tests_to_run, on_test_event, test_runner::TestRunStrategy::InProcess, false)?;
 
     Ok(profiled_tests)
 }
@@ -107,7 +132,7 @@ fn sort_profiled_tests_by_exec_time(profiled_tests: &mut Vec<ProfiledTest>) {
     });
 }
 
-fn prioritize_tests_by_distance(tests: &mut Vec<test::TestDescAndFn>, mutations: &'static [&'static MutationMeta]) {
+fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, mutations: &'static [&'static MutationMeta]) {
     tests.sort_by(|a, b| {
         let distance_a = mutations.iter().filter_map(|&m| m.reachable_from.get(a.desc.name.as_slice())).reduce(Ord::min);
         let distance_b = mutations.iter().filter_map(|&m| m.reachable_from.get(b.desc.name.as_slice())).reduce(Ord::min);
@@ -121,8 +146,8 @@ fn prioritize_tests_by_distance(tests: &mut Vec<test::TestDescAndFn>, mutations:
     });
 }
 
-fn maximize_mutation_parallelism(tests: &mut Vec<test::TestDescAndFn>, mutations: &'static [&'static MutationMeta]) {
-    let mut parallelized_tests = Vec::<test::TestDescAndFn>::with_capacity(tests.len());
+fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: &'static [&'static MutationMeta]) {
+    let mut parallelized_tests = Vec::<test_runner::Test>::with_capacity(tests.len());
 
     while !tests.is_empty() {
         for mutation in mutations {
@@ -145,7 +170,7 @@ pub enum MutationTestResult {
     Crashed,
 }
 
-fn run_tests<S>(mut tests: Vec<test::TestDescAndFn>, mutant: &MutantMeta<S>, test_timeout: Option<Duration>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
+fn run_tests<S>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
     let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
@@ -158,7 +183,7 @@ fn run_tests<S>(mut tests: Vec<test::TestDescAndFn>, mutant: &MutantMeta<S>, tes
     let total_tests_count = tests.len();
     let mut completed_tests_count = 0;
 
-    let on_test_event = |event, remaining_tests: &mut Vec<(test::TestId, test::TestDescAndFn)>| -> Result<_, Infallible> {
+    let on_test_event = |event, remaining_tests: &mut Vec<(test::TestId, test_runner::Test)>| -> Result<_, Infallible> {
         match event {
             test_runner::TestEvent::Result(test) => {
                 completed_tests_count += 1;
@@ -208,7 +233,7 @@ fn run_tests<S>(mut tests: Vec<test::TestDescAndFn>, mutant: &MutantMeta<S>, tes
         }),
     };
 
-    test_runner::run_tests(tests, on_test_event, test_run_strategy, test_timeout, false)?;
+    test_runner::run_tests(tests, on_test_event, test_run_strategy, false)?;
 
     println!("ran {completed} out of {total} {descr}",
         completed = completed_tests_count,
@@ -255,24 +280,30 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
     }
     println!();
 
-    let auto_test_timeout = profiled_tests.last().and_then(|profiled_test| profiled_test.exec_time)
-        .map(|d| d + Ord::max(d.mul_f32(0.1), Duration::from_secs(1)));
+    let tests = profiled_tests.into_iter()
+        .map(|profiled_test| {
+            let test::TestDescAndFn { desc, testfn: test_fn } = profiled_test.test;
 
-    let tests = profiled_tests.into_iter().map(|profiled_test| profiled_test.test).collect();
+            let auto_test_timeout = profiled_test.exec_time
+                .map(|d| d + Ord::max(d.mul_f32(0.1), Duration::from_secs(1)));
 
-    let test_timeout = match opts.test_timeout {
-        config::TestTimeout::None => None,
-        config::TestTimeout::Auto => Some(auto_test_timeout.expect("no test timeout could be deduced automatically")),
-        config::TestTimeout::Explicit(test_timeout) => {
-            if let Some(auto_test_timeout) = auto_test_timeout {
-                if test_timeout < auto_test_timeout {
-                    println!("warning: explicit test timeout is less than the recommended test timeout based on the profiled reference run\n");
+            let timeout = match opts.test_timeout {
+                config::TestTimeout::None => None,
+                config::TestTimeout::Auto => Some(auto_test_timeout.expect("no test timeout could be deduced automatically")),
+                config::TestTimeout::Explicit(test_timeout) => {
+                    if let Some(auto_test_timeout) = auto_test_timeout {
+                        if test_timeout < auto_test_timeout {
+                            println!("warning: explicit test timeout is less than the recommended test timeout based on the profiled reference run\n");
+                        }
+                    }
+
+                    Some(test_timeout)
                 }
-            }
+            };
 
-            Some(test_timeout)
-        }
-    };
+            test_runner::Test { desc, test_fn, timeout }
+        })
+        .collect::<Vec<_>>();
 
     let mut all_test_runs_failed_successfully = true;
     let mut total_mutations_count = 0;
@@ -308,7 +339,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        match run_tests(tests, mutant, test_timeout) {
+        match run_tests(tests, mutant) {
             Ok(results) => {
                 for &mutation in mutant.mutations {
                     total_mutations_count += 1;
@@ -420,14 +451,14 @@ pub fn mutest_main_static<S>(tests: &[&test::TestDescAndFn], mutants: &'static [
 
         let test = tests.iter().find(|test| test.desc.name.as_slice() == test_name)
             .expect(&format!("cannot find test with name `{test_name}`"));
-        let test = make_owned_test(test);
+        let test = make_owned_test_def(test);
 
         mutest_isolated_worker(test, mutants, active_mutant_handle);
     }
 
     let args = env::args().collect::<Vec<_>>();
     let args = args.iter().map(String::as_ref).collect::<Vec<_>>();
-    let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test(test)).collect();
+    let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test_def(test)).collect();
 
     mutest_main(&args, owned_tests, mutants, active_mutant_handle)
 }

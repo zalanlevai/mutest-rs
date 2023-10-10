@@ -140,6 +140,13 @@ impl TestResult {
 }
 
 #[derive(Debug)]
+pub struct Test {
+    pub desc: test::TestDesc,
+    pub test_fn: test::TestFn,
+    pub timeout: Option<Duration>,
+}
+
+#[derive(Debug)]
 pub struct CompletedTest {
     pub id: test::TestId,
     pub desc: test::TestDesc,
@@ -342,14 +349,13 @@ pub fn run_test_in_spawned_subprocess(test: test::TestDescAndFn) -> ! {
 
 fn run_test(
     id: test::TestId,
-    test: test::TestDescAndFn,
+    test: Test,
     control_ch: Option<mpsc::Receiver<ControlMsg>>,
     monitor_ch: mpsc::Sender<CompletedTest>,
     test_run_strategy: TestRunStrategy,
-    test_timeout: Option<Duration>,
     no_capture: bool,
 ) -> Option<thread::JoinHandle<()>> {
-    let test::TestDescAndFn { desc, testfn } = test;
+    let Test { desc, test_fn, timeout } = test;
 
     let ignore_because_no_process_support = match desc.should_panic {
         test::ShouldPanic::Yes | test::ShouldPanic::YesWithMessage(_) => {
@@ -410,10 +416,10 @@ fn run_test(
         }
     }
 
-    match testfn {
+    match test_fn {
         test::TestFn::StaticTestFn(f) => {
             let test_fn = Box::new(move || __rust_begin_short_backtrace(f));
-            run_test_impl(id, desc, test_fn, test_run_strategy, control_ch, monitor_ch, test_timeout, no_capture)
+            run_test_impl(id, desc, test_fn, test_run_strategy, control_ch, monitor_ch, timeout, no_capture)
         }
 
         test::TestFn::DynTestFn(_) => {
@@ -432,6 +438,7 @@ fn run_test(
 #[derive(Debug)]
 pub struct RunningTest {
     pub desc: test::TestDesc,
+    pub timeout: Option<Duration>,
     pub start_time: Instant,
     pub control_tx: mpsc::Sender<ControlMsg>,
     pub join_handle: Option<thread::JoinHandle<()>>,
@@ -451,18 +458,17 @@ pub enum Flow {
 }
 
 pub fn run_tests<E, F>(
-    tests: Vec<test::TestDescAndFn>,
+    tests: Vec<Test>,
     mut on_test_event: F,
     test_run_strategy: TestRunStrategy,
-    test_timeout: Option<Duration>,
     no_capture: bool,
-) -> Result<(Vec<test::TestDescAndFn>, Vec<RunningTest>), E>
+) -> Result<(Vec<Test>, Vec<RunningTest>), E>
 where
-    F: FnMut(TestEvent, &mut Vec<(test::TestId, test::TestDescAndFn)>) -> Result<Flow, E>,
+    F: FnMut(TestEvent, &mut Vec<(test::TestId, Test)>) -> Result<Flow, E>,
 {
     let tests = tests.into_iter().enumerate()
         .map(|(i, test)| (test::TestId(i), test))
-        .filter(|(_, test)| matches!(test.testfn, test::TestFn::StaticTestFn(_) | test::TestFn::DynTestFn(_)))
+        .filter(|(_, test)| matches!(test.test_fn, test::TestFn::StaticTestFn(_) | test::TestFn::DynTestFn(_)))
         .collect::<Vec<_>>();
 
     let concurrency = match env::var("RUST_TEST_THREADS").ok() {
@@ -491,15 +497,15 @@ where
             }
         }
 
-        if let Some(_) = test_timeout {
-            panic!("test timeouts were requested but concurrency is unavailable");
-        }
-
         while let Some((id, test)) = remaining_tests.pop() {
+            if let Some(_) = test.timeout {
+                panic!("test timeout was requested but concurrency is unavailable");
+            }
+
             event!(TestEvent::Queue(1, remaining_tests.len()));
             event!(TestEvent::Wait(test.desc.clone()));
 
-            let join_handle = run_test(id, test, None, test_tx.clone(), test_run_strategy.clone(), test_timeout, no_capture);
+            let join_handle = run_test(id, test, None, test_tx.clone(), test_run_strategy.clone(), no_capture);
             let mut completed_test = test_rx.recv().unwrap();
 
             if let Some(join_handle) = join_handle {
@@ -564,16 +570,18 @@ where
                 event!(TestEvent::Wait(test.desc.clone()));
 
                 let desc = test.desc.clone();
+                let timeout = test.timeout;
 
                 let (control_tx, control_rx) = mpsc::channel::<ControlMsg>();
-                let join_handle = run_test(id, test, Some(control_rx), test_tx.clone(), test_run_strategy.clone(), test_timeout, no_capture);
-                running_tests.insert(id, RunningTest { desc, start_time: Instant::now(), control_tx, join_handle });
+                let join_handle = run_test(id, test, Some(control_rx), test_tx.clone(), test_run_strategy.clone(), no_capture);
+                running_tests.insert(id, RunningTest { desc, timeout, start_time: Instant::now(), control_tx, join_handle });
             }
 
-            if let (Some(test_timeout), TestRunStrategy::InProcess) = (test_timeout, &test_run_strategy) {
+            if let TestRunStrategy::InProcess = &test_run_strategy {
                 let running_test_ids = running_tests.keys().cloned().collect::<Vec<_>>();
                 for test_id in running_test_ids {
                     let running_test = running_tests.get(&test_id).unwrap();
+                    let Some(test_timeout) = running_test.timeout else { continue; };
                     let exec_time = running_test.start_time.elapsed();
                     if exec_time > test_timeout {
                         match &running_test.join_handle {
@@ -601,7 +609,7 @@ where
 
             if running_tests.is_empty() { break; }
 
-            let deadline = test_timeout.and_then(|test_timeout| running_tests.values().map(|test| test.start_time + test_timeout).reduce(Ord::min));
+            let deadline = running_tests.values().filter_map(|test| test.timeout.map(|test_timeout| test.start_time + test_timeout)).reduce(Ord::min);
             let mut completed_test = match (deadline, &test_run_strategy) {
                 (Some(deadline), TestRunStrategy::InProcess) => {
                     match test_rx.recv_deadline(deadline) {
