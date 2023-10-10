@@ -626,7 +626,11 @@ where
                 }
             };
 
-            let running_test = running_tests.remove(&completed_test.id).expect("just completed test not found amongst running tests");
+            let Some(running_test) = running_tests.remove(&completed_test.id) else {
+                // The test completion corresponds to a test that has been previously marked as timed out.
+                // In this case, the completion was caused by changes in the active mutations and should be considered bogus.
+                continue;
+            };
 
             if let Some(join_handle) = running_test.join_handle {
                 if let Err(_) = join_handle.join() {
