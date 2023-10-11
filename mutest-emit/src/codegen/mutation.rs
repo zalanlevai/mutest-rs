@@ -1,10 +1,11 @@
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 
 use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::hir::nested_filter::OnlyBodies;
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::analysis::ast_lowering::{self, AstDefItem};
 use crate::analysis::diagnostic::{self, SessionRcSourceMap};
@@ -726,27 +727,80 @@ pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
     !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
 }
 
-pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutant_max_mutations_count: usize, unsafe_targeting: UnsafeTargeting) -> Vec<Mutant<'tcx, 'trg, 'm>> {
-    let conflicting_mutations = {
-        let mut mutation_conflicts: FxHashSet<(MutId, MutId)> = Default::default();
+pub struct MutationConflictGraph<'m> {
+    unsafes: FxHashSet<MutId>,
+    conflicts: FxHashSet<(MutId, MutId)>,
+    phantom: PhantomData<&'m MutId>,
+}
 
-        let mut iterator = mutations.iter();
+impl<'m> MutationConflictGraph<'m> {
+    pub fn is_unsafe(&self, v: MutId) -> bool {
+        self.unsafes.contains(&v)
+    }
+
+    pub fn conflicting_mutations(&self, a: MutId, b: MutId) -> bool {
+        self.conflicts.contains(&(a, b)) || self.conflicts.contains(&(b, a))
+    }
+
+    pub fn compatible_mutations(&self, a: MutId, b: MutId) -> bool {
+        !self.conflicting_mutations(a, b)
+    }
+}
+
+pub fn generate_mutation_conflict_graph<'tcx, 'trg, 'm>(mutations: &[Mut<'tcx, 'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> MutationConflictGraph<'m> {
+    let mut unsafes: FxHashSet<MutId> = Default::default();
+    let mut conflicts: FxHashSet<(MutId, MutId)> = Default::default();
+
+    let mut iterator = mutations.iter();
+    while let Some(mutation) = iterator.next() {
+        if mutation.is_unsafe(unsafe_targeting) {
+            unsafes.insert(mutation.id);
+        }
+
+        for other in iterator.clone() {
+            let is_conflicting = false
+                // Unsafe mutations cannot be batched with any other mutation.
+                || mutation.is_unsafe(unsafe_targeting)
+                || other.is_unsafe(unsafe_targeting)
+                // To discern results related to the various mutations of a mutant, they have to have distinct entry points.
+                || conflicting_targets(&mutation.target, &other.target)
+                // The substitutions that make up each mutation cannot conflict with each other.
+                || mutation.substs.iter().any(|s| other.substs.iter().any(|s_other| conflicting_substs(s, s_other)));
+
+            if is_conflicting {
+                conflicts.insert((mutation.id, other.id));
+            }
+        }
+    }
+
+    MutationConflictGraph { unsafes, conflicts, phantom: PhantomData }
+}
+
+pub enum MutationBatchesValidationError<'tcx, 'trg, 'm> {
+    ConflictingMutationsInBatch(&'m Mutant<'tcx, 'trg, 'm>, SmallVec<[&'m Mut<'tcx, 'trg, 'm>; 2]>),
+}
+
+pub fn validate_mutation_batches<'tcx, 'trg, 'm>(mutants: &'m [Mutant<'tcx, 'trg, 'm>], mutation_conflict_graph: &MutationConflictGraph<'m>) -> Result<(), Vec<MutationBatchesValidationError<'tcx, 'trg, 'm>>> {
+    use MutationBatchesValidationError::*;
+
+    let mut errors = vec![];
+
+    for mutant in mutants {
+        let mut iterator = mutant.mutations.iter();
         while let Some(mutation) = iterator.next() {
             for other in iterator.clone() {
-                let is_conflicting = false
-                    || mutation.is_unsafe(unsafe_targeting)
-                    || other.is_unsafe(unsafe_targeting)
-                    || conflicting_targets(&mutation.target, &other.target);
-
-                if is_conflicting {
-                    mutation_conflicts.insert((mutation.id, other.id));
+                if mutation_conflict_graph.conflicting_mutations(mutation.id, other.id) {
+                    errors.push(ConflictingMutationsInBatch(mutant, smallvec![mutation, other]))
                 }
             }
         }
+    }
 
-        move |a: MutId, b: MutId| mutation_conflicts.contains(&(a, b)) || mutation_conflicts.contains(&(b, a))
-    };
+    if errors.is_empty() { return Ok(()) }
+    Err(errors)
+}
 
+pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
     let mutation_conflict_heuristic = mutations.iter()
         .map(|mutation| {
             let mut conflict_heuristic = 0_usize;
@@ -754,7 +808,7 @@ pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, 
             for other in &mutations {
                 if mutation == other { continue; }
 
-                if conflicting_mutations(mutation.id, other.id) {
+                if mutation_conflict_graph.conflicting_mutations(mutation.id, other.id) {
                     conflict_heuristic += 1;
                 }
             }
@@ -771,22 +825,14 @@ pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, 
     for mutation in mutations {
         let mutant_candidate = 'mutant_candidate: {
             // Unsafe mutations are isolated into their own mutant.
-            if mutation.is_unsafe(unsafe_targeting) { break 'mutant_candidate None; }
+            if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
 
             mutants.iter_mut().find(|mutant| {
                 // Ensure the mutant has not already reached capacity.
                 if mutant.mutations.len() >= mutant_max_mutations_count { return false; }
 
-                // The substitutions that make up each mutation of a mutant cannot conflict with each other.
-                for subst in &mutation.substs {
-                    if mutant.iter_substitutions().any(|s| conflicting_substs(s, subst)) { return false; }
-                }
-
-                // Mutations cannot be added to a mutant of an unsafe mutation.
-                if mutant.mutations.iter().any(|m| m.is_unsafe(unsafe_targeting)) { return false; }
-
-                // To discern results related to the various mutations of a mutant, they have to have distinct entry points.
-                if mutant.mutations.iter().any(|m| conflicting_mutations(m.id, mutation.id)) { return false; }
+                // The mutation must not conflict with any other mutation already in the mutant.
+                if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { return false; }
 
                 true
             })

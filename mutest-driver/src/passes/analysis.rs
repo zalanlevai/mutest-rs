@@ -5,6 +5,7 @@ use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::edition::Edition;
+use rustc_span::fatal_error::FatalError;
 
 use crate::config::{self, Config};
 use crate::passes::{Flow, base_compiler_config};
@@ -189,8 +190,27 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutation_analysis_duration = t_mutation_analysis_start.elapsed();
 
                 let t_mutation_batching_start = Instant::now();
-                let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, opts.mutant_max_mutations_count, opts.unsafe_targeting);
+                let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
+                let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count);
                 mutation_batching_duration = t_mutation_batching_start.elapsed();
+
+                if let Err(errors) = mutest_emit::codegen::mutation::validate_mutation_batches(&mutants, &mutation_conflict_graph) {
+                    for error in &errors {
+                        use mutest_emit::codegen::mutation::MutationBatchesValidationError::*;
+                        match error {
+                            ConflictingMutationsInBatch(mutant, mutations) => {
+                                let mut diagnostic = sess.struct_err("mutant contains conflicting mutations");
+                                for mutation in mutations {
+                                    diagnostic.span_warn(mutation.location.span(), format!("incompatible mutation: {}", mutation.mutation.span_label()));
+                                }
+                                diagnostic.emit();
+                            }
+                        }
+                    }
+
+                    println!("found {} mutation batching errors", errors.len());
+                    FatalError.raise();
+                }
 
                 if let config::Mode::PrintMutants = opts.mode {
                     print_mutants(tcx, &mutants, opts.unsafe_targeting);
