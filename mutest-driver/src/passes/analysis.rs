@@ -191,7 +191,10 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let t_mutation_batching_start = Instant::now();
                 let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
-                let mutants = mutest_emit::codegen::mutation::batch_mutations(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count);
+                let mutants = match opts.mutation_batching_algorithm {
+                    config::MutationBatchingAlgorithm::Greedy
+                    => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count),
+                };
                 mutation_batching_duration = t_mutation_batching_start.elapsed();
 
                 if let Err(errors) = mutest_emit::codegen::mutation::validate_mutation_batches(&mutants, &mutation_conflict_graph) {

@@ -800,7 +800,7 @@ pub fn validate_mutation_batches<'tcx, 'trg, 'm>(mutants: &'m [Mutant<'tcx, 'trg
     Err(errors)
 }
 
-pub fn batch_mutations<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+pub fn batch_mutations_greedy<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
     let mutation_conflict_heuristic = mutations.iter()
         .map(|mutation| {
             let mut conflict_heuristic = 0_usize;

@@ -138,6 +138,12 @@ pub fn main() {
         };
 
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
+
+        let mutation_batching_algorithm = match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
+            Some("greedy") => config::MutationBatchingAlgorithm::Greedy,
+            _ => unreachable!(),
+        };
+
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
         let config = Config {
@@ -169,6 +175,7 @@ pub fn main() {
                     &mutest_operators::RelationalOpInvert,
                 ],
                 mutation_depth,
+                mutation_batching_algorithm,
                 mutant_max_mutations_count,
             },
         };

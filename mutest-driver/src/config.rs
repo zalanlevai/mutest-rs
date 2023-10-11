@@ -10,12 +10,17 @@ pub enum Mode {
     Build,
 }
 
+pub enum MutationBatchingAlgorithm {
+    Greedy,
+}
+
 pub struct Options<'op, 'm> {
     pub mode: Mode,
     pub report_timings: bool,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub mutation_depth: usize,
+    pub mutation_batching_algorithm: MutationBatchingAlgorithm,
     pub mutant_max_mutations_count: usize,
 }
 
