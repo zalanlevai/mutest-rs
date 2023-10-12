@@ -9,3 +9,7 @@ edition = "2021"
 rustc_private = true
 
 [dependencies]
+rand = { version = "0.8", optional = true }
+
+[features]
+random = ["dep:rand"]

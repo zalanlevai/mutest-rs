@@ -12,6 +12,9 @@ pub enum Mode {
 
 pub enum MutationBatchingAlgorithm {
     Greedy,
+
+    #[cfg(feature = "random")]
+    Random { seed: Option<[u8; 32]>, attempts: usize },
 }
 
 pub struct Options<'op, 'm> {

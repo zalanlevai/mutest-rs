@@ -1,5 +1,5 @@
 pub fn command() -> clap::Command {
-    clap::command!("cargo mutest")
+    let cmd = clap::command!("cargo mutest")
         .propagate_version(true)
         .subcommand_required(true)
         .arg_required_else_help(true)
@@ -36,12 +36,19 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--unsafe "Mutate code in `unsafe` blocks.").display_order(100))
         .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "unsafe"]).multiple(false))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(100))
-        .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(["greedy"]).default_value("greedy").display_order(100))
+        .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(["greedy", #[cfg(feature = "random")] "random"]).default_value("greedy").display_order(100))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(100))
         .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
         //        of the help flags.
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
-        .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true))
+        .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true));
+
+    #[cfg(feature = "random")]
+    let cmd = cmd
+        .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for `random` mutation batching algorithm.").display_order(100))
+        .arg(clap::arg!(--"mutant-batch-random-attempts" [MUTANT_BATCH_RANDOM_ATTEMPTS] "Number of attempts made to place each mutation into a random mutant by the `random` mutation batching algorithm.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(100));
+
+    cmd
 }

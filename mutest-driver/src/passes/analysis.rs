@@ -194,6 +194,18 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let mutants = match opts.mutation_batching_algorithm {
                     config::MutationBatchingAlgorithm::Greedy
                     => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count),
+
+                    #[cfg(feature = "random")]
+                    config::MutationBatchingAlgorithm::Random { seed, attempts } => {
+                        use rand::prelude::*;
+
+                        let mut rng = match seed {
+                            Some(seed) => StdRng::from_seed(seed),
+                            None => StdRng::from_entropy(),
+                        };
+
+                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng, attempts)
+                    }
                 };
                 mutation_batching_duration = t_mutation_batching_start.elapsed();
 

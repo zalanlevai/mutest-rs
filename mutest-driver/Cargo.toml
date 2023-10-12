@@ -14,3 +14,10 @@ mutest-operators = { path = "../mutest-operators" }
 mutest-runtime = { path = "../mutest-runtime" }
 
 clap = { version = "4", features = ["cargo"] }
+
+rand = { version = "0.8", optional = true }
+rand_seeder = { version = "0.2", optional = true }
+
+[features]
+default = ["random"]
+random = ["mutest-emit/random", "dep:rand", "dep:rand_seeder"]

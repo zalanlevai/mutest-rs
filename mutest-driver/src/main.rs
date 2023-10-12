@@ -141,6 +141,19 @@ pub fn main() {
 
         let mutation_batching_algorithm = match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
             Some("greedy") => config::MutationBatchingAlgorithm::Greedy,
+
+            #[cfg(feature = "random")]
+            Some("random") => {
+                use rand_seeder::Seeder;
+
+                let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
+                let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<[u8; 32]>());
+
+                let attempts = *mutest_arg_matches.get_one::<usize>("mutant-batch-random-attempts").unwrap();
+
+                config::MutationBatchingAlgorithm::Random { seed, attempts }
+            }
+
             _ => unreachable!(),
         };
 

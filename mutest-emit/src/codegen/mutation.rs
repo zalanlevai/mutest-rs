@@ -849,3 +849,44 @@ pub fn batch_mutations_greedy<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg,
 
     mutants
 }
+
+#[cfg(feature = "random")]
+pub fn batch_mutations_random<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize, rng: &mut impl rand::Rng, random_attempts: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+    let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
+    let mut next_mutant_index = 1;
+
+    for mutation in mutations {
+        let mutant_candidate = 'mutant_candidate: {
+            if mutants.is_empty() { break 'mutant_candidate None; }
+
+            // Unsafe mutations are isolated into their own mutant.
+            if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
+
+            for _ in 0..random_attempts {
+                // Pick random mutant, place into, if possible. If not, create new mutant.
+                let idx = rng.gen_range(0..mutants.len());
+                let mutant = &mut mutants[idx];
+
+                // Ensure the mutant has not already reached capacity.
+                if mutant.mutations.len() >= mutant_max_mutations_count { continue; }
+
+                // The mutation must not conflict with any other mutation already in the mutant.
+                if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { continue; }
+
+                break 'mutant_candidate Some(mutant);
+            }
+
+            None
+        };
+
+        match mutant_candidate {
+            Some(mutant) => mutant.mutations.push(mutation),
+            None => {
+                mutants.push(Mutant { id: MutantId(next_mutant_index), mutations: vec![mutation] });
+                next_mutant_index += 1;
+            }
+        }
+    }
+
+    mutants
+}

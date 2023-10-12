@@ -12,3 +12,7 @@ mutest-operators = { path = "../mutest-operators" }
 
 cargo_metadata = "0.18"
 clap = { version = "4", features = ["cargo"] }
+
+[features]
+default = ["random"]
+random = ["mutest-driver/random"]
