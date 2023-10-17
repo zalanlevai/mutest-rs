@@ -44,3 +44,9 @@ cargo mutest -p <PACKAGE> run
 ```
 
 See `--help` for more options and subcommands.
+
+## License
+
+The mutest-rs project is dual-licensed under Apache 2.0 and MIT terms.
+
+See [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT), and [COPYRIGHT](COPYRIGHT) for details.
