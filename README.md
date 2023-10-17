@@ -1,5 +1,7 @@
 # mutest-rs &mdash; Mutation testing tools for Rust
 
+[![DOI 10.1109/ICST57152.2023.00014](https://img.shields.io/badge/10.1109%2FICST57152.2023.00014-black?logo=DOI)](https://doi.org/10.1109/ICST57152.2023.00014)
+
 Generate and analyze runtime-swappable code mutants of Rust programs using a dynamic set of abstract mutation operators.
 
 ![Output of mutest](docs/res/output.png)
