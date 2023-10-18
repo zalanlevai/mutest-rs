@@ -6,6 +6,9 @@ Generate and analyze runtime-swappable code mutants of Rust programs using a dyn
 
 ![Output of mutest](docs/res/output.png)
 
+> [!NOTE]
+> mutest-rs is primarily a research tool, but is an extremely capable mutation testing tool for all use cases. It was originally developed for my ongoing PhD work.
+
 ## Build
 
 > `mutest` relies on the nightly compiler toolchain. `rustup` is configured to automatically install and use the right nightly version.
