@@ -30,6 +30,7 @@ cargo install --force --path cargo-mutest
 
 ## Usage
 
+> [!IMPORTANT]
 > Currently, the invocation of the tool requires manually specifying the following values:
 > * `MUTEST_SEARCH_PATH`: environment variable pointing to the local build artifacts, and
 > * the compiler version used to build the tool.
