@@ -852,6 +852,8 @@ pub fn batch_mutations_greedy<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg,
 
 #[cfg(feature = "random")]
 pub fn batch_mutations_random<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize, rng: &mut impl rand::Rng, random_attempts: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+    use rand::prelude::*;
+
     let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
     let mut next_mutant_index = 1;
 
@@ -862,9 +864,11 @@ pub fn batch_mutations_random<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>
             // Unsafe mutations are isolated into their own mutant.
             if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
 
-            for _ in 0..random_attempts {
+            // Sample random mutants to attempt, ensuring that they are all distinct (i.e. without replacement).
+            let idx_attempts = (0..mutants.len()).choose_multiple(rng, random_attempts);
+
+            for idx in idx_attempts {
                 // Pick random mutant, place into, if possible. If not, create new mutant.
-                let idx = rng.gen_range(0..mutants.len());
                 let mutant = &mut mutants[idx];
 
                 // Ensure the mutant has not already reached capacity.
