@@ -19,6 +19,7 @@ pub enum MutationBatchingAlgorithm {
 
 pub struct Options<'op, 'm> {
     pub mode: Mode,
+    pub verbosity: u8,
     pub report_timings: bool,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,

@@ -128,6 +128,7 @@ pub fn main() {
             _ => unreachable!(),
         };
 
+        let verbosity = mutest_arg_matches.get_count("verbose");
         let report_timings = mutest_arg_matches.get_flag("timings");
 
         let unsafe_targeting = match () {
@@ -165,6 +166,7 @@ pub fn main() {
             mutest_search_path,
             opts: config::Options {
                 mode,
+                verbosity,
                 report_timings,
                 unsafe_targeting,
                 operators: &[

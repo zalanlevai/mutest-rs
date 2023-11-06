@@ -39,6 +39,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(["greedy", #[cfg(feature = "random")] "random"]).default_value("greedy").display_order(100))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(100))
         .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
+        .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
         //        of the help flags.
