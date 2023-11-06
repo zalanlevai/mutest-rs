@@ -187,10 +187,16 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let t_mutation_analysis_start = Instant::now();
                 let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &resolutions, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
+                println!("generated {} mutations", mutations.len());
                 mutation_analysis_duration = t_mutation_analysis_start.elapsed();
 
                 let t_mutation_batching_start = Instant::now();
                 let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
+                println!("found {conflicts} conflicts, {compatibilities} compatibilities",
+                    conflicts = mutation_conflict_graph.iter_conflicts().count(),
+                    compatibilities = mutation_conflict_graph.iter_compatibilities().count(),
+                );
+
                 let mutants = match opts.mutation_batching_algorithm {
                     config::MutationBatchingAlgorithm::Greedy
                     => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count),

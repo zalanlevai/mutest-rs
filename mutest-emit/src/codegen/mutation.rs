@@ -728,6 +728,7 @@ pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
 }
 
 pub struct MutationConflictGraph<'m> {
+    n_mutations: u32,
     unsafes: FxHashSet<MutId>,
     conflicts: FxHashSet<(MutId, MutId)>,
     phantom: PhantomData<&'m MutId>,
@@ -744,6 +745,46 @@ impl<'m> MutationConflictGraph<'m> {
 
     pub fn compatible_mutations(&self, a: MutId, b: MutId) -> bool {
         !self.conflicting_mutations(a, b)
+    }
+
+    pub fn iter_conflicts(&self) -> impl Iterator<Item = (MutId, MutId)> + '_ {
+        self.conflicts.iter().map(|&(a, b)| (a, b))
+    }
+
+    pub fn iter_compatibilities(&self) -> MutationConflictGraphCompatibilityIter<'m, '_> {
+        MutationConflictGraphCompatibilityIter::new(self)
+    }
+}
+
+pub struct MutationConflictGraphCompatibilityIter<'m, 'op> {
+    graph: &'op MutationConflictGraph<'m>,
+    cursor: (u32, u32),
+}
+
+impl<'m, 'op> MutationConflictGraphCompatibilityIter<'m, 'op> {
+    fn new(graph: &'op MutationConflictGraph<'m>) -> Self {
+        Self { graph, cursor: (1, 2) }
+    }
+}
+
+impl<'m, 'op> Iterator for MutationConflictGraphCompatibilityIter<'m, 'op> {
+    type Item = (MutId, MutId);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let (i, _) = self.cursor && i <= self.graph.n_mutations {
+            while let (_, j) = self.cursor && j <= self.graph.n_mutations {
+                self.cursor.1 += 1;
+
+                if self.graph.compatible_mutations(MutId(i), MutId(j)) {
+                    return Some((MutId(i), MutId(j)));
+                }
+            }
+
+            self.cursor.0 += 1;
+            self.cursor.1 = self.cursor.0 + 1;
+        }
+
+        None
     }
 }
 
@@ -773,7 +814,9 @@ pub fn generate_mutation_conflict_graph<'tcx, 'trg, 'm>(mutations: &[Mut<'tcx, '
         }
     }
 
-    MutationConflictGraph { unsafes, conflicts, phantom: PhantomData }
+    let n_mutations = mutations.iter().map(|m| m.id.index()).max().unwrap_or(0);
+
+    MutationConflictGraph { n_mutations, unsafes, conflicts, phantom: PhantomData }
 }
 
 pub enum MutationBatchesValidationError<'tcx, 'trg, 'm> {
