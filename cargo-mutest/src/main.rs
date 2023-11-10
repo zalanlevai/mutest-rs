@@ -53,6 +53,7 @@ fn main() {
 
     let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args): (_, &[&str], _, _) = match matches.subcommand() {
         Some(("print-targets", _)) => ("check", &["--profile", "test"], "print-targets", None),
+        Some(("print-conflict-graph", _)) => ("check", &["--profile", "test"], "print-conflict-graph", None),
         Some(("print-mutants", _)) => ("check", &["--profile", "test"], "print-mutants", None),
         Some(("print-code", _)) => ("check", &["--profile", "test"], "print-code", None),
         Some(("build", _)) => ("test", &["--no-run"], "build", None),

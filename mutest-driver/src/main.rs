@@ -122,6 +122,10 @@ pub fn main() {
 
         let mode = match mutest_arg_matches.subcommand() {
             Some(("print-targets", _)) => config::Mode::PrintMutationTargets,
+            Some(("print-conflict-graph", matches)) => {
+                let compatibility_graph = matches.get_flag("compatibility");
+                config::Mode::PrintConflictGraph { compatibility_graph }
+            }
             Some(("print-mutants", _)) => config::Mode::PrintMutants,
             Some(("print-code", _)) => config::Mode::PrintCode,
             Some(("build", _)) => config::Mode::Build,

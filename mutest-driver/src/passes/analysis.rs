@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use mutest_emit::codegen::mutation::{Mutant, Target, UnsafeTargeting, Unsafety};
+use mutest_emit::codegen::mutation::{Mutant, MutId, Target, UnsafeTargeting, Unsafety};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::ty::TyCtxt;
@@ -200,6 +200,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutation_analysis_duration = t_mutation_analysis_start.elapsed();
 
                 let t_mutation_batching_start = Instant::now();
+
                 let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
                 if opts.verbosity >= 1 {
                     println!("found {conflicts} conflicts, {compatibilities} compatibilities",
@@ -207,6 +208,29 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         compatibilities = mutation_conflict_graph.iter_compatibilities().count(),
                     );
                 }
+
+                if let config::Mode::PrintConflictGraph { compatibility_graph } = opts.mode {
+                    let mutation_conflict_resolution_duration = t_mutation_batching_start.elapsed();
+                    fn print_graph<T: Iterator<Item = (MutId, MutId)>>(edge_iter: T) {
+                        for (a, b) in edge_iter {
+                            println!("{} {}", a.index(), b.index());
+                        }
+                    }
+                    match compatibility_graph {
+                        false => print_graph(mutation_conflict_graph.iter_conflicts()),
+                        true => print_graph(mutation_conflict_graph.iter_compatibilities()),
+                    }
+                    if opts.report_timings {
+                        println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?})",
+                            total = t_start.elapsed(),
+                            targets = target_analysis_duration,
+                            mutations = mutation_analysis_duration,
+                            conflicts = mutation_conflict_resolution_duration,
+                        );
+                    }
+                    return Flow::Break;
+                }
+
                 let mutants = match opts.mutation_batching_algorithm {
                     config::MutationBatchingAlgorithm::Greedy
                     => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count),
@@ -223,6 +247,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng, attempts)
                     }
                 };
+
                 mutation_batching_duration = t_mutation_batching_start.elapsed();
 
                 if let Err(errors) = mutest_emit::codegen::mutation::validate_mutation_batches(&mutants, &mutation_conflict_graph) {
