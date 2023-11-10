@@ -109,7 +109,7 @@ pub fn main() {
         }));
     }
 
-    let mutest_arg_matches = mutest_driver::cli::command()
+    let mutest_arg_matches = mutest_driver_cli::command()
         .no_binary_name(true)
         .get_matches_from(mutest_args.as_deref().unwrap_or_default().split(" "));
 

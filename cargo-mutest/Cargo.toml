@@ -7,11 +7,16 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
+mutest-driver-cli = { path = "../mutest-driver-cli" }
 mutest-driver = { path = "../mutest-driver" }
 mutest-operators = { path = "../mutest-operators" }
 
 cargo_metadata = "0.18"
 clap = { version = "4", features = ["cargo"] }
+
+[build-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
 
 [features]
 default = ["random"]

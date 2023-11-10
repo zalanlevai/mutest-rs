@@ -1,0 +1,13 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "mutest-driver-cli"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["cargo"] }
+
+[features]
+default = ["random"]
+random = []

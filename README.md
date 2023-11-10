@@ -59,8 +59,7 @@ cargo install --force --path cargo-mutest
 
 > [!IMPORTANT]
 > Currently, the invocation of the tool requires manually specifying the following values:
-> * `MUTEST_SEARCH_PATH`: environment variable pointing to the local build artifacts, and
-> * the compiler version used to build the tool.
+> * `MUTEST_SEARCH_PATH`: environment variable pointing to the local build artifacts.
 >
 > In addition, the Cargo test target may have to be specified explicitly with the `--lib` or `--bin <BIN>` options. For more targeting options, see `--help`.
 >
@@ -68,7 +67,7 @@ cargo install --force --path cargo-mutest
 >
 > ```sh
 > export MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/release
-> cargo +nightly-2023-09-26 mutest --lib run
+> cargo mutest --lib run
 > ```
 
 Run the `cargo mutest` subcommand against a standard Cargo package directory or workspace containing your crate.

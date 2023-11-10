@@ -1,6 +1,10 @@
 use std::env;
 use std::process::{self, Command};
 
+pub mod build {
+    pub const RUST_TOOLCHAIN_VERSION: &str = env!("RUST_TOOLCHAIN_VERSION");
+}
+
 fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, long_arg: Option<&str>) {
     let short_arg = short_arg.map(|v| format!("-{v}"));
     let long_arg = long_arg.map(|v| format!("--{v}"));
@@ -22,7 +26,7 @@ fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, l
 fn main() {
     let args = env::args().skip(2).collect::<Vec<_>>();
 
-    let matches = mutest_driver::cli::command()
+    let matches = mutest_driver_cli::command()
         .bin_name("cargo mutest")
         .no_binary_name(true)
         .about("Mutation testing tools for Rust")
@@ -65,6 +69,7 @@ fn main() {
     };
 
     let mut cmd = Command::new("cargo");
+    cmd.arg(format!("+{}", build::RUST_TOOLCHAIN_VERSION));
     cmd.arg(cargo_subcommand);
     cmd.args(cargo_args);
 

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "cargo-mutest",
     "mutest-driver",
+    "mutest-driver-cli",
     "mutest-emit",
     "mutest-operators",
     "mutest-runtime",

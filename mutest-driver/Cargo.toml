@@ -9,6 +9,7 @@ edition = "2021"
 rustc_private = true
 
 [dependencies]
+mutest-driver-cli = { path = "../mutest-driver-cli" }
 mutest-emit = { path = "../mutest-emit" }
 mutest-operators = { path = "../mutest-operators" }
 mutest-runtime = { path = "../mutest-runtime" }
@@ -20,4 +21,4 @@ rand_seeder = { version = "0.2", optional = true }
 
 [features]
 default = ["random"]
-random = ["mutest-emit/random", "dep:rand", "dep:rand_seeder"]
+random = ["mutest-driver-cli/random", "mutest-emit/random", "dep:rand", "dep:rand_seeder"]
