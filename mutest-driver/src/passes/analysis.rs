@@ -66,7 +66,7 @@ fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: 
     );
 }
 
-fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: UnsafeTargeting) {
+fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: UnsafeTargeting, verbosity: u8) {
     let mut total_mutations_count = 0;
     let mut unsafe_mutations_count = 0;
     let mut tainted_mutations_count = 0;
@@ -74,6 +74,9 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
     for mutant in mutants {
         total_mutations_count += mutant.mutations.len();
 
+        if verbosity >= 1 {
+            print!("{}: ", mutant.id.index());
+        }
         match mutant.mutations.len() {
             1 => println!("1 mutation"),
             _ => println!("{} mutations", mutant.mutations.len()),
@@ -94,7 +97,11 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
                 (false, _) => {}
             };
 
-            println!("  - {unsafe_marker}{display_name} in {def_path} at {span:#?}",
+            print!("  - ");
+            if verbosity >= 1 {
+                print!("{}: ", mutation.id.index());
+            }
+            println!("{unsafe_marker}{display_name} in {def_path} at {span:#?}",
                 display_name = mutation.display_name(),
                 def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
                 span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(mutation.target.def_id)),
@@ -237,7 +244,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 if let config::Mode::PrintMutants = opts.mode {
-                    print_mutants(tcx, &mutants, opts.unsafe_targeting);
+                    print_mutants(tcx, &mutants, opts.unsafe_targeting, opts.verbosity);
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
                             total = t_start.elapsed(),
