@@ -19,7 +19,7 @@ impl Mutation for RangeLimitSwapMutation {
     }
 }
 
-/// Swap the limits (inclusivity) of range expressions.
+/// Invert the limits (inclusivity) of range expressions.
 pub struct RangeLimitSwap;
 
 impl<'a> Operator<'a> for RangeLimitSwap {

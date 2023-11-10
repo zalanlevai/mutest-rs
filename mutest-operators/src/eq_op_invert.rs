@@ -23,7 +23,7 @@ impl Mutation for EqOpInvertMutation {
     }
 }
 
-/// Invert equlaity operators.
+/// Invert equlaity checks.
 pub struct EqOpInvert;
 
 impl<'a> Operator<'a> for EqOpInvert {

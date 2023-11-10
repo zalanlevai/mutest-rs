@@ -23,7 +23,7 @@ impl Mutation for RelationalOpInvertMutation {
     }
 }
 
-/// Invert relational operators, also chaning their boundary (equality).
+/// Completely invert relation operators.
 pub struct RelationalOpInvert;
 
 impl<'a> Operator<'a> for RelationalOpInvert {
