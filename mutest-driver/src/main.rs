@@ -124,7 +124,12 @@ pub fn main() {
             Some(("print-targets", _)) => config::Mode::PrintMutationTargets,
             Some(("print-conflict-graph", matches)) => {
                 let compatibility_graph = matches.get_flag("compatibility");
-                config::Mode::PrintConflictGraph { compatibility_graph }
+                let format = match matches.get_one::<String>("format").map(String::as_str) {
+                    Some("simple") => config::GraphFormat::Simple,
+                    Some("graphviz") => config::GraphFormat::Graphviz,
+                    _ => unreachable!(),
+                };
+                config::Mode::PrintConflictGraph { compatibility_graph, format }
             }
             Some(("print-mutants", _)) => config::Mode::PrintMutants,
             Some(("print-code", _)) => config::Mode::PrintCode,

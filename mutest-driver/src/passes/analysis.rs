@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use mutest_emit::codegen::mutation::{Mutant, MutId, Target, UnsafeTargeting, Unsafety};
+use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::ty::TyCtxt;
@@ -64,6 +64,45 @@ fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: 
         r#unsafe = unsafe_targets_count,
         tainted = tainted_targets_count,
     );
+}
+
+fn print_graph<'tcx, 'trg, 'm, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations: &[Mut<'tcx, 'trg, 'm>], edge_iter: E, format: config::GraphFormat)
+where
+    E: IntoIterator<Item = (MutId, MutId)>,
+{
+    match format {
+        config::GraphFormat::Simple => {
+            for (a, b) in edge_iter {
+                println!("{} {}", a.index(), b.index());
+            }
+        }
+        config::GraphFormat::Graphviz => {
+            println!("strict graph {{");
+            println!("  overlap=\"false\";");
+            println!("  splines=\"true\";");
+
+            for m in mutations {
+                let mut attrs = vec![];
+                if mutation_conflict_graph.is_unsafe(m.id) {
+                    attrs.push("color=\"red\"");
+                    attrs.push("fontcolor=\"red\"");
+                }
+
+                println!("  {}{attrs};", m.id.index(),
+                    attrs = match attrs.is_empty() {
+                        true => "".to_owned(),
+                        false => format!(" [{}]", attrs.join(", ")),
+                    },
+                );
+            }
+
+            for (a, b) in edge_iter.into_iter() {
+                println!("  {} -- {};", a.index(), b.index());
+            }
+
+            println!("}}");
+        }
+    }
 }
 
 fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: UnsafeTargeting, verbosity: u8) {
@@ -209,16 +248,11 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     );
                 }
 
-                if let config::Mode::PrintConflictGraph { compatibility_graph } = opts.mode {
+                if let config::Mode::PrintConflictGraph { compatibility_graph, format } = opts.mode {
                     let mutation_conflict_resolution_duration = t_mutation_batching_start.elapsed();
-                    fn print_graph<T: Iterator<Item = (MutId, MutId)>>(edge_iter: T) {
-                        for (a, b) in edge_iter {
-                            println!("{} {}", a.index(), b.index());
-                        }
-                    }
                     match compatibility_graph {
-                        false => print_graph(mutation_conflict_graph.iter_conflicts()),
-                        true => print_graph(mutation_conflict_graph.iter_compatibilities()),
+                        false => print_graph(&mutation_conflict_graph, &mutations, mutation_conflict_graph.iter_conflicts(), format),
+                        true => print_graph(&mutation_conflict_graph, &mutations, mutation_conflict_graph.iter_compatibilities(), format),
                     }
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?})",

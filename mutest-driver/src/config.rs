@@ -3,9 +3,15 @@ use std::path::PathBuf;
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_interface::Config as CompilerConfig;
 
+#[derive(Clone, Copy)]
+pub enum GraphFormat {
+    Simple,
+    Graphviz,
+}
+
 pub enum Mode {
     PrintMutationTargets,
-    PrintConflictGraph { compatibility_graph: bool },
+    PrintConflictGraph { compatibility_graph: bool, format: GraphFormat },
     PrintMutants,
     PrintCode,
     Build,
