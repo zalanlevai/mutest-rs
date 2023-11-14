@@ -66,8 +66,9 @@ fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: 
     );
 }
 
-fn print_graph<'tcx, 'trg, 'm, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations: &[Mut<'tcx, 'trg, 'm>], edge_iter: E, format: config::GraphFormat)
+fn print_graph<'tcx: 'op, 'trg: 'op, 'm: 'op, 'op, N, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations_iter: N, edge_iter: E, format: config::GraphFormat)
 where
+    N: IntoIterator<Item = &'op Mut<'tcx, 'trg, 'm>>,
     E: IntoIterator<Item = (MutId, MutId)>,
 {
     match format {
@@ -81,7 +82,7 @@ where
             println!("  overlap=\"false\";");
             println!("  splines=\"true\";");
 
-            for m in mutations {
+            for m in mutations_iter.into_iter() {
                 let mut attrs = vec![];
                 if mutation_conflict_graph.is_unsafe(m.id) {
                     attrs.push("color=\"red\"");
@@ -242,17 +243,21 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
                 if opts.verbosity >= 1 {
-                    println!("found {conflicts} conflicts, {compatibilities} compatibilities",
+                    println!("found {conflicts} conflicts ({conflicts_excluding_unsafe} excluding unsafe mutations), {compatibilities} compatibilities",
                         conflicts = mutation_conflict_graph.iter_conflicts().count(),
+                        conflicts_excluding_unsafe = mutation_conflict_graph.iter_conflicts_excluding_unsafe().count(),
                         compatibilities = mutation_conflict_graph.iter_compatibilities().count(),
                     );
                 }
 
-                if let config::Mode::PrintConflictGraph { compatibility_graph, format } = opts.mode {
+                if let config::Mode::PrintConflictGraph { compatibility_graph, exclude_unsafe, format } = opts.mode {
                     let mutation_conflict_resolution_duration = t_mutation_batching_start.elapsed();
-                    match compatibility_graph {
-                        false => print_graph(&mutation_conflict_graph, &mutations, mutation_conflict_graph.iter_conflicts(), format),
-                        true => print_graph(&mutation_conflict_graph, &mutations, mutation_conflict_graph.iter_compatibilities(), format),
+                    let mutations_excluding_unsafe = mutations.iter().filter(|m| !mutation_conflict_graph.is_unsafe(m.id));
+                    match (compatibility_graph, exclude_unsafe) {
+                        (false, false) => print_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_conflicts(), format),
+                        (false, true) => print_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_conflicts_excluding_unsafe(), format),
+                        (true, false) => print_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_compatibilities(), format),
+                        (true, true) => print_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_compatibilities(), format),
                     }
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?})",

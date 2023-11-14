@@ -11,7 +11,7 @@ pub enum GraphFormat {
 
 pub enum Mode {
     PrintMutationTargets,
-    PrintConflictGraph { compatibility_graph: bool, format: GraphFormat },
+    PrintConflictGraph { compatibility_graph: bool, exclude_unsafe: bool, format: GraphFormat },
     PrintMutants,
     PrintCode,
     Build,

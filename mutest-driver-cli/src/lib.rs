@@ -22,6 +22,7 @@ pub fn command() -> clap::Command {
             .display_order(4)
             .about("Print mutation conflict graph.")
             .arg(clap::arg!(--compatibility "Print mutation compatibility graph (a.k.a. the complement graph) instead of conflict graph."))
+            .arg(clap::arg!(--"exclude-unsafe" "Exclude unsafe mutations from the graph, only listing safe mutations."))
             .arg(clap::arg!(--format [FORMAT] "Format to print the graph in.").value_parser(["simple", "graphviz"]).default_value("simple"))
         )
         .subcommand(clap::Command::new("print-mutants")

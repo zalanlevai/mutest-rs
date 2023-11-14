@@ -751,6 +751,10 @@ impl<'m> MutationConflictGraph<'m> {
         self.conflicts.iter().map(|&(a, b)| (a, b))
     }
 
+    pub fn iter_conflicts_excluding_unsafe(&self) -> impl Iterator<Item = (MutId, MutId)> + '_{
+        self.iter_conflicts().filter(|&(a, b)| !self.is_unsafe(a) && !self.is_unsafe(b))
+    }
+
     pub fn iter_compatibilities(&self) -> MutationConflictGraphCompatibilityIter<'m, '_> {
         MutationConflictGraphCompatibilityIter::new(self)
     }
