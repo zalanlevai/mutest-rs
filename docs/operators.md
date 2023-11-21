@@ -126,12 +126,12 @@ Swap continue expressions for break expressions and vice versa.
 Replaces
 ```rs
 for other in mutations {
-    if conflicts.contain(&(mutation, other)) { continue; }
+    if conflicts.contains(&(mutation, other)) { continue; }
 ```
 with
 ```rs
 for other in mutations {
-    if conflicts.contain(&(mutation, other)) { break; }
+    if conflicts.contains(&(mutation, other)) { break; }
 ```
 
 ## `eq_op_invert`
