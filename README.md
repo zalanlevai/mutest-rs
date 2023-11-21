@@ -78,6 +78,41 @@ cargo mutest -p <PACKAGE> run
 
 See `--help` for more options and subcommands.
 
+### Annotating code with tool attributes
+
+mutest-rs provides [tool attributes](https://doc.rust-lang.org/reference/attributes.html#tool-attributes) that can be used to optionally annotate your code for use with the tool. Note, that these attributes are only available when running `cargo mutest`, so they need to be wrapped in `#[cfg_attr(mutest, <MUTEST_ATTRIBUTE>)]` for regular Cargo commands to run.
+
+#### `#[mutest::skip]` (use `#[cfg_attr(mutest, mutest::skip)]`)
+
+Tells mutest-rs to skip the function when applying mutation operators. Useful for marking helper functions for tests (test cases themselves are automatically skipped).
+
+This attribute can only be applied to function declarations:
+```rs
+#[cfg_attr(mutest, mutest::skip)]
+fn perform_tests() {
+```
+
+#### `#[mutest::ignore]` (use `#[cfg_attr(mutest, mutest::ignore)]`)
+
+Tells mutest-rs to ignore the statement or expression, including any subexpressions, or function parameter, when applying mutation operators. Useful if mutest-rs is trying to apply mutations to a critical piece of code that might be causing problems.
+
+This attribute can be applied to
+* statements (note that expression statements might have to be wrapped in `{}`, [see this linked Rust issue](https://github.com/rust-lang/rust/issues/59144)):
+  ```rs
+  #[cfg_attr(mutest, mutest::ignore)]
+  let buff_len = mem::size_of::<u16>() * 1024;
+  ```
+* expressions ([wherever the compiler supports attrbiutes on expressions](https://doc.rust-lang.org/reference/expressions.html#expression-attributes)):
+  ```rs
+      #[cfg_attr(mutest, mutest::ignore)]
+      Some(body)
+  }
+   ```
+* and function parameters:
+  ```rs
+  fn foo(&self, #[cfg_attr(mutest, mutest::ignore)] experimental: bool) {
+  ```
+
 ## License
 
 The mutest-rs project is dual-licensed under Apache 2.0 and MIT terms.
