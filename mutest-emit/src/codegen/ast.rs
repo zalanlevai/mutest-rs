@@ -4,47 +4,50 @@ pub use rustc_ast::ptr::P;
 pub use rustc_ast::token::TokenKind;
 pub use rustc_ast::tokenstream::*;
 
-pub use inlined::*;
-mod inlined {
-    use rustc_ast as ast;
-    use rustc_span::Span;
-    use rustc_span::symbol::Ident;
+use rustc_span::Span;
+use rustc_span::symbol::Ident;
 
-    // TODO: Add documentation referencing `rustc_ast::visit::Fn`.
-    #[derive(Clone, Copy)]
-    pub struct InlinedFn<'ast> {
-        pub id: ast::NodeId,
-        pub span: Span,
-        pub ident: Ident,
-        pub ctx: ast::visit::FnCtxt,
-        pub vis: &'ast ast::Visibility,
-        pub generics: &'ast ast::Generics,
-        pub sig: &'ast ast::FnSig,
-        pub body: Option<&'ast ast::Block>,
+#[derive(Clone, Debug)]
+pub struct FnItem {
+    pub id: ast::NodeId,
+    pub span: Span,
+    pub ctx: visit::FnCtxt,
+    pub vis: ast::Visibility,
+    pub ident: Ident,
+    pub generics: ast::Generics,
+    pub sig: ast::FnSig,
+    pub body: Option<ast::Block>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum DefItem<'ast> {
+    Item(&'ast ast::Item),
+    ForeignItem(&'ast ast::ForeignItem),
+    AssocItem(&'ast ast::AssocItem, visit::AssocCtxt),
+}
+
+impl<'ast> DefItem<'ast> {
+    pub fn ident(&self) -> Ident {
+        match self {
+            Self::Item(item) => item.ident,
+            Self::ForeignItem(item) => item.ident,
+            Self::AssocItem(item, _) => item.ident,
+        }
     }
 
-    #[derive(Clone)]
-    pub struct OwnedInlinedFn {
-        pub id: ast::NodeId,
-        pub span: Span,
-        pub ctx: ast::visit::FnCtxt,
-        pub ident: Ident,
-        pub sig: ast::FnSig,
-        pub vis: ast::Visibility,
-        pub body: Option<ast::Block>,
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Item(item) => item.span,
+            Self::ForeignItem(item) => item.span,
+            Self::AssocItem(item, _) => item.span,
+        }
     }
 
-    impl<'ast> InlinedFn<'ast> {
-        pub fn into_owned(&self) -> OwnedInlinedFn {
-            OwnedInlinedFn {
-                id: self.id,
-                span: self.span,
-                ctx: self.ctx,
-                ident: self.ident,
-                sig: self.sig.clone(),
-                vis: self.vis.clone(),
-                body: self.body.cloned(),
-            }
+    pub fn kind(&self) -> ast::ItemKind {
+        match self {
+            Self::Item(item) => item.kind.clone(),
+            Self::ForeignItem(item) => item.kind.clone().into(),
+            Self::AssocItem(item, _) => item.kind.clone().into(),
         }
     }
 }

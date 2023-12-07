@@ -80,7 +80,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
 
         let Some((callee, expr_ty)) = non_default_call(
             tcx,
-            f.hir.def_id.to_def_id(),
+            f.hir.owner_id.to_def_id(),
             f.hir.body.id(),
             expr.hir,
             self.limit_scope_to_local_callees,
@@ -145,7 +145,7 @@ impl<'a> Operator<'a> for CallDelete {
 
         let Some((callee, _)) = non_default_call(
             tcx,
-            f.hir.def_id.to_def_id(),
+            f.hir.owner_id.to_def_id(),
             f.hir.body.id(),
             expr.hir,
             self.limit_scope_to_local_callees,

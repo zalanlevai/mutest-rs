@@ -80,7 +80,7 @@ macro define_op_swap_operator(
                 _ => { return None; }
             };
 
-            let param_env = tcx.param_env(f.hir.def_id);
+            let param_env = tcx.param_env(f.hir.owner_id.def_id);
             let typeck = tcx.typeck_body(f.hir.body.id());
 
             let expr_ty = typeck.expr_ty(expr.hir);

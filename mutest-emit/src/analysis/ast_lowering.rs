@@ -10,7 +10,6 @@ use crate::analysis::hir;
 use crate::analysis::ty::TyCtxt;
 use crate::analysis::res;
 use crate::codegen::ast;
-use crate::codegen::symbols::{Ident, Span};
 
 pub struct Resolutions {
     pub node_id_to_def_id: FxHashMap<ast::NodeId, hir::LocalDefId>,
@@ -408,105 +407,25 @@ pub mod visit {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum AstDefItem<'ast> {
-    Item(&'ast ast::Item),
-    ForeignItem(&'ast ast::ForeignItem),
-    AssocItem(&'ast ast::AssocItem, ast::visit::AssocCtxt),
-}
-
-impl<'ast> AstDefItem<'ast> {
-    pub fn ident(&self) -> Ident {
-        match self {
-            Self::Item(item) => item.ident,
-            Self::ForeignItem(item) => item.ident,
-            Self::AssocItem(item, _) => item.ident,
-        }
-    }
-
-    pub fn span(&self) -> Span {
-        match self {
-            Self::Item(item) => item.span,
-            Self::ForeignItem(item) => item.span,
-            Self::AssocItem(item, _) => item.span,
-        }
-    }
-
-    pub fn kind(&self) -> ast::ItemKind {
-        match self {
-            Self::Item(item) => item.kind.clone(),
-            Self::ForeignItem(item) => item.kind.clone().into(),
-            Self::AssocItem(item, _) => item.kind.clone().into(),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum HirDefItem<'hir> {
-    Item(&'hir hir::Item<'hir>),
-    ForeignItem(&'hir hir::ForeignItem<'hir>),
-    TraitItem(&'hir hir::TraitItem<'hir>),
-    ImplItem(&'hir hir::ImplItem<'hir>),
-}
-
-impl<'hir> HirDefItem<'hir> {
-    pub fn from_node(node: &'hir hir::Node<'hir>) -> Option<Self> {
-        match node {
-            hir::Node::Item(item) => Some(Self::Item(item)),
-            hir::Node::ForeignItem(item) => Some(Self::ForeignItem(item)),
-            hir::Node::TraitItem(item) => Some(Self::TraitItem(item)),
-            hir::Node::ImplItem(item) => Some(Self::ImplItem(item)),
-            _ => None,
-        }
-    }
-
-    pub fn def_id(&self) -> hir::LocalDefId {
-        match self {
-            Self::Item(item) => item.owner_id.def_id,
-            Self::ForeignItem(item) => item.owner_id.def_id,
-            Self::TraitItem(item) => item.owner_id.def_id,
-            Self::ImplItem(item) => item.owner_id.def_id,
-        }
-    }
-
-    pub fn ident(&self) -> Ident {
-        match self {
-            Self::Item(item) => item.ident,
-            Self::ForeignItem(item) => item.ident,
-            Self::TraitItem(item) => item.ident,
-            Self::ImplItem(item) => item.ident,
-        }
-    }
-
-    pub fn span(&self) -> Span {
-        match self {
-            Self::Item(item) => item.span,
-            Self::ForeignItem(item) => item.span,
-            Self::TraitItem(item) => item.span,
-            Self::ImplItem(item) => item.span,
-        }
-    }
-}
-
 struct AstBodyChildItemCollector<'ast> {
-    result: Vec<AstDefItem<'ast>>,
+    result: Vec<ast::DefItem<'ast>>,
 }
 
 impl<'ast> ast::visit::Visitor<'ast> for AstBodyChildItemCollector<'ast> {
     fn visit_item(&mut self, item: &'ast ast::Item) {
-        self.result.push(AstDefItem::Item(item));
+        self.result.push(ast::DefItem::Item(item));
     }
 
     fn visit_foreign_item(&mut self, item: &'ast ast::ForeignItem) {
-        self.result.push(AstDefItem::ForeignItem(item));
+        self.result.push(ast::DefItem::ForeignItem(item));
     }
 
     fn visit_assoc_item(&mut self, item: &'ast ast::AssocItem, ctx: rustc_ast::visit::AssocCtxt) {
-        self.result.push(AstDefItem::AssocItem(item, ctx));
+        self.result.push(ast::DefItem::AssocItem(item, ctx));
     }
 }
 
-fn ast_body_child_items<'ast>(block: &'ast ast::Block) -> Vec<AstDefItem<'ast>> {
+fn ast_body_child_items<'ast>(block: &'ast ast::Block) -> Vec<ast::DefItem<'ast>> {
     use ast::visit::Visitor;
 
     let mut collector = AstBodyChildItemCollector { result: vec![] };
@@ -516,7 +435,7 @@ fn ast_body_child_items<'ast>(block: &'ast ast::Block) -> Vec<AstDefItem<'ast>> 
 
 struct HirBodyChildItemCollector<'tcx> {
     tcx: TyCtxt<'tcx>,
-    result: Vec<HirDefItem<'tcx>>,
+    result: Vec<hir::DefItem<'tcx>>,
 }
 
 impl<'hir> hir::intravisit::Visitor<'hir> for HirBodyChildItemCollector<'hir> {
@@ -527,23 +446,23 @@ impl<'hir> hir::intravisit::Visitor<'hir> for HirBodyChildItemCollector<'hir> {
     }
 
     fn visit_item(&mut self, item: &'hir hir::Item<'hir>) {
-        self.result.push(HirDefItem::Item(item));
+        self.result.push(hir::DefItem::Item(item));
     }
 
     fn visit_foreign_item(&mut self, item: &'hir hir::ForeignItem<'hir>) {
-        self.result.push(HirDefItem::ForeignItem(item));
+        self.result.push(hir::DefItem::ForeignItem(item));
     }
 
     fn visit_trait_item(&mut self, item: &'hir hir::TraitItem<'hir>) {
-        self.result.push(HirDefItem::TraitItem(item));
+        self.result.push(hir::DefItem::TraitItem(item));
     }
 
     fn visit_impl_item(&mut self, item: &'hir hir::ImplItem<'hir>) {
-        self.result.push(HirDefItem::ImplItem(item));
+        self.result.push(hir::DefItem::ImplItem(item));
     }
 }
 
-fn hir_body_child_items<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> Vec<HirDefItem<'tcx>> {
+fn hir_body_child_items<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> Vec<hir::DefItem<'tcx>> {
     use hir::intravisit::Visitor;
 
     let mut collector = HirBodyChildItemCollector { tcx, result: vec![] };
@@ -558,9 +477,9 @@ struct DefDisambiguator {
 }
 
 fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path: &[hir::Node]) -> Vec<Option<DefDisambiguator>> {
-    fn disambiguated_kind<'hir>(def_item: HirDefItem<'hir>) -> Option<hir::definitions::DefPathData> {
+    fn disambiguated_kind<'hir>(def_item: hir::DefItem<'hir>) -> Option<hir::definitions::DefPathData> {
         match def_item {
-            HirDefItem::Item(item) => match item.kind {
+            hir::DefItem::Item(item) => match item.kind {
                 hir::ItemKind::ExternCrate(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
                 hir::ItemKind::Use(_, _) => None,
                 hir::ItemKind::Static(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
@@ -579,17 +498,17 @@ fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path:
                 hir::ItemKind::TraitAlias(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
                 hir::ItemKind::Impl(_) => Some(hir::definitions::DefPathData::Impl),
             }
-            HirDefItem::ForeignItem(item) => match item.kind {
+            hir::DefItem::ForeignItem(item) => match item.kind {
                 hir::ForeignItemKind::Fn(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
                 hir::ForeignItemKind::Static(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
                 hir::ForeignItemKind::Type => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
             }
-            HirDefItem::TraitItem(item) => match item.kind {
+            hir::DefItem::TraitItem(item) => match item.kind {
                 hir::TraitItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
                 hir::TraitItemKind::Fn(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
                 hir::TraitItemKind::Type(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
             }
-            HirDefItem::ImplItem(item) => match item.kind {
+            hir::DefItem::ImplItem(item) => match item.kind {
                 hir::ImplItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
                 hir::ImplItemKind::Fn(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
                 hir::ImplItemKind::Type(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
@@ -597,9 +516,9 @@ fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path:
         }
     }
 
-    fn disambiguate_child_item<'hir, I>(def_item: HirDefItem<'hir>, items: I) -> Option<DefDisambiguator>
+    fn disambiguate_child_item<'hir, I>(def_item: hir::DefItem<'hir>, items: I) -> Option<DefDisambiguator>
     where
-        I: IntoIterator<Item = HirDefItem<'hir>>,
+        I: IntoIterator<Item = hir::DefItem<'hir>>,
     {
         let kind = disambiguated_kind(def_item);
 
@@ -616,28 +535,28 @@ fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path:
     path.iter()
         .tuple_windows::<(_, _)>()
         .map(|(parent_node, current_node)| {
-            let Some(current_def_item) = HirDefItem::from_node(current_node) else { return None; };
+            let Some(current_def_item) = hir::DefItem::from_node(current_node) else { return None; };
 
             match parent_node {
                 hir::Node::Crate(parent_mod) => {
-                    let items = parent_mod.item_ids.iter().map(|item_id| tcx.hir().item(*item_id)).map(HirDefItem::Item);
+                    let items = parent_mod.item_ids.iter().map(|item_id| tcx.hir().item(*item_id)).map(hir::DefItem::Item);
                     disambiguate_child_item(current_def_item, items)
                 }
                 hir::Node::Item(parent_item) => match &parent_item.kind {
                     hir::ItemKind::Mod(parent_mod) => {
-                        let items = parent_mod.item_ids.iter().map(|item_id| tcx.hir().item(*item_id)).map(HirDefItem::Item);
+                        let items = parent_mod.item_ids.iter().map(|item_id| tcx.hir().item(*item_id)).map(hir::DefItem::Item);
                         disambiguate_child_item(current_def_item, items)
                     }
                     hir::ItemKind::ForeignMod { items: parent_items, .. } => {
-                        let items = parent_items.iter().map(|item_ref| tcx.hir().foreign_item(item_ref.id)).map(HirDefItem::ForeignItem);
+                        let items = parent_items.iter().map(|item_ref| tcx.hir().foreign_item(item_ref.id)).map(hir::DefItem::ForeignItem);
                         disambiguate_child_item(current_def_item, items)
                     }
                     hir::ItemKind::Trait(_, _, _, _, parent_items) => {
-                        let items = parent_items.iter().map(|item_ref| tcx.hir().trait_item(item_ref.id)).map(HirDefItem::TraitItem);
+                        let items = parent_items.iter().map(|item_ref| tcx.hir().trait_item(item_ref.id)).map(hir::DefItem::TraitItem);
                         disambiguate_child_item(current_def_item, items)
                     }
                     hir::ItemKind::Impl(parent_impl) => {
-                        let items = parent_impl.items.iter().map(|item_ref| tcx.hir().impl_item(item_ref.id)).map(HirDefItem::ImplItem);
+                        let items = parent_impl.items.iter().map(|item_ref| tcx.hir().impl_item(item_ref.id)).map(hir::DefItem::ImplItem);
                         disambiguate_child_item(current_def_item, items)
                     }
                     | hir::ItemKind::Static(_, _, parent_body)
@@ -669,12 +588,12 @@ fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path:
 
 struct AstDefFinder<'ast, 'hir> {
     path_stack: VecDeque<(hir::Node<'hir>, Option<DefDisambiguator>)>,
-    result: Option<AstDefItem<'ast>>,
+    result: Option<ast::DefItem<'ast>>,
 }
 
-fn find_hir_def_item_in_ast<'ast, 'hir, I>(item_hir: HirDefItem<'hir>, disambiguator: Option<DefDisambiguator>, items_ast: I) -> Option<AstDefItem<'ast>>
+fn find_hir_def_item_in_ast<'ast, 'hir, I>(item_hir: hir::DefItem<'hir>, disambiguator: Option<DefDisambiguator>, items_ast: I) -> Option<ast::DefItem<'ast>>
 where
-    I: IntoIterator<Item = AstDefItem<'ast>>,
+    I: IntoIterator<Item = ast::DefItem<'ast>>,
 {
     macro matching_item {
         ($(|)? $($pat:pat_param)|+ $(if $guard:expr)? $(,)?) => {
@@ -686,7 +605,7 @@ where
     }
 
     match item_hir {
-        HirDefItem::Item(item_hir) => match &item_hir.kind {
+        hir::DefItem::Item(item_hir) => match &item_hir.kind {
             hir::ItemKind::ExternCrate(symbol_hir) => {
                 matching_item!(ast::ItemKind::ExternCrate(symbol_ast) if symbol_ast == symbol_hir)
             }
@@ -750,7 +669,7 @@ where
                 items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::Impl(_))).nth(index)
             }
         }
-        HirDefItem::ForeignItem(item_hir) => match &item_hir.kind {
+        hir::DefItem::ForeignItem(item_hir) => match &item_hir.kind {
             hir::ForeignItemKind::Fn(_, _, _) => {
                 matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
@@ -761,7 +680,7 @@ where
                 matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
         }
-        HirDefItem::TraitItem(item_hir) => match &item_hir.kind {
+        hir::DefItem::TraitItem(item_hir) => match &item_hir.kind {
             hir::TraitItemKind::Const(_, _) => {
                 matching_item!(ast::ItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
@@ -772,7 +691,7 @@ where
                 matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
         }
-        HirDefItem::ImplItem(item_hir) => match &item_hir.kind {
+        hir::DefItem::ImplItem(item_hir) => match &item_hir.kind {
             hir::ImplItemKind::Const(_, _) => {
                 matching_item!(ast::ItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
@@ -794,11 +713,11 @@ impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
         self.path_stack.pop_front();
 
         let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
-        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
+        let Some(def_item_hir) = hir::DefItem::from_node(&node_hir) else { return; };
 
         let def_item_ast = match def_item_hir {
-            HirDefItem::Item(_) => {
-                let def_items_ast = krate.items.iter().map(ast::AstDeref::ast_deref).map(AstDefItem::Item);
+            hir::DefItem::Item(_) => {
+                let def_items_ast = krate.items.iter().map(ast::AstDeref::ast_deref).map(ast::DefItem::Item);
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
             }
             _ => { return; }
@@ -813,36 +732,36 @@ impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
         }
 
         match def_item_ast {
-            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
-            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
-            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+            ast::DefItem::Item(item_ast) => self.visit_item(item_ast),
+            ast::DefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            ast::DefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
         }
     }
 
     fn visit_item(&mut self, item: &'ast ast::Item) {
         let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
-        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
+        let Some(def_item_hir) = hir::DefItem::from_node(&node_hir) else { return; };
 
         let def_item_ast = match (def_item_hir, &item.kind) {
-            (HirDefItem::Item(_), ast::ItemKind::Mod(_, ast::ModKind::Loaded(items_ast, _, _))) => {
-                let def_items_ast = items_ast.iter().map(ast::AstDeref::ast_deref).map(AstDefItem::Item);
+            (hir::DefItem::Item(_), ast::ItemKind::Mod(_, ast::ModKind::Loaded(items_ast, _, _))) => {
+                let def_items_ast = items_ast.iter().map(ast::AstDeref::ast_deref).map(ast::DefItem::Item);
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
             }
-            (HirDefItem::ForeignItem(_), ast::ItemKind::ForeignMod(foreign_mod_ast)) => {
-                let def_items_ast = foreign_mod_ast.items.iter().map(ast::AstDeref::ast_deref).map(AstDefItem::ForeignItem);
+            (hir::DefItem::ForeignItem(_), ast::ItemKind::ForeignMod(foreign_mod_ast)) => {
+                let def_items_ast = foreign_mod_ast.items.iter().map(ast::AstDeref::ast_deref).map(ast::DefItem::ForeignItem);
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
             }
-            (HirDefItem::TraitItem(_), ast::ItemKind::Trait(trait_ast)) => {
+            (hir::DefItem::TraitItem(_), ast::ItemKind::Trait(trait_ast)) => {
                 let def_items_ast = trait_ast.items.iter().map(ast::AstDeref::ast_deref)
-                    .map(|item_ast| AstDefItem::AssocItem(item_ast, ast::visit::AssocCtxt::Trait));
+                    .map(|item_ast| ast::DefItem::AssocItem(item_ast, ast::visit::AssocCtxt::Trait));
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
             }
-            (HirDefItem::ImplItem(_), ast::ItemKind::Impl(impl_ast)) => {
+            (hir::DefItem::ImplItem(_), ast::ItemKind::Impl(impl_ast)) => {
                 let def_items_ast = impl_ast.items.iter().map(ast::AstDeref::ast_deref)
-                    .map(|item_ast| AstDefItem::AssocItem(item_ast, ast::visit::AssocCtxt::Impl));
+                    .map(|item_ast| ast::DefItem::AssocItem(item_ast, ast::visit::AssocCtxt::Impl));
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, def_items_ast)
             }
-            (HirDefItem::Item(_), ast::ItemKind::Fn(fn_ast)) => {
+            (hir::DefItem::Item(_), ast::ItemKind::Fn(fn_ast)) => {
                 let Some(body_ast) = &fn_ast.body else { return; };
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, ast_body_child_items(body_ast))
             }
@@ -858,18 +777,18 @@ impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
         }
 
         match def_item_ast {
-            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
-            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
-            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+            ast::DefItem::Item(item_ast) => self.visit_item(item_ast),
+            ast::DefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            ast::DefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
         }
     }
 
     fn visit_foreign_item(&mut self, item: &'ast ast::ForeignItem) {
         let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
-        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
+        let Some(def_item_hir) = hir::DefItem::from_node(&node_hir) else { return; };
 
         let def_item_ast = match (def_item_hir, &item.kind) {
-            (HirDefItem::Item(_), ast::ForeignItemKind::Fn(fn_ast)) => {
+            (hir::DefItem::Item(_), ast::ForeignItemKind::Fn(fn_ast)) => {
                 let Some(body_ast) = &fn_ast.body else { return; };
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, ast_body_child_items(body_ast))
             }
@@ -885,18 +804,18 @@ impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
         }
 
         match def_item_ast {
-            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
-            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
-            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+            ast::DefItem::Item(item_ast) => self.visit_item(item_ast),
+            ast::DefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            ast::DefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
         }
     }
 
     fn visit_assoc_item(&mut self, item: &'ast ast::AssocItem, _ctx: ast::visit::AssocCtxt) {
         let Some(&(node_hir, disambiguator)) = self.path_stack.front() else { return; };
-        let Some(def_item_hir) = HirDefItem::from_node(&node_hir) else { return; };
+        let Some(def_item_hir) = hir::DefItem::from_node(&node_hir) else { return; };
 
         let def_item_ast = match (def_item_hir, &item.kind) {
-            (HirDefItem::Item(_), ast::AssocItemKind::Fn(fn_ast)) => {
+            (hir::DefItem::Item(_), ast::AssocItemKind::Fn(fn_ast)) => {
                 let Some(body_ast) = &fn_ast.body else { return; };
                 find_hir_def_item_in_ast(def_item_hir, disambiguator, ast_body_child_items(body_ast))
             }
@@ -912,14 +831,14 @@ impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
         }
 
         match def_item_ast {
-            AstDefItem::Item(item_ast) => self.visit_item(item_ast),
-            AstDefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
-            AstDefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
+            ast::DefItem::Item(item_ast) => self.visit_item(item_ast),
+            ast::DefItem::ForeignItem(item_ast) => self.visit_foreign_item(item_ast),
+            ast::DefItem::AssocItem(item_ast, assoc_ctx_ast) => self.visit_assoc_item(item_ast, assoc_ctx_ast),
         }
     }
 }
 
-pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<AstDefItem<'ast>> {
+pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<ast::DefItem<'ast>> {
     use ast::visit::Visitor;
 
     // The definition HIR path will contain the full HIR tree walk, including blocks, statements, expressions, etc.
@@ -927,7 +846,7 @@ pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, k
     // components to resolve definitions. This is also how the compiler's own `DefPath`s are defined.
     let def_hir_item_node_path = res::def_hir_path(tcx, def_id).into_iter()
         .map(|(_, node)| node)
-        .filter(|node| matches!(node, hir::Node::Crate(_)) || HirDefItem::from_node(node).is_some())
+        .filter(|node| matches!(node, hir::Node::Crate(_)) || hir::DefItem::from_node(node).is_some())
         .collect::<Vec<_>>();
 
     let disambiguators = iter::once(None).chain(disambiguate_hir_def_item_node_path_components(tcx, &def_hir_item_node_path));

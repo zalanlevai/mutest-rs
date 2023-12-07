@@ -45,7 +45,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
             _,
         ) = param.ast.pat.kind else { return None; };
 
-        let Some(body) = f.ast.body else { return None; };
+        let Some(body) = &f.ast.body else { return None; };
         let Some(first_item) = body.stmts.first() else { return None; };
 
         let typeck = tcx.typeck_body(f.hir.body.id());

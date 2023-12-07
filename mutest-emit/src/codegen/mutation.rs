@@ -7,7 +7,7 @@ use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 use smallvec::{SmallVec, smallvec};
 
-use crate::analysis::ast_lowering::{self, AstDefItem};
+use crate::analysis::ast_lowering;
 use crate::analysis::diagnostic::{self, SessionRcSourceMap};
 use crate::analysis::hir;
 use crate::analysis::res;
@@ -27,49 +27,20 @@ pub struct Lowered<A, H> {
     pub hir: H,
 }
 
-pub type LoweredFn<'ast, 'hir> = Lowered<ast::InlinedFn<'ast>, hir::InlinedFn<'hir>>;
-pub type OwnedLoweredFn<'hir> = Lowered<ast::OwnedInlinedFn, hir::InlinedFn<'hir>>;
-pub type LoweredParam<'ast, 'hir> = Lowered<&'ast ast::Param, &'hir hir::Param<'hir>>;
-pub type OwnedLoweredParam<'hir> = Lowered<ast::Param, &'hir hir::Param<'hir>>;
-pub type LoweredStmt<'ast, 'hir> = Lowered<&'ast ast::Stmt, &'hir hir::Stmt<'hir>>;
-pub type OwnedLoweredStmt<'hir> = Lowered<ast::Stmt, &'hir hir::Stmt<'hir>>;
-pub type LoweredExpr<'ast, 'hir> = Lowered<&'ast ast::Expr, &'hir hir::Expr<'hir>>;
-pub type OwnedLoweredExpr<'hir> = Lowered<ast::Expr, &'hir hir::Expr<'hir>>;
+pub type LoweredFn<'hir> = Lowered<ast::FnItem, hir::FnItem<'hir>>;
+pub type LoweredParam<'hir> = Lowered<ast::Param, &'hir hir::Param<'hir>>;
+pub type LoweredStmt<'hir> = Lowered<ast::Stmt, &'hir hir::Stmt<'hir>>;
+pub type LoweredExpr<'hir> = Lowered<ast::Expr, &'hir hir::Expr<'hir>>;
 
-pub enum MutLoc<'ast, 'hir> {
-    Fn(LoweredFn<'ast, 'hir>),
-    FnParam(LoweredParam<'ast, 'hir>, LoweredFn<'ast, 'hir>),
-    FnBodyStmt(LoweredStmt<'ast, 'hir>, LoweredFn<'ast, 'hir>),
-    FnBodyExpr(LoweredExpr<'ast, 'hir>, LoweredFn<'ast, 'hir>),
+#[derive(Clone)]
+pub enum MutLoc<'hir> {
+    Fn(LoweredFn<'hir>),
+    FnParam(LoweredParam<'hir>, LoweredFn<'hir>),
+    FnBodyStmt(LoweredStmt<'hir>, LoweredFn<'hir>),
+    FnBodyExpr(LoweredExpr<'hir>, LoweredFn<'hir>),
 }
 
-pub enum OwnedMutLoc<'hir> {
-    Fn(OwnedLoweredFn<'hir>),
-    FnParam(OwnedLoweredParam<'hir>, OwnedLoweredFn<'hir>),
-    FnBodyStmt(OwnedLoweredStmt<'hir>, OwnedLoweredFn<'hir>),
-    FnBodyExpr(OwnedLoweredExpr<'hir>, OwnedLoweredFn<'hir>),
-}
-
-impl<'ast, 'hir> MutLoc<'ast, 'hir> {
-    pub fn into_owned(&self) -> OwnedMutLoc<'hir> {
-        match self {
-            Self::Fn(Lowered { ast: fn_ast, hir: fn_hir }) => {
-                OwnedMutLoc::Fn(Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
-            }
-            Self::FnParam(Lowered { ast: param_ast, hir: param_hir }, Lowered { ast: fn_ast, hir: fn_hir }) => {
-                OwnedMutLoc::FnParam(Lowered { ast: (*param_ast).clone(), hir: param_hir }, Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
-            }
-            Self::FnBodyStmt(Lowered { ast: stmt_ast, hir: stmt_hir }, Lowered { ast: fn_ast, hir: fn_hir }) => {
-                OwnedMutLoc::FnBodyStmt(Lowered { ast: (*stmt_ast).clone(), hir: stmt_hir }, Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
-            }
-            Self::FnBodyExpr(Lowered { ast: expr_ast, hir: expr_hir }, Lowered { ast: fn_ast, hir: fn_hir }) => {
-                OwnedMutLoc::FnBodyExpr(Lowered { ast: (*expr_ast).clone(), hir: expr_hir }, Lowered { ast: fn_ast.into_owned(), hir: *fn_hir })
-            }
-        }
-    }
-}
-
-impl<'hir> OwnedMutLoc<'hir> {
+impl<'hir> MutLoc<'hir> {
     pub fn span(&self) -> Span {
         match self {
             Self::Fn(lowered_fn) => lowered_fn.ast.span,
@@ -79,7 +50,7 @@ impl<'hir> OwnedMutLoc<'hir> {
         }
     }
 
-    pub fn containing_fn(&self) -> Option<&OwnedLoweredFn> {
+    pub fn containing_fn(&self) -> Option<&LoweredFn<'hir>> {
         match self {
             Self::Fn(lowered_fn) => Some(lowered_fn),
             Self::FnParam(_, lowered_fn) => Some(lowered_fn),
@@ -89,11 +60,11 @@ impl<'hir> OwnedMutLoc<'hir> {
     }
 }
 
-pub struct MutCtxt<'ast, 'tcx, 'op> {
+pub struct MutCtxt<'tcx, 'op> {
     pub tcx: TyCtxt<'tcx>,
     pub resolutions: &'op ast_lowering::Resolutions,
     pub def_site: Span,
-    pub location: MutLoc<'ast, 'tcx>,
+    pub location: &'op MutLoc<'tcx>,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -174,7 +145,7 @@ impl MutId {
 pub struct Mut<'hir, 'trg, 'm> {
     pub id: MutId,
     pub target: &'trg Target<'trg>,
-    pub location: OwnedMutLoc<'hir>,
+    pub location: MutLoc<'hir>,
     pub is_in_unsafe_block: bool,
     pub mutation: BoxedMutation<'m>,
     pub substs: SmallVec<[SubstDef; 1]>,
@@ -240,14 +211,14 @@ impl UnsafeTargeting {
     }
 }
 
-struct MutationCollector<'ast, 'tcx, 'op, 'trg, 'm> {
+struct MutationCollector<'tcx, 'op, 'trg, 'm> {
     pub operators: Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
     pub resolutions: &'op ast_lowering::Resolutions,
     pub def_site: Span,
     pub unsafe_targeting: UnsafeTargeting,
     pub target: Option<&'trg Target<'trg>>,
-    pub current_fn: Option<LoweredFn<'ast, 'tcx>>,
+    pub current_fn: Option<LoweredFn<'tcx>>,
     pub current_closure: Option<hir::BodyId>,
     pub is_in_unsafe_block: bool,
     pub next_mut_index: u32,
@@ -268,7 +239,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
                 $self.mutations.push(Mut {
                     id: MutId($self.next_mut_index),
                     target: $self.target.expect("attempted to collect mutations without a target"),
-                    location: mcx.location.into_owned(),
+                    location: mcx.location.clone(),
                     is_in_unsafe_block: $self.is_in_unsafe_block,
                     mutation,
                     substs,
@@ -280,35 +251,13 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     }
 }
 
-
-impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'ast, 'tcx, 'op, 'trg, 'm> {
+impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'op, 'trg, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
-        let ast::visit::FnKind::Fn(ref ctx, ref ident, sig, vis, generics, body) = kind else { return; };
-
-        let fn_ast = ast::InlinedFn { id, span, ctx: *ctx, ident: *ident, vis, generics, sig, body };
+        let ast::visit::FnKind::Fn(ctx, ident, sig, vis, generics, body) = kind else { return; };
+        let fn_ast = ast::FnItem { id, span, ctx, vis: vis.clone(), ident, generics: generics.clone(), sig: sig.clone(), body: body.cloned() };
 
         let Some(fn_def_id) = self.resolutions.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
-        let fn_hir = match self.tcx.hir().get_by_def_id(fn_def_id) {
-            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ident, ref kind }) => {
-                let hir::ItemKind::Fn(sig, generics, body) = kind else { unreachable!(); };
-                let body = self.tcx.hir().body(*body);
-                let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header);
-                hir::InlinedFn { def_id: owner_id.def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
-            }
-            hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness }) => {
-                let hir::TraitItemKind::Fn(sig, hir::TraitFn::Provided(body)) = kind else { unreachable!(); };
-                let body = self.tcx.hir().body(*body);
-                let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
-                hir::InlinedFn { def_id: owner_id.def_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body }
-            }
-            hir::Node::ImplItem(&hir::ImplItem { owner_id, span, vis_span, ident, ref generics, ref kind, defaultness }) => {
-                let hir::ImplItemKind::Fn(sig, body) = kind else { unreachable!(); };
-                let body = self.tcx.hir().body(*body);
-                let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
-                hir::InlinedFn { def_id: owner_id.def_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body }
-            }
-            _ => unreachable!(),
-        };
+        let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir().get_by_def_id(fn_def_id)) else { unreachable!() };
 
         let lowered_fn = Lowered { ast: fn_ast, hir: fn_hir };
 
@@ -316,7 +265,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             tcx: self.tcx,
             resolutions: self.resolutions,
             def_site: self.def_site,
-            location: MutLoc::Fn(lowered_fn.clone()),
+            location: &MutLoc::Fn(lowered_fn.clone()),
         });
 
         let kind_ast = kind;
@@ -326,7 +275,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let decl_hir = lowered_fn.hir.sig.decl;
         let body_hir = lowered_fn.hir.body.id();
         let span_hir = lowered_fn.hir.span;
-        let id_hir = self.tcx.hir().local_def_id_to_hir_id(lowered_fn.hir.def_id);
+        let id_hir = self.tcx.hir().local_def_id_to_hir_id(lowered_fn.hir.owner_id.def_id);
         self.current_fn = Some(lowered_fn);
         ast_lowering::visit::AstHirVisitor::visit_fn(self, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
         self.current_fn = None;
@@ -339,7 +288,7 @@ fn is_local_span(source_map: &SourceMap, sp: Span) -> bool {
     local_begin.sf.src.is_some() && local_end.sf.src.is_some()
 }
 
-impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'ast, 'hir, 'op, 'trg, 'm> {
+impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'hir, 'op, 'trg, 'm> {
     type NestedFilter = OnlyBodies;
 
     fn nested_visit_map(&mut self) -> Self::Map {
@@ -355,13 +304,13 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
             //        avoid generating leaking, malformed mutations.
             if let Some(_) = self.current_closure { return; }
 
-            let lowered_param = Lowered { ast: param_ast, hir: param_hir };
+            let lowered_param = Lowered { ast: param_ast.clone(), hir: param_hir };
 
             register_mutations!(self, MutCtxt {
                 tcx: self.tcx,
                 resolutions: self.resolutions,
                 def_site: self.def_site,
-                location: MutLoc::FnParam(lowered_param, lowered_fn.clone()),
+                location: &MutLoc::FnParam(lowered_param, lowered_fn.clone()),
             });
         }
 
@@ -388,13 +337,13 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
             //        avoid generating leaking, malformed mutations.
             if let Some(_) = self.current_closure { return; }
 
-            let lowered_stmt = Lowered { ast: stmt_ast, hir: stmt_hir };
+            let lowered_stmt = Lowered { ast: stmt_ast.clone(), hir: stmt_hir };
 
             register_mutations!(self, MutCtxt {
                 tcx: self.tcx,
                 resolutions: self.resolutions,
                 def_site: self.def_site,
-                location: MutLoc::FnBodyStmt(lowered_stmt, lowered_fn.clone()),
+                location: &MutLoc::FnBodyStmt(lowered_stmt, lowered_fn.clone()),
             });
         }
 
@@ -415,13 +364,13 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
                 return ast_lowering::visit::walk_expr(self, expr_ast, expr_hir);
             }
 
-            let lowered_expr = Lowered { ast: expr_ast, hir: expr_hir };
+            let lowered_expr = Lowered { ast: expr_ast.clone(), hir: expr_hir };
 
             register_mutations!(self, MutCtxt {
                 tcx: self.tcx,
                 resolutions: self.resolutions,
                 def_site: self.def_site,
-                location: MutLoc::FnBodyExpr(lowered_expr, lowered_fn.clone()),
+                location: &MutLoc::FnBodyExpr(lowered_expr, lowered_fn.clone()),
             });
         }
 
@@ -507,7 +456,7 @@ impl<'ast> ast::visit::Visitor<'ast> for BodyUnsafetyChecker {
     }
 }
 
-fn check_item_unsafety<'ast>(item: AstDefItem<'ast>) -> Unsafety {
+fn check_item_unsafety<'ast>(item: ast::DefItem<'ast>) -> Unsafety {
     let ast::ItemKind::Fn(target_fn) = item.kind() else { return Unsafety::None };
 
     let ast::Unsafe::No = target_fn.sig.header.unsafety else { return Unsafety::Unsafe(UnsafeSource::Unsafe) };
@@ -696,9 +645,9 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, res
         let Some(target_item) = ast_lowering::find_def_in_ast(tcx, target.def_id, krate) else { continue; };
 
         match target_item {
-            AstDefItem::Item(item) => collector.visit_item(item),
-            AstDefItem::ForeignItem(item) => collector.visit_foreign_item(item),
-            AstDefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
+            ast::DefItem::Item(item) => collector.visit_item(item),
+            ast::DefItem::ForeignItem(item) => collector.visit_foreign_item(item),
+            ast::DefItem::AssocItem(item, ctx) => collector.visit_assoc_item(item, ctx),
         }
     }
 
