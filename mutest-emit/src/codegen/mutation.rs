@@ -439,15 +439,23 @@ impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> f
             }
             // The `else` branch of an `if` conditional must be either another `if` conditional or a block, so we do
             // not mutate `else` blocks directly, instead visiting its contents.
-            (ast::ExprKind::If(cond_ast, then_ast, els_ast), hir::ExprKind::If(cond_hir, then_hir, els_hir)) => {
-                ast_lowering::visit::visit_matching_expr(self, cond_ast, cond_hir);
-                ast_lowering::visit::visit_block_expr(self, then_ast, then_hir);
-                if let Some(els_ast) = els_ast && let Some(els_hir) = els_hir {
-                    match &els_ast.kind {
-                        ast::ExprKind::Block(_, _) => ast_lowering::visit::walk_expr(self, els_ast, els_hir),
-                        _ => ast_lowering::visit::visit_matching_expr(self, els_ast, els_hir),
+            (ast::ExprKind::If(_, _, _), hir::ExprKind::If(_, _, _)) => {
+                fn inner_visit_if<'ast, 'hir, T: ast_lowering::visit::AstHirVisitor<'ast, 'hir>>(visitor: &mut T, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
+                    let ast::ExprKind::If(cond_ast, then_ast, els_ast) = &expr_ast.kind else { unreachable!() };
+                    let hir::ExprKind::If(cond_hir, then_hir, els_hir) = &expr_hir.kind else { unreachable!() };
+
+                    ast_lowering::visit::visit_matching_expr(visitor, cond_ast, cond_hir);
+                    ast_lowering::visit::visit_block_expr(visitor, then_ast, then_hir);
+                    if let Some(els_ast) = els_ast && let Some(els_hir) = els_hir {
+                        match &els_ast.kind {
+                            ast::ExprKind::If(_, _, _) => inner_visit_if(visitor, els_ast, els_hir),
+                            ast::ExprKind::Block(_, _) => ast_lowering::visit::walk_expr(visitor, els_ast, els_hir),
+                            _ => unreachable!("the else branch of an if expression can only be another if (else if) or a block (else)"),
+                        }
                     }
                 }
+
+                inner_visit_if(self, expr_ast, expr_hir);
             }
             _ => ast_lowering::visit::walk_expr(self, expr_ast, expr_hir),
         }
