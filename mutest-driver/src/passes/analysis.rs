@@ -233,7 +233,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 let t_mutation_analysis_start = Instant::now();
-                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
+                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting, opts.verbosity);
                 if opts.verbosity >= 1 {
                     println!("generated {} mutations", mutations.len());
                 }

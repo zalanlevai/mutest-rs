@@ -207,6 +207,7 @@ struct MutationCollector<'tcx, 'op, 'trg, 'm> {
     pub def_res: &'op ast_lowering::DefResolutions,
     pub def_site: Span,
     pub unsafe_targeting: UnsafeTargeting,
+    pub verbosity: u8,
     pub target: Option<&'trg Target<'trg>>,
     pub current_fn: Option<(ast::FnItem, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
     pub current_closure: Option<hir::BodyId>,
@@ -247,6 +248,15 @@ fn is_local_span(source_map: &SourceMap, sp: Span) -> bool {
     local_begin.sf.src.is_some() && local_end.sf.src.is_some()
 }
 
+fn report_unmatched_ast_node<'tcx>(tcx: TyCtxt<'tcx>, node_kind: &str, def_id: hir::LocalDefId, span: Span) {
+    let mut diagnostic = tcx.sess.struct_warn(format!("unmatched {node_kind} in {def_path}",
+        def_path = tcx.def_path_debug_str(def_id.to_def_id()),
+    ));
+    diagnostic.set_span(span);
+    diagnostic.span_label(span, "no matching HIR node found");
+    diagnostic.emit();
+}
+
 impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'op, 'trg, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
         let ast::visit::FnKind::Fn(ctx, ident, sig, vis, generics, body) = kind else { return; };
@@ -273,7 +283,12 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
 
     fn visit_param(&mut self, param: &'ast ast::Param) {
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(param_hir) = body_res.hir_param(param) else { unreachable!() };
+        let Some(param_hir) = body_res.hir_param(param) else {
+            if self.verbosity >= 1 {
+                report_unmatched_ast_node(self.tcx, "parameter", fn_hir.owner_id.def_id, param.span);
+            }
+            return;
+        };
 
         if !is_local_span(self.tcx.sess.source_map(), param.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
@@ -295,8 +310,13 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
     }
 
     fn visit_block(&mut self, block: &'ast ast::Block) {
-        let Some((_fn_ast, _fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(block_hir) = body_res.hir_block(block) else { unreachable!() };
+        let Some((_fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
+        let Some(block_hir) = body_res.hir_block(block) else {
+            if self.verbosity >= 1 {
+                return report_unmatched_ast_node(self.tcx, "block", fn_hir.owner_id.def_id, block.span);
+            }
+            return;
+        };
 
         if !is_local_span(self.tcx.sess.source_map(), block.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
@@ -318,7 +338,12 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         }
 
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(stmt_hir) = body_res.hir_stmt(stmt) else { unreachable!() };
+        let Some(stmt_hir) = body_res.hir_stmt(stmt) else {
+            if self.verbosity >= 1 {
+                return report_unmatched_ast_node(self.tcx, "statement", fn_hir.owner_id.def_id, stmt.span);
+            }
+            return;
+        };
 
         if !is_local_span(self.tcx.sess.source_map(), stmt.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
@@ -347,7 +372,12 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         }
 
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
+        let Some(expr_hir) = body_res.hir_expr(expr) else {
+            if self.verbosity >= 1 {
+                return report_unmatched_ast_node(self.tcx, "expression", fn_hir.owner_id.def_id, expr.span);
+            }
+            return;
+        };
 
         if !is_local_span(self.tcx.sess.source_map(), expr.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
@@ -619,7 +649,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting) -> Vec<Mut<'trg, 'm>> {
+pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting, verbosity: u8) -> Vec<Mut<'trg, 'm>> {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
         DUMMY_SP,
@@ -633,6 +663,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, def
         def_res,
         def_site,
         unsafe_targeting,
+        verbosity,
         target: None,
         current_fn: None,
         current_closure: None,
