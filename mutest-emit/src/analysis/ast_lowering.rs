@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::iter;
 
 use itertools::Itertools;
+use rustc_data_structures::sync::HashMapExt;
 use rustc_hash::FxHashMap;
 use rustc_index::IndexVec;
 use rustc_middle::ty::ResolverAstLowering;
@@ -10,13 +11,14 @@ use crate::analysis::hir;
 use crate::analysis::ty::TyCtxt;
 use crate::analysis::res;
 use crate::codegen::ast;
+use crate::codegen::symbols::Span;
 
-pub struct Resolutions {
+pub struct DefResolutions {
     pub node_id_to_def_id: FxHashMap<ast::NodeId, hir::LocalDefId>,
     pub def_id_to_node_id: IndexVec<hir::LocalDefId, ast::NodeId>,
 }
 
-impl Resolutions {
+impl DefResolutions {
     pub fn from_resolver(resolver: &ResolverAstLowering) -> Self {
         Self {
             node_id_to_def_id: resolver.node_id_to_def_id.clone(),
@@ -404,6 +406,112 @@ pub mod visit {
             (ast::ExprKind::Err, _) | (_, hir::ExprKind::Err(_)) => {}
             _ => unreachable!(),
         }
+    }
+}
+
+pub struct BodyResolutions<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    node_id_to_hir_id: FxHashMap<ast::NodeId, hir::HirId>,
+    hir_id_to_node_id: FxHashMap<hir::HirId, ast::NodeId>,
+}
+
+impl<'tcx> BodyResolutions<'tcx> {
+    pub fn ast_id(&self, hir_id: hir::HirId) -> Option<ast::NodeId> {
+        self.hir_id_to_node_id.get(&hir_id).copied()
+    }
+
+    pub fn hir_id(&self, node_id: ast::NodeId) -> Option<hir::HirId> {
+        self.node_id_to_hir_id.get(&node_id).copied()
+    }
+
+    pub fn hir_node(&self, node_id: ast::NodeId) -> Option<hir::Node<'tcx>> {
+        self.node_id_to_hir_id.get(&node_id).map(|&hir_id| self.tcx.hir().get(hir_id))
+    }
+
+    pub fn hir_param(&self, param: &ast::Param) -> Option<&'tcx hir::Param<'tcx>> {
+        self.hir_node(param.id).map(|hir_node| hir_node.expect_param())
+    }
+
+    pub fn hir_expr(&self, expr: &ast::Expr) -> Option<&'tcx hir::Expr<'tcx>> {
+        self.hir_node(expr.id).map(|hir_node| hir_node.expect_expr())
+    }
+
+    pub fn hir_stmt(&self, stmt: &ast::Stmt) -> Option<&'tcx hir::Stmt<'tcx>> {
+        self.hir_node(stmt.id).map(|hir_node| hir_node.expect_stmt())
+    }
+
+    pub fn hir_block(&self, block: &ast::Block) -> Option<&'tcx hir::Block<'tcx>> {
+        self.hir_node(block.id).map(|hir_node| hir_node.expect_block())
+    }
+}
+
+struct BodyResolutionsCollector<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    node_id_to_hir_id: FxHashMap<ast::NodeId, hir::HirId>,
+    hir_id_to_node_id: FxHashMap<hir::HirId, ast::NodeId>,
+}
+
+impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'hir> {
+    type NestedFilter = rustc_middle::hir::nested_filter::OnlyBodies;
+
+    fn nested_visit_map(&mut self) -> Self::Map {
+        self.tcx.hir()
+    }
+
+    fn visit_fn(&mut self, kind_ast: ast::visit::FnKind<'ast>, span_ast: Span, id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, decl_hir: &'hir hir::FnDecl<'hir>, body_hir: hir::BodyId, span_hir: Span, id_hir: hir::HirId) {
+        visit::walk_fn(self, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
+    }
+
+    fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {
+        self.node_id_to_hir_id.insert_same(param_ast.id, param_hir.hir_id);
+        self.hir_id_to_node_id.insert_same(param_hir.hir_id, param_ast.id);
+
+        visit::walk_param(self, param_ast, param_hir);
+    }
+
+    fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
+        self.node_id_to_hir_id.insert_same(block_ast.id, block_hir.hir_id);
+        self.hir_id_to_node_id.insert_same(block_hir.hir_id, block_ast.id);
+
+        visit::walk_block(self, block_ast, block_hir);
+    }
+
+    fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
+        self.node_id_to_hir_id.insert_same(stmt_ast.id, stmt_hir.hir_id);
+        self.hir_id_to_node_id.insert_same(stmt_hir.hir_id, stmt_ast.id);
+
+        visit::walk_stmt(self, stmt_ast, stmt_hir);
+    }
+
+    fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
+        self.node_id_to_hir_id.insert_same(expr_ast.id, expr_hir.hir_id);
+        self.hir_id_to_node_id.insert_same(expr_hir.hir_id, expr_ast.id);
+
+        visit::walk_expr(self, expr_ast, expr_hir);
+    }
+}
+
+pub fn resolve_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
+    let mut collector = BodyResolutionsCollector {
+        tcx,
+        node_id_to_hir_id: Default::default(),
+        hir_id_to_node_id: Default::default(),
+    };
+
+    let kind_ast = ast::visit::FnKind::Fn(fn_ast.ctx, fn_ast.ident, &fn_ast.sig, &fn_ast.vis, &fn_ast.generics, fn_ast.body.as_ref());
+    let span_ast = fn_ast.span;
+    let id_ast = fn_ast.id;
+    let kind_hir = fn_hir.kind;
+    let decl_hir = fn_hir.sig.decl;
+    let body_hir = fn_hir.body.id();
+    let span_hir = fn_hir.span;
+    let id_hir = tcx.hir().local_def_id_to_hir_id(fn_hir.owner_id.def_id);
+    visit::AstHirVisitor::visit_fn(&mut collector, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
+
+    BodyResolutions {
+        tcx: collector.tcx,
+        node_id_to_hir_id: collector.node_id_to_hir_id,
+        hir_id_to_node_id: collector.hir_id_to_node_id,
     }
 }
 

@@ -66,9 +66,9 @@ fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: 
     );
 }
 
-fn print_graph<'tcx: 'op, 'trg: 'op, 'm: 'op, 'op, N, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations_iter: N, edge_iter: E, format: config::GraphFormat)
+fn print_graph<'trg: 'op, 'm: 'op, 'op, N, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations_iter: N, edge_iter: E, format: config::GraphFormat)
 where
-    N: IntoIterator<Item = &'op Mut<'tcx, 'trg, 'm>>,
+    N: IntoIterator<Item = &'op Mut<'trg, 'm>>,
     E: IntoIterator<Item = (MutId, MutId)>,
 {
     match format {
@@ -201,16 +201,16 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
             };
 
             queries.global_ctxt()?.enter(|tcx| {
-                let (mut generated_crate_ast, resolutions) = {
+                let (mut generated_crate_ast, def_res) = {
                     let (resolver, expanded_crate_ast) = &*tcx.resolver_for_lowering(()).borrow();
-                    let resolutions = mutest_emit::analysis::ast_lowering::Resolutions::from_resolver(resolver);
+                    let def_res = mutest_emit::analysis::ast_lowering::DefResolutions::from_resolver(resolver);
 
                     // TODO: Generate code based on the original, unexpanded AST instead of the
                     //       expanded AST which may contain invalid code that is not equivalent due
                     //       to macro hygiene.
                     let generated_crate_ast = (**expanded_crate_ast).clone();
 
-                    (generated_crate_ast, resolutions)
+                    (generated_crate_ast, def_res)
                 };
 
                 let tests = mutest_emit::analysis::tests::collect_tests(&generated_crate_ast);
@@ -218,7 +218,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 tcx.analysis(())?;
 
                 let t_target_analysis_start = Instant::now();
-                let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, &resolutions, &generated_crate_ast, &tests, opts.mutation_depth);
+                let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, opts.mutation_depth);
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
                 if let config::Mode::PrintMutationTargets = opts.mode {
@@ -233,7 +233,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 let t_mutation_analysis_start = Instant::now();
-                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &resolutions, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
+                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting);
                 if opts.verbosity >= 1 {
                     println!("generated {} mutations", mutations.len());
                 }

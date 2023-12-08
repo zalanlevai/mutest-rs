@@ -2,7 +2,6 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 use rustc_hash::{FxHashSet, FxHashMap};
-use rustc_middle::hir::nested_filter::OnlyBodies;
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 use smallvec::{SmallVec, smallvec};
@@ -22,49 +21,40 @@ use crate::codegen::symbols::hygiene::AstPass;
 use crate::codegen::tool_attr;
 
 #[derive(Clone)]
-pub struct Lowered<A, H> {
-    pub ast: A,
-    pub hir: H,
+pub enum MutLoc {
+    Fn(ast::FnItem),
+    FnParam(ast::Param, ast::FnItem),
+    FnBodyStmt(ast::Stmt, ast::FnItem),
+    FnBodyExpr(ast::Expr, ast::FnItem),
 }
 
-pub type LoweredFn<'hir> = Lowered<ast::FnItem, hir::FnItem<'hir>>;
-pub type LoweredParam<'hir> = Lowered<ast::Param, &'hir hir::Param<'hir>>;
-pub type LoweredStmt<'hir> = Lowered<ast::Stmt, &'hir hir::Stmt<'hir>>;
-pub type LoweredExpr<'hir> = Lowered<ast::Expr, &'hir hir::Expr<'hir>>;
-
-#[derive(Clone)]
-pub enum MutLoc<'hir> {
-    Fn(LoweredFn<'hir>),
-    FnParam(LoweredParam<'hir>, LoweredFn<'hir>),
-    FnBodyStmt(LoweredStmt<'hir>, LoweredFn<'hir>),
-    FnBodyExpr(LoweredExpr<'hir>, LoweredFn<'hir>),
-}
-
-impl<'hir> MutLoc<'hir> {
+impl MutLoc {
     pub fn span(&self) -> Span {
         match self {
-            Self::Fn(lowered_fn) => lowered_fn.ast.span,
-            Self::FnParam(lowered_param, _) => lowered_param.ast.span,
-            Self::FnBodyStmt(lowered_stmt, _) => lowered_stmt.ast.span,
-            Self::FnBodyExpr(lowered_expr, _) => lowered_expr.ast.span,
+            Self::Fn(fn_item) => fn_item.span,
+            Self::FnParam(param, _) => param.span,
+            Self::FnBodyStmt(stmt, _) => stmt.span,
+            Self::FnBodyExpr(expr, _) => expr.span,
         }
     }
 
-    pub fn containing_fn(&self) -> Option<&LoweredFn<'hir>> {
+    pub fn containing_fn(&self) -> Option<&ast::FnItem> {
         match self {
-            Self::Fn(lowered_fn) => Some(lowered_fn),
-            Self::FnParam(_, lowered_fn) => Some(lowered_fn),
-            Self::FnBodyStmt(_, lowered_fn) => Some(lowered_fn),
-            Self::FnBodyExpr(_, lowered_fn) => Some(lowered_fn),
+            Self::Fn(fn_item) => Some(fn_item),
+            Self::FnParam(_, fn_item) => Some(fn_item),
+            Self::FnBodyStmt(_, fn_item) => Some(fn_item),
+            Self::FnBodyExpr(_, fn_item) => Some(fn_item),
         }
     }
 }
 
 pub struct MutCtxt<'tcx, 'op> {
     pub tcx: TyCtxt<'tcx>,
-    pub resolutions: &'op ast_lowering::Resolutions,
+    pub def_res: &'op ast_lowering::DefResolutions,
     pub def_site: Span,
-    pub location: &'op MutLoc<'tcx>,
+    pub item_hir: &'op hir::FnItem<'tcx>,
+    pub body_res: &'op ast_lowering::BodyResolutions<'tcx>,
+    pub location: &'op MutLoc,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -142,16 +132,16 @@ impl MutId {
     }
 }
 
-pub struct Mut<'hir, 'trg, 'm> {
+pub struct Mut<'trg, 'm> {
     pub id: MutId,
     pub target: &'trg Target<'trg>,
-    pub location: MutLoc<'hir>,
+    pub location: MutLoc,
     pub is_in_unsafe_block: bool,
     pub mutation: BoxedMutation<'m>,
     pub substs: SmallVec<[SubstDef; 1]>,
 }
 
-impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
+impl<'trg, 'm> Mut<'trg, 'm> {
     pub fn display_name(&self) -> String {
         self.mutation.display_name()
     }
@@ -171,14 +161,14 @@ impl<'hir, 'trg, 'm> Mut<'hir, 'trg, 'm> {
     }
 }
 
-impl<'hir, 'trg, 'm> Eq for Mut<'hir, 'trg, 'm> {}
-impl<'hir, 'trg, 'm> PartialEq for Mut<'hir, 'trg, 'm> {
+impl<'trg, 'm> Eq for Mut<'trg, 'm> {}
+impl<'trg, 'm> PartialEq for Mut<'trg, 'm> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<'hir, 'trg, 'm> Hash for Mut<'hir, 'trg, 'm> {
+impl<'trg, 'm> Hash for Mut<'trg, 'm> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
@@ -214,15 +204,15 @@ impl UnsafeTargeting {
 struct MutationCollector<'tcx, 'op, 'trg, 'm> {
     pub operators: Operators<'op, 'm>,
     pub tcx: TyCtxt<'tcx>,
-    pub resolutions: &'op ast_lowering::Resolutions,
+    pub def_res: &'op ast_lowering::DefResolutions,
     pub def_site: Span,
     pub unsafe_targeting: UnsafeTargeting,
     pub target: Option<&'trg Target<'trg>>,
-    pub current_fn: Option<LoweredFn<'tcx>>,
+    pub current_fn: Option<(ast::FnItem, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
     pub current_closure: Option<hir::BodyId>,
     pub is_in_unsafe_block: bool,
     pub next_mut_index: u32,
-    pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
+    pub mutations: Vec<Mut<'trg, 'm>>,
 }
 
 /// Macro used during mutation collection to apply every mutation operator using the given mutation
@@ -251,165 +241,181 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
     }
 }
 
-impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'op, 'trg, 'm> {
-    fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
-        let ast::visit::FnKind::Fn(ctx, ident, sig, vis, generics, body) = kind else { return; };
-        let fn_ast = ast::FnItem { id, span, ctx, vis: vis.clone(), ident, generics: generics.clone(), sig: sig.clone(), body: body.cloned() };
-
-        let Some(fn_def_id) = self.resolutions.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
-        let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir().get_by_def_id(fn_def_id)) else { unreachable!() };
-
-        let lowered_fn = Lowered { ast: fn_ast, hir: fn_hir };
-
-        register_mutations!(self, MutCtxt {
-            tcx: self.tcx,
-            resolutions: self.resolutions,
-            def_site: self.def_site,
-            location: &MutLoc::Fn(lowered_fn.clone()),
-        });
-
-        let kind_ast = kind;
-        let span_ast = lowered_fn.ast.span;
-        let id_ast = lowered_fn.ast.id;
-        let kind_hir = lowered_fn.hir.kind;
-        let decl_hir = lowered_fn.hir.sig.decl;
-        let body_hir = lowered_fn.hir.body.id();
-        let span_hir = lowered_fn.hir.span;
-        let id_hir = self.tcx.hir().local_def_id_to_hir_id(lowered_fn.hir.owner_id.def_id);
-        self.current_fn = Some(lowered_fn);
-        ast_lowering::visit::AstHirVisitor::visit_fn(self, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
-        self.current_fn = None;
-    }
-}
-
 fn is_local_span(source_map: &SourceMap, sp: Span) -> bool {
     let local_begin = source_map.lookup_byte_offset(sp.lo());
     let local_end = source_map.lookup_byte_offset(sp.hi());
     local_begin.sf.src.is_some() && local_end.sf.src.is_some()
 }
 
-impl<'ast, 'hir, 'op, 'trg, 'm> ast_lowering::visit::AstHirVisitor<'ast, 'hir> for MutationCollector<'hir, 'op, 'trg, 'm> {
-    type NestedFilter = OnlyBodies;
+impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'op, 'trg, 'm> {
+    fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
+        let ast::visit::FnKind::Fn(ctx, ident, sig, vis, generics, body) = kind else { return; };
+        let fn_ast = ast::FnItem { id, span, ctx, vis: vis.clone(), ident, generics: generics.clone(), sig: sig.clone(), body: body.cloned() };
 
-    fn nested_visit_map(&mut self) -> Self::Map {
-        self.tcx.hir()
+        let Some(fn_def_id) = self.def_res.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
+        let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir().get_by_def_id(fn_def_id)) else { unreachable!() };
+
+        let body_res = ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir);
+
+        register_mutations!(self, MutCtxt {
+            tcx: self.tcx,
+            def_res: self.def_res,
+            def_site: self.def_site,
+            item_hir: &fn_hir,
+            body_res: &body_res,
+            location: &MutLoc::Fn(fn_ast.clone()),
+        });
+
+        self.current_fn = Some((fn_ast, fn_hir, body_res));
+        ast::visit::walk_fn(self, kind);
+        self.current_fn = None;
     }
 
-    fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>) {
-        if !is_local_span(self.tcx.sess.source_map(), param_ast.span) { return; };
+    fn visit_param(&mut self, param: &'ast ast::Param) {
+        let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
+        let Some(param_hir) = body_res.hir_param(param) else { unreachable!() };
+
+        if !is_local_span(self.tcx.sess.source_map(), param.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
 
-        if let Some(lowered_fn) = &self.current_fn {
-            // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
-            //        avoid generating leaking, malformed mutations.
-            if let Some(_) = self.current_closure { return; }
+        // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
+        //        avoid generating leaking, malformed mutations.
+        if let Some(_) = self.current_closure { return; }
 
-            let lowered_param = Lowered { ast: param_ast.clone(), hir: param_hir };
+        register_mutations!(self, MutCtxt {
+            tcx: self.tcx,
+            def_res: self.def_res,
+            def_site: self.def_site,
+            item_hir: fn_hir,
+            body_res,
+            location: &MutLoc::FnParam(param.clone(), fn_ast.clone()),
+        });
 
-            register_mutations!(self, MutCtxt {
-                tcx: self.tcx,
-                resolutions: self.resolutions,
-                def_site: self.def_site,
-                location: &MutLoc::FnParam(lowered_param, lowered_fn.clone()),
-            });
-        }
-
-        ast_lowering::visit::walk_param(self, param_ast, param_hir);
+        ast::visit::walk_param(self, param);
     }
 
-    fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
-        if !is_local_span(self.tcx.sess.source_map(), block_ast.span) { return; };
+    fn visit_block(&mut self, block: &'ast ast::Block) {
+        let Some((_fn_ast, _fn_hir, body_res)) = &self.current_fn else { return; };
+        let Some(block_hir) = body_res.hir_block(block) else { unreachable!() };
+
+        if !is_local_span(self.tcx.sess.source_map(), block.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
-        if !self.unsafe_targeting.inside_unsafe() && let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { return; }
+        if !self.unsafe_targeting.inside_unsafe() && let ast::BlockCheckMode::Unsafe(_) = block.rules { return; }
 
         let is_in_unsafe_block = self.is_in_unsafe_block;
-        if let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { self.is_in_unsafe_block = true; }
-        ast_lowering::visit::walk_block(self, block_ast, block_hir);
-        if let ast::BlockCheckMode::Unsafe(_) = block_ast.rules { self.is_in_unsafe_block = is_in_unsafe_block; }
+        if let ast::BlockCheckMode::Unsafe(_) = block.rules { self.is_in_unsafe_block = true; }
+        ast::visit::walk_block(self, block);
+        if let ast::BlockCheckMode::Unsafe(_) = block.rules { self.is_in_unsafe_block = is_in_unsafe_block; }
     }
 
-    fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
-        if !is_local_span(self.tcx.sess.source_map(), stmt_ast.span) { return; };
+    fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+        // The following nodes are not directly associated with any HIR node.
+        match &stmt.kind {
+            ast::StmtKind::Empty => return,
+            // Trailing expression statements are associated with the inner expression.
+            ast::StmtKind::Expr(expr) => return self.visit_expr(expr),
+            _ => {}
+        }
+
+        let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
+        let Some(stmt_hir) = body_res.hir_stmt(stmt) else { unreachable!() };
+
+        if !is_local_span(self.tcx.sess.source_map(), stmt.span) { return; };
         if tool_attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
 
-        if let Some(lowered_fn) = &self.current_fn {
-            // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
-            //        avoid generating leaking, malformed mutations.
-            if let Some(_) = self.current_closure { return; }
+        // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
+        //        avoid generating leaking, malformed mutations.
+        if let Some(_) = self.current_closure { return; }
 
-            let lowered_stmt = Lowered { ast: stmt_ast.clone(), hir: stmt_hir };
+        register_mutations!(self, MutCtxt {
+            tcx: self.tcx,
+            def_res: self.def_res,
+            def_site: self.def_site,
+            item_hir: fn_hir,
+            body_res,
+            location: &MutLoc::FnBodyStmt(stmt.clone(), fn_ast.clone()),
+        });
 
-            register_mutations!(self, MutCtxt {
-                tcx: self.tcx,
-                resolutions: self.resolutions,
-                def_site: self.def_site,
-                location: &MutLoc::FnBodyStmt(lowered_stmt, lowered_fn.clone()),
-            });
-        }
-
-        ast_lowering::visit::walk_stmt(self, stmt_ast, stmt_hir);
+        ast::visit::walk_stmt(self, stmt);
     }
 
-    fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
-        if !is_local_span(self.tcx.sess.source_map(), expr_ast.span) { return; };
-        if tool_attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
-
-        if let Some(lowered_fn) = &self.current_fn {
-            // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
-            //        avoid generating leaking, malformed mutations.
-            if let Some(_) = self.current_closure { return; }
-
-            // Ignore block expressions with only a single nested node, visit the nested node instead.
-            if let ast::ExprKind::Block(block_ast, _) = &expr_ast.kind && block_ast.stmts.len() == 1 {
-                return ast_lowering::visit::walk_expr(self, expr_ast, expr_hir);
-            }
-
-            let lowered_expr = Lowered { ast: expr_ast.clone(), hir: expr_hir };
-
-            register_mutations!(self, MutCtxt {
-                tcx: self.tcx,
-                resolutions: self.resolutions,
-                def_site: self.def_site,
-                location: &MutLoc::FnBodyExpr(lowered_expr, lowered_fn.clone()),
-            });
+    fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        // The following nodes are not directly associated with any HIR node.
+        match &expr.kind {
+            ast::ExprKind::Paren(expr) => return self.visit_expr(expr),
+            _ => {}
         }
 
-        let current_closure = self.current_closure;
-        if let hir::ExprKind::Closure(&hir::Closure { body, ..  }) = expr_hir.kind { self.current_closure = Some(body); }
+        let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
+        let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
 
-        match (&expr_ast.kind, &expr_hir.kind) {
+        if !is_local_span(self.tcx.sess.source_map(), expr.span) { return; };
+        if tool_attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
+
+        // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
+        //        avoid generating leaking, malformed mutations.
+        if let Some(_) = self.current_closure { return; }
+
+        // Ignore block expressions with only a single nested node, visit the nested node instead.
+        if let ast::ExprKind::Block(block_ast, _) = &expr.kind && block_ast.stmts.len() == 1 {
+            return ast::visit::walk_expr(self, expr);
+        }
+
+        register_mutations!(self, MutCtxt {
+            tcx: self.tcx,
+            def_res: self.def_res,
+            def_site: self.def_site,
+            item_hir: fn_hir,
+            body_res,
+            location: &MutLoc::FnBodyExpr(expr.clone(), fn_ast.clone()),
+        });
+
+        let current_closure = self.current_closure;
+        if let hir::ExprKind::Closure(&hir::Closure { body, .. }) = expr_hir.kind { self.current_closure = Some(body); }
+
+        match &expr.kind {
             // The left-hand side of assignment expressions only supports a strict subset of expressions, not including
             // the branching match expressions we use for substitutions, so we only mutate the right-hand side.
-            (ast::ExprKind::Assign(_lhs_ast, rhs_ast, _), hir::ExprKind::Assign(_lhs_hir, rhs_hir, _)) => {
-                ast_lowering::visit::visit_matching_expr(self, rhs_ast, rhs_hir);
+            ast::ExprKind::Assign(_lhs, rhs, _) | ast::ExprKind::AssignOp(_, _lhs, rhs) => {
+                self.visit_expr(rhs);
             }
-            (ast::ExprKind::AssignOp(_, _lhs_ast, rhs_ast), hir::ExprKind::AssignOp(_, _lhs_hir, rhs_hir)) => {
-                ast_lowering::visit::visit_matching_expr(self, rhs_ast, rhs_hir);
+            ast::ExprKind::Match(expr, arms) => {
+                self.visit_expr(expr);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard { self.visit_expr(guard); }
+                    self.visit_expr(&arm.body);
+                }
             }
             // The `else` branch of an `if` conditional must be either another `if` conditional or a block, so we do
             // not mutate `else` blocks directly, instead visiting its contents.
-            (ast::ExprKind::If(_, _, _), hir::ExprKind::If(_, _, _)) => {
-                fn inner_visit_if<'ast, 'hir, T: ast_lowering::visit::AstHirVisitor<'ast, 'hir>>(visitor: &mut T, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
-                    let ast::ExprKind::If(cond_ast, then_ast, els_ast) = &expr_ast.kind else { unreachable!() };
-                    let hir::ExprKind::If(cond_hir, then_hir, els_hir) = &expr_hir.kind else { unreachable!() };
+            ast::ExprKind::If(_, _, _) => {
+                fn inner_visit_if<'ast, T: ast::visit::Visitor<'ast>>(visitor: &mut T, expr: &'ast ast::Expr) {
+                    let ast::ExprKind::If(cond, then, els) = &expr.kind else { unreachable!() };
 
-                    ast_lowering::visit::visit_matching_expr(visitor, cond_ast, cond_hir);
-                    ast_lowering::visit::visit_block_expr(visitor, then_ast, then_hir);
-                    if let Some(els_ast) = els_ast && let Some(els_hir) = els_hir {
-                        match &els_ast.kind {
-                            ast::ExprKind::If(_, _, _) => inner_visit_if(visitor, els_ast, els_hir),
-                            ast::ExprKind::Block(_, _) => ast_lowering::visit::walk_expr(visitor, els_ast, els_hir),
+                    visitor.visit_expr(cond);
+                    visitor.visit_block(then);
+                    if let Some(els) = els {
+                        match &els.kind {
+                            ast::ExprKind::If(_, _, _) => inner_visit_if(visitor, els),
+                            ast::ExprKind::Block(_, _) => ast::visit::walk_expr(visitor, els),
                             _ => unreachable!("the else branch of an if expression can only be another if (else if) or a block (else)"),
                         }
                     }
                 }
 
-                inner_visit_if(self, expr_ast, expr_hir);
+                inner_visit_if(self, expr);
             }
-            _ => ast_lowering::visit::walk_expr(self, expr_ast, expr_hir),
+            _ => ast::visit::walk_expr(self, expr),
         }
 
         if let hir::ExprKind::Closure(_) = expr_hir.kind { self.current_closure = current_closure; }
+    }
+
+    fn visit_attribute(&mut self, _attr: &'ast ast::Attribute) {}
+
+    fn visit_ty(&mut self, _ty: &'ast ast::Ty) {
+        // NOTE: We do not want to visit types, specifically expressions within them, since we cannot match them
+        //       against HIR nodes.
     }
 }
 
@@ -490,7 +496,7 @@ impl<'tst> Target<'tst> {
     }
 }
 
-pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowering::Resolutions, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
+pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
     type Callee<'tcx> = (hir::LocalDefId, ty::GenericArgsRef<'tcx>);
 
     /// A map from each entry point to the most severe unsafety source of any call path in its current call tree walk.
@@ -516,7 +522,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowe
     let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
     for test in tests {
-        let Some(def_id) = resolutions.node_id_to_def_id.get(&test.item.id).copied() else { continue; };
+        let Some(def_id) = def_res.node_id_to_def_id.get(&test.item.id).copied() else { continue; };
         let body = tcx.hir().body(tcx.hir().get_by_def_id(def_id).body_id().unwrap());
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
@@ -613,7 +619,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowe
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, resolutions: &ast_lowering::Resolutions, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting) -> Vec<Mut<'tcx, 'trg, 'm>> {
+pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting) -> Vec<Mut<'trg, 'm>> {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
         DUMMY_SP,
@@ -624,7 +630,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, res
     let mut collector = MutationCollector {
         operators: ops,
         tcx,
-        resolutions,
+        def_res,
         def_site,
         unsafe_targeting,
         target: None,
@@ -663,12 +669,12 @@ impl MutantId {
     }
 }
 
-pub struct Mutant<'tcx, 'trg, 'm> {
+pub struct Mutant<'trg, 'm> {
     pub id: MutantId,
-    pub mutations: Vec<Mut<'tcx, 'trg, 'm>>,
+    pub mutations: Vec<Mut<'trg, 'm>>,
 }
 
-impl<'tcx, 'trg, 'm> Mutant<'tcx, 'trg, 'm> {
+impl<'trg, 'm> Mutant<'trg, 'm> {
     pub fn iter_mutations(&self) -> impl Iterator<Item = &BoxedMutation<'m>> {
         self.mutations.iter().map(|m| &m.mutation)
     }
@@ -749,7 +755,7 @@ impl<'m, 'op> Iterator for MutationConflictGraphCompatibilityIter<'m, 'op> {
     }
 }
 
-pub fn generate_mutation_conflict_graph<'tcx, 'trg, 'm>(mutations: &[Mut<'tcx, 'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> MutationConflictGraph<'m> {
+pub fn generate_mutation_conflict_graph<'trg, 'm>(mutations: &[Mut<'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> MutationConflictGraph<'m> {
     let mut unsafes: FxHashSet<MutId> = Default::default();
     let mut conflicts: FxHashSet<(MutId, MutId)> = Default::default();
 
@@ -780,11 +786,11 @@ pub fn generate_mutation_conflict_graph<'tcx, 'trg, 'm>(mutations: &[Mut<'tcx, '
     MutationConflictGraph { n_mutations, unsafes, conflicts, phantom: PhantomData }
 }
 
-pub enum MutationBatchesValidationError<'tcx, 'trg, 'm> {
-    ConflictingMutationsInBatch(&'m Mutant<'tcx, 'trg, 'm>, SmallVec<[&'m Mut<'tcx, 'trg, 'm>; 2]>),
+pub enum MutationBatchesValidationError<'trg, 'm> {
+    ConflictingMutationsInBatch(&'m Mutant<'trg, 'm>, SmallVec<[&'m Mut<'trg, 'm>; 2]>),
 }
 
-pub fn validate_mutation_batches<'tcx, 'trg, 'm>(mutants: &'m [Mutant<'tcx, 'trg, 'm>], mutation_conflict_graph: &MutationConflictGraph<'m>) -> Result<(), Vec<MutationBatchesValidationError<'tcx, 'trg, 'm>>> {
+pub fn validate_mutation_batches<'trg, 'm>(mutants: &'m [Mutant<'trg, 'm>], mutation_conflict_graph: &MutationConflictGraph<'m>) -> Result<(), Vec<MutationBatchesValidationError<'trg, 'm>>> {
     use MutationBatchesValidationError::*;
 
     let mut errors = vec![];
@@ -804,7 +810,7 @@ pub fn validate_mutation_batches<'tcx, 'trg, 'm>(mutants: &'m [Mutant<'tcx, 'trg
     Err(errors)
 }
 
-pub fn batch_mutations_greedy<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+pub fn batch_mutations_greedy<'trg, 'm>(mut mutations: Vec<Mut<'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize) -> Vec<Mutant<'trg, 'm>> {
     let mutation_conflict_heuristic = mutations.iter()
         .map(|mutation| {
             let mut conflict_heuristic = 0_usize;
@@ -823,7 +829,7 @@ pub fn batch_mutations_greedy<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg,
 
     mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)).reverse());
 
-    let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
+    let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
     let mut next_mutant_index = 1;
 
     for mutation in mutations {
@@ -855,10 +861,10 @@ pub fn batch_mutations_greedy<'tcx, 'trg, 'm>(mut mutations: Vec<Mut<'tcx, 'trg,
 }
 
 #[cfg(feature = "random")]
-pub fn batch_mutations_random<'tcx, 'trg, 'm>(mutations: Vec<Mut<'tcx, 'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize, rng: &mut impl rand::Rng, random_attempts: usize) -> Vec<Mutant<'tcx, 'trg, 'm>> {
+pub fn batch_mutations_random<'trg, 'm>(mutations: Vec<Mut<'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize, rng: &mut impl rand::Rng, random_attempts: usize) -> Vec<Mutant<'trg, 'm>> {
     use rand::prelude::*;
 
-    let mut mutants: Vec<Mutant<'tcx, 'trg, 'm>> = vec![];
+    let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
     let mut next_mutant_index = 1;
 
     for mutation in mutations {

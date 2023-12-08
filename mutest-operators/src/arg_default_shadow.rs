@@ -33,24 +33,25 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
     type Mutation = ArgDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
 
         let MutLoc::FnParam(param, f) = location else { return None; };
 
-        if param.ast.is_self() { return None; };
+        if param.is_self() { return None; };
 
         let ast::PatKind::Ident(
             ast::BindingAnnotation(_, param_mutbl),
             param_ident,
             _,
-        ) = param.ast.pat.kind else { return None; };
+        ) = param.pat.kind else { return None; };
 
-        let Some(body) = &f.ast.body else { return None; };
+        let Some(body) = &f.body else { return None; };
         let Some(first_item) = body.stmts.first() else { return None; };
 
-        let typeck = tcx.typeck_body(f.hir.body.id());
+        let typeck = tcx.typeck_body(f_hir.body.id());
 
-        let param_ty = typeck.pat_ty(param.hir.pat);
+        let Some(param_hir) = body_res.hir_param(param) else { unreachable!() };
+        let param_ty = typeck.pat_ty(param_hir.pat);
         if !ty::impls_trait(tcx, param_ty, res::traits::Default(tcx), vec![]) { return None; }
 
         // Default::default();
@@ -62,7 +63,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
             SubstDef::new(
                 SubstLoc::InsertBefore(first_item.id),
                 // let $param: $ty = Default::default();
-                Subst::AstLocal(param_ident, param_mutbl, Some(param.ast.ty.clone()), default, None),
+                Subst::AstLocal(param_ident, param_mutbl, Some(param.ty.clone()), default, None),
             ),
         ]))
     }

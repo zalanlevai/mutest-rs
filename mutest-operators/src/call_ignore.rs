@@ -72,17 +72,18 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
     type Mutation = CallValueDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
 
-        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.ast.kind else { return None; };
+        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return None; };
 
+        let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let Some((callee, expr_ty)) = non_default_call(
             tcx,
-            f.hir.owner_id.to_def_id(),
-            f.hir.body.id(),
-            expr.hir,
+            f_hir.owner_id.to_def_id(),
+            f_hir.body.id(),
+            expr_hir,
             self.limit_scope_to_local_callees,
         ) else { return None; };
 
@@ -94,7 +95,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
         // { let _: $ty = $expr; Default::default() }
         let shadow_scope = ast::mk::expr_block(ast::mk::block(def, thin_vec![
-            ast::mk::stmt_let(def, false, Ident::new(kw::Underscore, def), Some(expr_ty_ast), P(expr.ast.clone())),
+            ast::mk::stmt_let(def, false, Ident::new(kw::Underscore, def), Some(expr_ty_ast), P(expr.clone())),
             ast::mk::stmt_expr(default),
         ]));
 
@@ -104,7 +105,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.ast.id),
+                SubstLoc::Replace(expr.id),
                 Subst::AstExpr(shadow_scope.into_inner()),
             ),
         ]))
@@ -137,17 +138,18 @@ impl<'a> Operator<'a> for CallDelete {
     type Mutation = CallDeleteMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
 
-        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.ast.kind else { return None; };
+        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return None; };
 
+        let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let Some((callee, _)) = non_default_call(
             tcx,
-            f.hir.owner_id.to_def_id(),
-            f.hir.body.id(),
-            expr.hir,
+            f_hir.owner_id.to_def_id(),
+            f_hir.body.id(),
+            expr_hir,
             self.limit_scope_to_local_callees,
         ) else { return None; };
 
@@ -160,7 +162,7 @@ impl<'a> Operator<'a> for CallDelete {
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.ast.id),
+                SubstLoc::Replace(expr.id),
                 Subst::AstExpr(default.into_inner()),
             ),
         ]))

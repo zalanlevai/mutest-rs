@@ -46,11 +46,11 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
     type Mutation = ContinueBreakSwapMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx: _, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
 
-        let swapped_expr = match &expr.ast.kind {
+        let swapped_expr = match &expr.kind {
             ast::ExprKind::Continue(label) => {
                 ast::mk::expr(def, ast::ExprKind::Break(*label, None))
             }
@@ -61,13 +61,13 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
         };
 
         let mutation = Self::Mutation {
-            original_expr: expr.ast.kind.clone(),
+            original_expr: expr.kind.clone(),
             replacement_expr: swapped_expr.kind.clone(),
         };
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.ast.id),
+                SubstLoc::Replace(expr.id),
                 Subst::AstExpr(swapped_expr.into_inner()),
             ),
         ]))

@@ -25,26 +25,27 @@ impl<'a> Operator<'a> for BoolExprNegate {
     type Mutation = BoolExprNegateMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
 
-        if let ast::ExprKind::Let(_, _, _, _) = expr.ast.kind { return None; };
+        if let ast::ExprKind::Let(_, _, _, _) = expr.kind { return None; };
 
-        let typeck = tcx.typeck_body(f.hir.body.id());
+        let typeck = tcx.typeck_body(f_hir.body.id());
 
-        let expr_ty = typeck.expr_ty(expr.hir);
+        let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
+        let expr_ty = typeck.expr_ty(expr_hir);
         if expr_ty != tcx.types.bool { return None; }
 
-        let negated_expr = ast::mk::expr_unary(def, ast::UnOp::Not, P(expr.ast.clone()));
+        let negated_expr = ast::mk::expr_unary(def, ast::UnOp::Not, P(expr.clone()));
 
         let mutation = Self::Mutation {
-            was_negated: matches!(&expr.ast.kind, ast::ExprKind::Unary(ast::UnOp::Not, _)),
+            was_negated: matches!(&expr.kind, ast::ExprKind::Unary(ast::UnOp::Not, _)),
         };
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.ast.id),
+                SubstLoc::Replace(expr.id),
                 Subst::AstExpr(negated_expr.into_inner()),
             ),
         ]))

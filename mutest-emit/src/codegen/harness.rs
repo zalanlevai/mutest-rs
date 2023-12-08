@@ -224,7 +224,7 @@ fn mk_harness_fn(sp: Span) -> P<ast::Item> {
 struct HarnessGenerator<'tcx, 'trg, 'm> {
     sess: &'tcx Session,
     unsafe_targeting: UnsafeTargeting,
-    mutants: &'m [Mutant<'tcx, 'trg, 'm>],
+    mutants: &'m [Mutant<'trg, 'm>],
     def_site: Span,
 }
 

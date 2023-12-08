@@ -30,11 +30,11 @@ impl<'a> Operator<'a> for EqOpInvert {
     type Mutation = EqOpInvertMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx: _, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, ref location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
 
-        let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.ast.kind else { return None; };
+        let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.kind else { return None; };
 
         let inverted_bin_op = match bin_op.node {
             ast::BinOpKind::Eq => ast::BinOpKind::Ne,
@@ -50,7 +50,7 @@ impl<'a> Operator<'a> for EqOpInvert {
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.ast.id),
+                SubstLoc::Replace(expr.id),
                 Subst::AstExpr(inverted_bin_expr.into_inner()),
             ),
         ]))

@@ -26,11 +26,11 @@ impl<'a> Operator<'a> for RangeLimitSwap {
     type Mutation = RangeLimitSwapMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
+        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
 
-        let ast::ExprKind::Range(start, end, limits) = &expr.ast.kind else { return None; };
+        let ast::ExprKind::Range(start, end, limits) = &expr.kind else { return None; };
 
         let swapped_limits = match (start, end, limits) {
             | (None, Some(_), ast::RangeLimits::HalfOpen)
@@ -59,9 +59,10 @@ impl<'a> Operator<'a> for RangeLimitSwap {
         //       ast::mk::expr_range(def, start.clone(), end.clone(), swapped_limits);
         //       ```
         let swapped_limits_range_expr = {
-            let typeck = tcx.typeck_body(f.hir.body.id());
+            let typeck = tcx.typeck_body(f_hir.body.id());
 
-            let range_ty = typeck.node_type(expr.hir.hir_id);
+            let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
+            let range_ty = typeck.node_type(expr_hir.hir_id);
             let ty::TyKind::Adt(_, range_ty_generics) = range_ty.kind() else { unreachable!() };
             let range_bound_ty = range_ty_generics.type_at(0);
             if !range_bound_ty.is_integral() { return None; }
@@ -86,7 +87,7 @@ impl<'a> Operator<'a> for RangeLimitSwap {
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.ast.id),
+                SubstLoc::Replace(expr.id),
                 Subst::AstExpr(swapped_limits_range_expr.into_inner()),
             ),
         ]))

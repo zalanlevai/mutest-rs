@@ -70,21 +70,22 @@ macro define_op_swap_operator(
         type Mutation = $mutation;
 
         fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-            let MutCtxt { tcx, resolutions: _, def_site: def, ref location } = *mcx;
+            let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
 
-            let MutLoc::FnBodyExpr(expr, f) = location else { return None; };
+            let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
 
-            let (bin_op, op_kind) = match &expr.ast.kind {
+            let (bin_op, op_kind) = match &expr.kind {
                 ast::ExprKind::Binary(bin_op, _, _) => (bin_op.node, OpKind::Standalone),
                 ast::ExprKind::AssignOp(bin_op, _, _) => (bin_op.node, OpKind::Assign),
                 _ => { return None; }
             };
 
-            let param_env = tcx.param_env(f.hir.owner_id.def_id);
-            let typeck = tcx.typeck_body(f.hir.body.id());
+            let param_env = tcx.param_env(f_hir.owner_id.def_id);
+            let typeck = tcx.typeck_body(f_hir.body.id());
 
-            let expr_ty = typeck.expr_ty(expr.hir);
-            let (lhs_ty, rhs_ty) = match expr.hir.kind {
+            let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
+            let expr_ty = typeck.expr_ty(expr_hir);
+            let (lhs_ty, rhs_ty) = match expr_hir.kind {
                 | hir::ExprKind::Binary(_, lhs, rhs)
                 | hir::ExprKind::AssignOp(_, lhs, rhs) => {
                     (typeck.expr_ty(lhs), typeck.expr_ty(rhs))
@@ -103,7 +104,7 @@ macro define_op_swap_operator(
                 _ => { return None; }
             };
 
-            let mapped_bin_expr = match &expr.ast.kind {
+            let mapped_bin_expr = match &expr.kind {
                 ast::ExprKind::Binary(_, lhs, rhs) => ast::mk::expr_binary(def, mapped_bin_op, lhs.clone(), rhs.clone()),
                 ast::ExprKind::AssignOp(_, lhs, rhs) => ast::mk::expr_assign_op(def, mapped_bin_op, lhs.clone(), rhs.clone()),
                 _ => unreachable!(),
@@ -117,7 +118,7 @@ macro define_op_swap_operator(
 
             Some((mutation, smallvec![
                 SubstDef::new(
-                    SubstLoc::Replace(expr.ast.id),
+                    SubstLoc::Replace(expr.id),
                     Subst::AstExpr(mapped_bin_expr.into_inner()),
                 ),
             ]))
