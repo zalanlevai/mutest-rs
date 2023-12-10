@@ -202,18 +202,18 @@ impl UnsafeTargeting {
 }
 
 struct MutationCollector<'tcx, 'op, 'trg, 'm> {
-    pub operators: Operators<'op, 'm>,
-    pub tcx: TyCtxt<'tcx>,
-    pub def_res: &'op ast_lowering::DefResolutions,
-    pub def_site: Span,
-    pub unsafe_targeting: UnsafeTargeting,
-    pub verbosity: u8,
-    pub target: Option<&'trg Target<'trg>>,
-    pub current_fn: Option<(ast::FnItem, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
-    pub current_closure: Option<hir::BodyId>,
-    pub is_in_unsafe_block: bool,
-    pub next_mut_index: u32,
-    pub mutations: Vec<Mut<'trg, 'm>>,
+    operators: Operators<'op, 'm>,
+    tcx: TyCtxt<'tcx>,
+    def_res: &'op ast_lowering::DefResolutions,
+    def_site: Span,
+    unsafe_targeting: UnsafeTargeting,
+    verbosity: u8,
+    target: Option<&'trg Target<'trg>>,
+    current_fn: Option<(ast::FnItem, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
+    current_closure: Option<hir::BodyId>,
+    is_in_unsafe_block: bool,
+    next_mut_index: u32,
+    mutations: Vec<Mut<'trg, 'm>>,
 }
 
 /// Macro used during mutation collection to apply every mutation operator using the given mutation

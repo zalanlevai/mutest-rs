@@ -138,9 +138,9 @@ pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, original: Option<a
 }
 
 struct SubstWriter<'tcx, 'op> {
-    pub sess: &'tcx Session,
-    pub substitutions: FxHashMap<SubstLoc, Vec<(MutId, &'op Subst)>>,
-    pub def_site: Span,
+    sess: &'tcx Session,
+    substitutions: FxHashMap<SubstLoc, Vec<(MutId, &'op Subst)>>,
+    def_site: Span,
 }
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
