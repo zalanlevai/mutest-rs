@@ -296,7 +296,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                             ConflictingMutationsInBatch(mutant, mutations) => {
                                 let mut diagnostic = sess.struct_err("mutant contains conflicting mutations");
                                 for mutation in mutations {
-                                    diagnostic.span_warn(mutation.location.span(), format!("incompatible mutation: {}", mutation.mutation.span_label()));
+                                    diagnostic.span_warn(mutation.span, format!("incompatible mutation: {}", mutation.mutation.span_label()));
                                 }
                                 diagnostic.emit();
                             }

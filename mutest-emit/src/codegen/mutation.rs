@@ -20,15 +20,15 @@ use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 use crate::codegen::tool_attr;
 
-#[derive(Clone)]
-pub enum MutLoc {
-    Fn(ast::FnItem),
-    FnParam(ast::Param, ast::FnItem),
-    FnBodyStmt(ast::Stmt, ast::FnItem),
-    FnBodyExpr(ast::Expr, ast::FnItem),
+#[derive(Clone, Copy)]
+pub enum MutLoc<'a> {
+    Fn(&'a ast::FnItem),
+    FnParam(&'a ast::Param, &'a ast::FnItem),
+    FnBodyStmt(&'a ast::Stmt, &'a ast::FnItem),
+    FnBodyExpr(&'a ast::Expr, &'a ast::FnItem),
 }
 
-impl MutLoc {
+impl<'a> MutLoc<'a> {
     pub fn span(&self) -> Span {
         match self {
             Self::Fn(fn_item) => fn_item.span,
@@ -54,7 +54,7 @@ pub struct MutCtxt<'tcx, 'op> {
     pub def_site: Span,
     pub item_hir: &'op hir::FnItem<'tcx>,
     pub body_res: &'op ast_lowering::BodyResolutions<'tcx>,
-    pub location: &'op MutLoc,
+    pub location: MutLoc<'op>,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -135,7 +135,7 @@ impl MutId {
 pub struct Mut<'trg, 'm> {
     pub id: MutId,
     pub target: &'trg Target<'trg>,
-    pub location: MutLoc,
+    pub span: Span,
     pub is_in_unsafe_block: bool,
     pub mutation: BoxedMutation<'m>,
     pub substs: SmallVec<[SubstDef; 1]>,
@@ -147,12 +147,12 @@ impl<'trg, 'm> Mut<'trg, 'm> {
     }
 
     pub fn display_location(&self, sess: &Session) -> String {
-        sess.source_map().span_to_embeddable_string(self.location.span())
+        sess.source_map().span_to_embeddable_string(self.span)
     }
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
-        let mut diagnostic = sess.struct_span_warn(self.location.span(), "mutation was not detected");
-        diagnostic.span_label(self.location.span(), self.mutation.span_label());
+        let mut diagnostic = sess.struct_span_warn(self.span, "mutation was not detected");
+        diagnostic.span_label(self.span, self.mutation.span_label());
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
 
@@ -230,7 +230,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
                 $self.mutations.push(Mut {
                     id: MutId($self.next_mut_index),
                     target: $self.target.expect("attempted to collect mutations without a target"),
-                    location: mcx.location.clone(),
+                    span: mcx.location.span(),
                     is_in_unsafe_block: $self.is_in_unsafe_block,
                     mutation,
                     substs,
@@ -273,7 +273,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             def_site: self.def_site,
             item_hir: &fn_hir,
             body_res: &body_res,
-            location: &MutLoc::Fn(fn_ast.clone()),
+            location: MutLoc::Fn(&fn_ast),
         });
 
         self.current_fn = Some((fn_ast, fn_hir, body_res));
@@ -303,7 +303,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             def_site: self.def_site,
             item_hir: fn_hir,
             body_res,
-            location: &MutLoc::FnParam(param.clone(), fn_ast.clone()),
+            location: MutLoc::FnParam(param, fn_ast),
         });
 
         ast::visit::walk_param(self, param);
@@ -358,7 +358,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             def_site: self.def_site,
             item_hir: fn_hir,
             body_res,
-            location: &MutLoc::FnBodyStmt(stmt.clone(), fn_ast.clone()),
+            location: MutLoc::FnBodyStmt(stmt, fn_ast),
         });
 
         ast::visit::walk_stmt(self, stmt);
@@ -397,7 +397,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             def_site: self.def_site,
             item_hir: fn_hir,
             body_res,
-            location: &MutLoc::FnBodyExpr(expr.clone(), fn_ast.clone()),
+            location: MutLoc::FnBodyExpr(expr, fn_ast),
         });
 
         let current_closure = self.current_closure;

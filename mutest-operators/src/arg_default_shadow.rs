@@ -33,7 +33,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
     type Mutation = ArgDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, ref location } = *mcx;
+        let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnParam(param, f) = location else { return None; };
 
