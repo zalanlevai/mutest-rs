@@ -64,6 +64,16 @@ pub enum SubstLoc {
     Replace(ast::NodeId),
 }
 
+impl SubstLoc {
+    pub fn is_dummy(&self) -> bool {
+        match *self {
+            Self::InsertBefore(node_id) => node_id == ast::DUMMY_NODE_ID,
+            Self::InsertAfter(node_id) => node_id == ast::DUMMY_NODE_ID,
+            Self::Replace(node_id) => node_id == ast::DUMMY_NODE_ID,
+        }
+    }
+}
+
 pub enum Subst {
     AstExpr(ast::Expr),
     AstStmt(ast::Stmt),
@@ -689,6 +699,26 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, def
     }
 
     collector.mutations
+}
+
+pub enum MutationError<'trg, 'm> {
+    DummySubsts(&'m Mut<'trg, 'm>, Vec<&'m SubstDef>),
+}
+
+pub fn validate_mutations<'trg, 'm>(mutations: &'m [Mut<'trg, 'm>]) -> Result<(), Vec<MutationError<'trg, 'm>>> {
+    use MutationError::*;
+
+    let mut errors = vec![];
+
+    for mutation in mutations {
+        let dummy_substs = mutation.substs.iter().filter(|s| s.location.is_dummy()).collect::<Vec<_>>();
+        if !dummy_substs.is_empty() {
+            errors.push(DummySubsts(mutation, dummy_substs));
+        }
+    }
+
+    if errors.is_empty() { return Ok(()) }
+    Err(errors)
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

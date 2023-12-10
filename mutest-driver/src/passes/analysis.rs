@@ -239,6 +239,28 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
                 mutation_analysis_duration = t_mutation_analysis_start.elapsed();
 
+                if let Err(errors) = mutest_emit::codegen::mutation::validate_mutations(&mutations) {
+                    for error in &errors {
+                        use mutest_emit::codegen::mutation::MutationError::*;
+                        match error {
+                            DummySubsts(mutation, dummy_substs) => {
+                                let mut diagnostic = sess.struct_err(format!("mutation operator attempted to write {desc}",
+                                    desc = match dummy_substs.len() {
+                                        1 => "dummy substitution".to_owned(),
+                                        n => format!("{n} dummy substitutions"),
+                                    },
+                                ));
+                                diagnostic.set_span(mutation.span);
+                                diagnostic.span_label(mutation.span, format!("invalid mutation: {}", mutation.mutation.span_label()));
+                                diagnostic.emit();
+                            }
+                        }
+                    }
+
+                    println!("found {} mutation errors", errors.len());
+                    FatalError.raise();
+                }
+
                 let t_mutation_batching_start = Instant::now();
 
                 let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
