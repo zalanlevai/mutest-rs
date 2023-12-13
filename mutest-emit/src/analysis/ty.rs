@@ -5,7 +5,6 @@ use rustc_middle::mir;
 use rustc_middle::ty;
 use rustc_middle::ty::print::Printer;
 use rustc_session::cstore::{ExternCrate, ExternCrateSource};
-use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::infer::InferCtxtExt;
 use thin_vec::ThinVec;
 
@@ -191,16 +190,13 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
                         hir::Unsafety::Normal => ast::Unsafe::No,
                         hir::Unsafety::Unsafe => ast::Unsafe::Yes(sp),
                     },
-                    ext: match sig.abi {
-                        Abi::Rust => ast::Extern::Implicit(sp),
-                        _ => ast::Extern::Explicit(ast::StrLit {
-                            span: sp,
-                            style: ast::StrStyle::Cooked,
-                            symbol: Symbol::intern(sig.abi.name()),
-                            symbol_unescaped: Symbol::intern(sig.abi.name()),
-                            suffix: None,
-                        }, DUMMY_SP),
-                    },
+                    ext: ast::Extern::Explicit(ast::StrLit {
+                        span: sp,
+                        style: ast::StrStyle::Cooked,
+                        symbol: Symbol::intern(sig.abi.name()),
+                        symbol_unescaped: Symbol::intern(sig.abi.name()),
+                        suffix: None,
+                    }, DUMMY_SP),
                     generic_params: ThinVec::new(),
                     decl: ast::mk::fn_decl(input_params, ast::FnRetTy::Ty(output_ty_ast)),
                     decl_span: DUMMY_SP,
