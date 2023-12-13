@@ -196,10 +196,15 @@ where
 }
 
 pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Vec<ast::Path> {
+    let root = match def_id.as_local() {
+        Some(_) => (CRATE_DEF_ID.to_def_id(), vec![Ident::new(kw::Crate, DUMMY_SP)]),
+        None => (def_id.krate.as_def_id(), vec![Ident::new(tcx.crate_name(def_id.krate), DUMMY_SP)]),
+    };
+
     let mut paths = vec![];
 
     let mut seen_modules: FxHashSet<hir::DefId> = Default::default();
-    let mut worklist = vec![(CRATE_DEF_ID.to_def_id(), vec![Ident::new(kw::Crate, DUMMY_SP)])];
+    let mut worklist = vec![root];
     while !worklist.is_empty() {
         let mut new_worklist: Vec<(hir::DefId, Vec<Ident>)> = vec![];
 
