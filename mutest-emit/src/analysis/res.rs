@@ -211,6 +211,7 @@ pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Vec<ast::Pa
 
             for mod_child in mod_children {
                 if mod_child.vis != ty::Visibility::Public && mod_child.vis != ty::Visibility::Restricted(CRATE_DEF_ID.to_def_id()) { continue; }
+                if mod_child.ident.name == kw::Underscore { continue; }
 
                 if mod_child.res.opt_def_id() == Some(def_id) {
                     let mut path = mod_path.clone();
