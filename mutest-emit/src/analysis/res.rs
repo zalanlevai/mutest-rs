@@ -1,10 +1,13 @@
 use std::hash::Hash;
 
-use crate::analysis::hir;
+use rustc_hash::FxHashSet;
+
+use crate::analysis::hir::{self, CRATE_DEF_ID};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, TyCtxt};
-use crate::codegen::symbols::Symbol;
+use crate::codegen::ast;
+use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, kw};
 
 pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
     fn item_child_by_symbol(tcx: TyCtxt<'_>, def_id: hir::DefId, symbol: Symbol) -> Option<Res> {
@@ -190,6 +193,49 @@ where
     T: ty::TypeFoldable<TyCtxt<'tcx>>,
 {
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
+}
+
+pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Vec<ast::Path> {
+    let mut paths = vec![];
+
+    let mut seen_modules: FxHashSet<hir::DefId> = Default::default();
+    let mut worklist = vec![(CRATE_DEF_ID.to_def_id(), vec![Ident::new(kw::Crate, DUMMY_SP)])];
+    while !worklist.is_empty() {
+        let mut new_worklist: Vec<(hir::DefId, Vec<Ident>)> = vec![];
+
+        for (mod_def_id, mod_path) in worklist.drain(..) {
+            let mod_children = match mod_def_id.as_local() {
+                Some(mod_def_id) => tcx.module_children_local(mod_def_id),
+                None => tcx.module_children(mod_def_id),
+            };
+
+            for mod_child in mod_children {
+                if mod_child.vis != ty::Visibility::Public && mod_child.vis != ty::Visibility::Restricted(CRATE_DEF_ID.to_def_id()) { continue; }
+
+                if mod_child.res.opt_def_id() == Some(def_id) {
+                    let mut path = mod_path.clone();
+                    path.push(mod_child.ident);
+                    paths.push(ast::mk::path(DUMMY_SP, true, path));
+                }
+
+                match mod_child.res {
+                    Res::Def(DefKind::Mod, child_def_id) => {
+                        if seen_modules.contains(&child_def_id) { continue; }
+                        seen_modules.insert(child_def_id);
+
+                        let mut path = mod_path.clone();
+                        path.push(mod_child.ident);
+                        new_worklist.push((child_def_id, path));
+                    }
+                    _ => {}
+                };
+            }
+        }
+
+        worklist.extend(new_worklist);
+    }
+
+    paths
 }
 
 macro interned {

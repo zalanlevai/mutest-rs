@@ -10,6 +10,7 @@ use rustc_trait_selection::infer::InferCtxtExt;
 use thin_vec::ThinVec;
 
 use crate::analysis::hir::{self, LOCAL_CRATE};
+use crate::analysis::res;
 use crate::codegen::ast::{self, P};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
@@ -484,6 +485,8 @@ impl<'tcx> ty::print::Printer<'tcx> for AstTyPrinter<'tcx> {
 trait PrinterExt<'tcx>: ty::print::Printer<'tcx> + Copy {
     fn path_local_root(self) -> Result<Self::Path, Self::Error>;
 
+    fn print_path(self, path: ast::Path) -> Result<Self::Path, Self::Error>;
+
     fn try_print_visible_def_path(self, def_id: hir::DefId, scoped_item_paths: ScopedItemPaths) -> Result<Option<Self::Path>, Self::Error> {
         fn try_print_visible_def_path_impl<'tcx, T: PrinterExt<'tcx>>(
             printer: T,
@@ -518,27 +521,9 @@ trait PrinterExt<'tcx>: ty::print::Printer<'tcx> + Copy {
                 }
             }
 
-            if def_id.is_local() {
-                if let Some(parent) = printer.tcx().opt_parent(def_id) {
-                    match printer.tcx().def_kind(parent) {
-                        | hir::def::DefKind::Const
-                        | hir::def::DefKind::Static(..)
-                        | hir::def::DefKind::Fn
-                        | hir::def::DefKind::AssocFn => {
-                            match scoped_item_paths {
-                                ScopedItemPaths::Trimmed => {
-                                    let disambiguated_data = printer.tcx().def_key(def_id).disambiguated_data;
-                                    let path = printer.path_append(|_| printer.path_local_root(), &disambiguated_data)?;
-                                    return Ok(Some(path));
-                                }
-                                ScopedItemPaths::FullyQualified => {}
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                return Ok(None);
+            let visible_paths = res::visible_paths(printer.tcx(), def_id);
+            if let Some(visible_path) = visible_paths.into_iter().next() {
+                return Some(printer.print_path(visible_path)).transpose();
             }
 
             let visible_parent_map = printer.tcx().visible_parent_map(());
@@ -596,6 +581,10 @@ trait PrinterExt<'tcx>: ty::print::Printer<'tcx> + Copy {
 impl<'tcx> PrinterExt<'tcx> for AstTyPrinter<'tcx> {
     fn path_local_root(self) -> Result<Self::Path, Self::Error> {
         Ok(ast::Path { span: self.sp, segments: ThinVec::new(), tokens: None })
+    }
+
+    fn print_path(self, path: ast::Path) -> Result<Self::Path, Self::Error> {
+        Ok(path)
     }
 }
 
