@@ -590,6 +590,9 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
         let mut newly_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
         for ((caller_def_id, outer_generic_args), call_paths) in previously_found_callees.drain() {
+            // `const` functions, like other `const` scopes, cannot be mutated.
+            if tcx.is_const_fn(caller_def_id.to_def_id()) { continue; }
+
             let Some(body_id) = tcx.hir().get_by_def_id(caller_def_id).body_id() else { continue; };
             let body = tcx.hir().body(body_id);
 
