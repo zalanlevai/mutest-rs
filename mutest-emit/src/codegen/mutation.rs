@@ -323,7 +323,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let Some((_fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(block_hir) = body_res.hir_block(block) else {
             if self.verbosity >= 1 {
-                return report_unmatched_ast_node(self.tcx, "block", fn_hir.owner_id.def_id, block.span);
+                report_unmatched_ast_node(self.tcx, "block", fn_hir.owner_id.def_id, block.span);
             }
             return;
         };
@@ -350,7 +350,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(stmt_hir) = body_res.hir_stmt(stmt) else {
             if self.verbosity >= 1 {
-                return report_unmatched_ast_node(self.tcx, "statement", fn_hir.owner_id.def_id, stmt.span);
+                report_unmatched_ast_node(self.tcx, "statement", fn_hir.owner_id.def_id, stmt.span);
             }
             return;
         };
@@ -384,7 +384,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(expr_hir) = body_res.hir_expr(expr) else {
             if self.verbosity >= 1 {
-                return report_unmatched_ast_node(self.tcx, "expression", fn_hir.owner_id.def_id, expr.span);
+                report_unmatched_ast_node(self.tcx, "expression", fn_hir.owner_id.def_id, expr.span);
             }
             return;
         };
@@ -419,6 +419,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             ast::ExprKind::Assign(_lhs, rhs, _) | ast::ExprKind::AssignOp(_, _lhs, rhs) => {
                 self.visit_expr(rhs);
             }
+            // Only the matched expression, and each arm's guard and body expressions can be mutated.
             ast::ExprKind::Match(expr, arms) => {
                 self.visit_expr(expr);
                 for arm in arms {
