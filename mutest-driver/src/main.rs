@@ -151,7 +151,17 @@ pub fn main() {
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
         let mutation_batching_algorithm = match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
-            Some("greedy") => config::MutationBatchingAlgorithm::Greedy,
+            None | Some("none") => config::MutationBatchingAlgorithm::None,
+
+            Some("greedy") => {
+                let ordering_heuristic = match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
+                    Some("conflicts") => config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc,
+                    Some("reverse-conflicts") => config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc,
+                    _ => unreachable!(),
+                };
+
+                config::MutationBatchingAlgorithm::Greedy(ordering_heuristic)
+            }
 
             #[cfg(feature = "random")]
             Some("random") => {

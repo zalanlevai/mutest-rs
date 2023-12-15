@@ -17,8 +17,11 @@ pub enum Mode {
     Build,
 }
 
+pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
+
 pub enum MutationBatchingAlgorithm {
-    Greedy,
+    None,
+    Greedy(GreedyMutationBatchingOrderingHeuristic),
 
     #[cfg(feature = "random")]
     Random { seed: Option<[u8; 32]>, attempts: usize },

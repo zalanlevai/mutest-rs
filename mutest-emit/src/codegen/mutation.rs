@@ -898,24 +898,47 @@ pub fn validate_mutation_batches<'trg, 'm>(mutants: &'m [Mutant<'trg, 'm>], muta
     Err(errors)
 }
 
-pub fn batch_mutations_greedy<'trg, 'm>(mut mutations: Vec<Mut<'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize) -> Vec<Mutant<'trg, 'm>> {
-    let mutation_conflict_heuristic = mutations.iter()
-        .map(|mutation| {
-            let mut conflict_heuristic = 0_usize;
+pub fn batch_mutations_dummy<'trg, 'm>(mutations: Vec<Mut<'trg, 'm>>) -> Vec<Mutant<'trg, 'm>> {
+    let mut mutants: Vec<Mutant<'trg, 'm>> = Vec::with_capacity(mutations.len());
+    let mut next_mutant_index = 1;
 
-            for other in &mutations {
-                if mutation == other { continue; }
+    for mutation in mutations {
+        mutants.push(Mutant { id: MutantId(next_mutant_index), mutations: vec![mutation] });
+        next_mutant_index += 1;
+    }
 
-                if mutation_conflict_graph.conflicting_mutations(mutation.id, other.id) {
-                    conflict_heuristic += 1;
-                }
+    mutants
+}
+
+#[derive(Clone, Copy)]
+pub enum GreedyMutationBatchingOrderingHeuristic {
+    ConflictsAsc,
+    ConflictsDesc,
+}
+
+pub fn batch_mutations_greedy<'trg, 'm>(mut mutations: Vec<Mut<'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, ordering_heuristic: GreedyMutationBatchingOrderingHeuristic, mutant_max_mutations_count: usize) -> Vec<Mutant<'trg, 'm>> {
+    use GreedyMutationBatchingOrderingHeuristic::*;
+    match ordering_heuristic {
+        ConflictsAsc | ConflictsDesc => {
+            let mutation_conflict_heuristic = mutations.iter()
+                .map(|mutation| {
+                    let mut conflict_heuristic = 0_usize;
+                    for other in &mutations {
+                        if mutation == other { continue; }
+                        if mutation_conflict_graph.conflicting_mutations(mutation.id, other.id) {
+                            conflict_heuristic += 1;
+                        }
+                    }
+                    (mutation.id, conflict_heuristic)
+                })
+                .collect::<FxHashMap<_, _>>();
+
+            mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)));
+            if let ConflictsDesc = ordering_heuristic {
+                mutations.reverse();
             }
-
-            (mutation.id, conflict_heuristic)
-        })
-        .collect::<FxHashMap<_, _>>();
-
-    mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)).reverse());
+        }
+    }
 
     let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
     let mut next_mutant_index = 1;

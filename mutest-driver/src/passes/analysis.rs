@@ -311,8 +311,11 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 let mutants = match opts.mutation_batching_algorithm {
-                    config::MutationBatchingAlgorithm::Greedy
-                    => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count),
+                    config::MutationBatchingAlgorithm::None
+                    => mutest_emit::codegen::mutation::batch_mutations_dummy(mutations),
+
+                    config::MutationBatchingAlgorithm::Greedy(ordering_heuristic)
+                    => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, ordering_heuristic, opts.mutant_max_mutations_count),
 
                     #[cfg(feature = "random")]
                     config::MutationBatchingAlgorithm::Random { seed, attempts } => {
