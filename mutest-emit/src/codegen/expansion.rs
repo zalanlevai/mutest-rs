@@ -370,8 +370,23 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
         ast::mut_visit::noop_visit_crate(krate, self);
     }
 
+    fn visit_block(&mut self, block: &mut P<ast::Block>) {
+        let items = block.stmts.iter()
+            .filter_map(|stmt| match &stmt.kind { ast::StmtKind::Item(item) => Some(item.clone()), _ => None })
+            .collect::<Vec<_>>();
+
+        // SAFETY: The field's value is restored before the end of the scope; the reference is not used outside of the scope.
+        let items_ref = unsafe { &*(&items as &[_] as *const _) };
+        let original_scope_in_original = mem::replace(&mut self.current_scope_in_original, items_ref);
+        ast::mut_visit::noop_visit_block(block, self);
+        self.current_scope_in_original = original_scope_in_original;
+    }
+
     fn flat_map_item(&mut self, mut item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
         let expn = item.span.ctxt().outer_expn_data();
+
+        // Visit items declared in item bodies (e.g. function bodies).
+        ast::mut_visit::noop_visit_item_kind(&mut item.kind, self);
 
         match expn.kind {
             ExpnKind::Root => {
