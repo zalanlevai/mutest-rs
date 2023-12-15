@@ -3,6 +3,7 @@
 #![feature(if_let_guard)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
+#![feature(lazy_cell)]
 #![feature(let_chains)]
 
 #![feature(rustc_private)]

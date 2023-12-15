@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::{iter, mem};
 use std::path::{self, Path, PathBuf};
 
@@ -303,6 +304,61 @@ pub fn load_modules(sess: &Session, krate: &mut ast::Crate) {
     loader.visit_crate(krate);
 }
 
+fn clone_important_attrs(attrs: &[ast::Attribute]) -> ThinVec<ast::Attribute> {
+    attrs.iter()
+        .filter_map(|attr| {
+            match attr.kind {
+                ast::AttrKind::Normal(_) => Some(attr.clone()),
+                ast::AttrKind::DocComment(_, _) => None,
+            }
+        })
+        .collect::<_>()
+}
+
+fn remove_macro_attrs(attrs: &mut ThinVec<ast::Attribute>) {
+    // HACK: Ideally, we would want to remove all attributes corresponding to procedural macros, but there is no way of
+    //       telling these attributes apart. So instead, we list all the problematic attributes we encounter below:
+    static MACRO_ATTRS: LazyLock<Box<[Symbol]>> = LazyLock::new(|| Box::new([
+        // Derives are removed, since they have already been expanded.
+        sym::derive,
+        // Some derive macros for `core`/`std` have additional marker attributes to influence their behaviour.
+        *sym::default,
+        // Some external derive macros have additional marker attributes to influence their behaviour.
+        Symbol::intern("serde"),
+    ]));
+
+    attrs.retain(|attr| !MACRO_ATTRS.iter().any(|macro_attr| attr.has_name(*macro_attr)))
+}
+
+fn remove_macro_attrs_from_item(item: &mut ast::Item) {
+    remove_macro_attrs(&mut item.attrs);
+
+    match &mut item.kind {
+        | ast::ItemKind::Struct(variant_data, _)
+        | ast::ItemKind::Union(variant_data, _) => {
+            match variant_data {
+                | ast::VariantData::Struct(fields, _)
+                | ast::VariantData::Tuple(fields, _)
+                => {
+                    for field in fields {
+                        remove_macro_attrs(&mut field.attrs);
+                    }
+                }
+
+                ast::VariantData::Unit(_) => {}
+            }
+        }
+
+        ast::ItemKind::Enum(def, _) => {
+            for variant in &mut def.variants {
+                remove_macro_attrs(&mut variant.attrs);
+            }
+        }
+
+        _ => {}
+    }
+}
+
 struct MacroExpansionReverter<'ast> {
     original_crate: &'ast ast::Crate,
     current_scope_in_original: &'ast [P<ast::Item>],
@@ -326,6 +382,7 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                 }
 
                 let Some(original_item) = self.current_scope_in_original.iter().find(|i| i.span == item.span) else {
+                    remove_macro_attrs_from_item(&mut item);
                     return smallvec![item];
                 };
 
@@ -340,7 +397,8 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                 }
 
                 // Copy attributes from original item.
-                item.attrs = original_item.attrs.clone();
+                item.attrs = clone_important_attrs(&original_item.attrs);
+                remove_macro_attrs_from_item(&mut item);
 
                 match &original_item.kind {
                     ast::ItemKind::Mod(_, ast::ModKind::Unloaded) => panic!("encountered unloaded module"),
@@ -379,12 +437,10 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
 
             | ExpnKind::Macro(MacroKind::Attr, _)
             | ExpnKind::Macro(MacroKind::Derive, _) => {
-                // Only remove the macro expansion if we can recover the attributes from the original item.
-                let Some(_original_item) = self.current_scope_in_original.iter().find(|i| i.span_with_attributes().contains(expn.call_site)) else {
-                    return smallvec![item];
-                };
-
-                smallvec![]
+                // HACK: We do not actually revert macro expansions currently, as removing leftover attributes and
+                //       enabling internal features seems to do a better job than previous attempts at reverting
+                //       derive macros.
+                return smallvec![item];
             }
 
             ExpnKind::AstPass(AstPass::StdImports) => smallvec![item],
