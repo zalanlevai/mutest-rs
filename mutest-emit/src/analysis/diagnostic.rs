@@ -18,7 +18,7 @@ pub fn escape_literal(s: &str) -> String {
                 escaped.push(delim);
                 chrs.next();
             }
-            ('"' | '\'', _) => {
+            ('"' | '\'' | '\\', _) => {
                 escaped.push('\\');
                 escaped.push(first)
             }
