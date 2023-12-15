@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use itertools::Itertools;
 use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
@@ -217,8 +218,17 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 tcx.analysis(())?;
 
+                let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx).count();
+
                 let t_target_analysis_start = Instant::now();
                 let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, opts.mutation_depth);
+                if opts.verbosity >= 1 {
+                    println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
+                        reached_pct = targets.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
+                        reached = targets.len(),
+                        total = all_mutable_fns_count,
+                    );
+                }
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
                 if let config::Mode::PrintMutationTargets = opts.mode {
@@ -235,7 +245,15 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let t_mutation_analysis_start = Instant::now();
                 let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting, opts.verbosity);
                 if opts.verbosity >= 1 {
-                    println!("generated {} mutations", mutations.len());
+                    let mutated_fns = mutations.iter().map(|m| m.target.def_id).unique();
+                    let mutated_fns_count = mutated_fns.count();
+
+                    println!("generated {mutations} mutations in {mutated_pct:.2}% of functions ({mutated} out of {total} functions)",
+                        mutations = mutations.len(),
+                        mutated_pct = mutated_fns_count as f64 / all_mutable_fns_count as f64 * 100_f64,
+                        mutated = mutated_fns_count,
+                        total = all_mutable_fns_count,
+                    );
                 }
                 mutation_analysis_duration = t_mutation_analysis_start.elapsed();
 

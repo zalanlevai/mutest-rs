@@ -537,6 +537,27 @@ impl<'tst> Target<'tst> {
     }
 }
 
+/// All functions we can introduce mutations in.
+/// Does not include closures, as they are (currently) considered part of their containing function, rather than
+/// standalone functions. This might change in the future.
+pub fn all_mutable_fns<'tcx>(tcx: TyCtxt<'tcx>) -> impl Iterator<Item = hir::LocalDefId> + 'tcx {
+    tcx.hir_crate_items(()).definitions()
+        .filter(move |&local_def_id| {
+            let def_id = local_def_id.to_def_id();
+            let hir_id = tcx.hir().local_def_id_to_hir_id(local_def_id);
+
+            matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn | hir::DefKind::Generator)
+                // const fn
+                && !tcx.is_const_fn(def_id)
+                // fn;
+                && tcx.hir().get_by_def_id(local_def_id).body_id().is_some()
+                // #[test] functions
+                && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test))
+                // #[mutest::skip] functions
+                && !tool_attr::skip(tcx.hir().attrs(hir_id))
+        })
+}
+
 pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
     type Callee<'tcx> = (hir::LocalDefId, ty::GenericArgsRef<'tcx>);
 

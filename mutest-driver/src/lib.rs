@@ -15,6 +15,8 @@ extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
 
+extern crate itertools;
+
 pub mod config;
 pub mod passes;
 
