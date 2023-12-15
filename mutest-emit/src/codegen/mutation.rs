@@ -342,6 +342,8 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         // The following nodes are not directly associated with any HIR node.
         match &stmt.kind {
             ast::StmtKind::Empty => return,
+            // Nested item declarations are handled like top-level item declarations, and not as children.
+            ast::StmtKind::Item(_item) => return,
             // Trailing expression statements are associated with the inner expression.
             ast::StmtKind::Expr(expr) => return self.visit_expr(expr),
             _ => {}
