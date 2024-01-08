@@ -21,10 +21,31 @@ pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
 
 pub enum MutationBatchingAlgorithm {
     None,
-    Greedy(GreedyMutationBatchingOrderingHeuristic),
+    Greedy { ordering_heuristic: GreedyMutationBatchingOrderingHeuristic, #[cfg(feature = "random")] epsilon: Option<f64> },
 
     #[cfg(feature = "random")]
-    Random { seed: Option<[u8; 32]>, attempts: usize },
+    Random,
+}
+
+#[cfg(feature = "random")]
+pub type RandomSeed = [u8; 32];
+
+#[cfg(feature = "random")]
+pub struct MutationBatchingRandomness {
+    pub seed: Option<RandomSeed>,
+    pub attempts: usize,
+}
+
+#[cfg(feature = "random")]
+impl MutationBatchingRandomness {
+    pub fn rng(&self) -> impl rand::Rng {
+        use rand::prelude::*;
+
+        match self.seed {
+            Some(seed) => StdRng::from_seed(seed),
+            None => StdRng::from_entropy(),
+        }
+    }
 }
 
 pub struct Options<'op, 'm> {
@@ -35,6 +56,7 @@ pub struct Options<'op, 'm> {
     pub operators: Operators<'op, 'm>,
     pub mutation_depth: usize,
     pub mutation_batching_algorithm: MutationBatchingAlgorithm,
+    #[cfg(feature = "random")] pub mutation_batching_randomness: MutationBatchingRandomness,
     pub mutant_max_mutations_count: usize,
 }
 

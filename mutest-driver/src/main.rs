@@ -160,22 +160,28 @@ pub fn main() {
                     _ => unreachable!(),
                 };
 
-                config::MutationBatchingAlgorithm::Greedy(ordering_heuristic)
+                #[cfg(feature = "random")]
+                let epsilon = mutest_arg_matches.get_one::<f64>("mutant-batch-greedy-epsilon").copied();
+
+                config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, #[cfg(feature = "random")] epsilon }
             }
 
             #[cfg(feature = "random")]
-            Some("random") => {
-                use rand_seeder::Seeder;
-
-                let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
-                let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<[u8; 32]>());
-
-                let attempts = *mutest_arg_matches.get_one::<usize>("mutant-batch-random-attempts").unwrap();
-
-                config::MutationBatchingAlgorithm::Random { seed, attempts }
-            }
+            Some("random") => config::MutationBatchingAlgorithm::Random,
 
             _ => unreachable!(),
+        };
+
+        #[cfg(feature = "random")]
+        let mutation_batching_randomness = {
+            use rand_seeder::Seeder;
+
+            let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
+            let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<config::RandomSeed>());
+
+            let attempts = *mutest_arg_matches.get_one::<usize>("mutant-batch-random-attempts").unwrap();
+
+            config::MutationBatchingRandomness { seed, attempts }
         };
 
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
@@ -211,6 +217,7 @@ pub fn main() {
                 ],
                 mutation_depth,
                 mutation_batching_algorithm,
+                #[cfg(feature = "random")] mutation_batching_randomness,
                 mutant_max_mutations_count,
             },
         };

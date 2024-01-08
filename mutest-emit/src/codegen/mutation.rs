@@ -924,6 +924,44 @@ pub fn batch_mutations_dummy<'trg, 'm>(mutations: Vec<Mut<'trg, 'm>>) -> Vec<Mut
     mutants
 }
 
+/// Pick a compatible mutant for the mutation by randomly picking distinct mutants (i.e. without replacement) until a
+/// compatible mutant is rolled, within the specified number of maximum attempts.
+/// If every attempt fails, then the function returns `None`.
+#[cfg(feature = "random")]
+fn pick_random_mutant<'trg, 'm, 'a>(
+    mutation: &Mut<'trg, 'm>,
+    mutants: &'a mut [Mutant<'trg, 'm>],
+    mutation_conflict_graph: &MutationConflictGraph<'m>,
+    mutant_max_mutations_count: usize,
+    rng: &mut impl rand::Rng,
+    random_attempts: usize,
+) -> Option<&'a mut Mutant<'trg, 'm>> {
+    use rand::prelude::*;
+
+    if mutants.is_empty() { return None; }
+
+    // Unsafe mutations are isolated into their own mutant.
+    if mutation_conflict_graph.is_unsafe(mutation.id) { return None; }
+
+    // Sample random mutants to attempt, ensuring that they are all distinct (i.e. without replacement).
+    let idx_attempts = (0..mutants.len()).choose_multiple(rng, random_attempts);
+
+    for idx in idx_attempts {
+        // Pick random mutant, place into, if possible. If not, create new mutant.
+        let mutant = &mutants[idx];
+
+        // Ensure the mutant has not already reached capacity.
+        if mutant.mutations.len() >= mutant_max_mutations_count { continue; }
+
+        // The mutation must not conflict with any other mutation already in the mutant.
+        if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { continue; }
+
+        return Some(&mut mutants[idx]);
+    }
+
+    None
+}
+
 #[derive(Clone, Copy)]
 pub enum GreedyMutationBatchingOrderingHeuristic {
     ConflictsAsc,
@@ -934,6 +972,7 @@ pub fn batch_mutations_greedy<'trg, 'm>(
     mut mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
     ordering_heuristic: GreedyMutationBatchingOrderingHeuristic,
+    #[cfg(feature = "random")] mut epsilon: Option<(f64, &mut impl rand::Rng, usize)>,
     mutant_max_mutations_count: usize,
 ) -> Vec<Mutant<'trg, 'm>> {
     use GreedyMutationBatchingOrderingHeuristic::*;
@@ -967,6 +1006,18 @@ pub fn batch_mutations_greedy<'trg, 'm>(
             // Unsafe mutations are isolated into their own mutant.
             if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
 
+            // Attempt to make a random choice if the optional epsilon parameter is used.
+            #[cfg(feature = "random")]
+            if let Some((epsilon, ref mut rng, random_attempts)) = epsilon {
+                // When using epsilon greedy batching, a random choice with probability epsilon is made for every
+                // mutation. If the random choice is true, then instead of making a greedy choice, a random compatible
+                // mutant is picked the same way as in random batching.
+                if rng.gen_bool(epsilon) {
+                    break 'mutant_candidate pick_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng, random_attempts);
+                }
+            }
+
+            // Pick the first mutant the current mutation is compatible with.
             mutants.iter_mut().find(|mutant| {
                 // Ensure the mutant has not already reached capacity.
                 if mutant.mutations.len() >= mutant_max_mutations_count { return false; }
@@ -998,36 +1049,11 @@ pub fn batch_mutations_random<'trg, 'm>(
     rng: &mut impl rand::Rng,
     random_attempts: usize,
 ) -> Vec<Mutant<'trg, 'm>> {
-    use rand::prelude::*;
-
     let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
     let mut next_mutant_index = 1;
 
     for mutation in mutations {
-        let mutant_candidate = 'mutant_candidate: {
-            if mutants.is_empty() { break 'mutant_candidate None; }
-
-            // Unsafe mutations are isolated into their own mutant.
-            if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
-
-            // Sample random mutants to attempt, ensuring that they are all distinct (i.e. without replacement).
-            let idx_attempts = (0..mutants.len()).choose_multiple(rng, random_attempts);
-
-            for idx in idx_attempts {
-                // Pick random mutant, place into, if possible. If not, create new mutant.
-                let mutant = &mut mutants[idx];
-
-                // Ensure the mutant has not already reached capacity.
-                if mutant.mutations.len() >= mutant_max_mutations_count { continue; }
-
-                // The mutation must not conflict with any other mutation already in the mutant.
-                if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { continue; }
-
-                break 'mutant_candidate Some(mutant);
-            }
-
-            None
-        };
+        let mutant_candidate = pick_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng, random_attempts);
 
         match mutant_candidate {
             Some(mutant) => mutant.mutations.push(mutation),

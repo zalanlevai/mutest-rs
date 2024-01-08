@@ -314,19 +314,23 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     config::MutationBatchingAlgorithm::None
                     => mutest_emit::codegen::mutation::batch_mutations_dummy(mutations),
 
-                    config::MutationBatchingAlgorithm::Greedy(ordering_heuristic)
-                    => mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, ordering_heuristic, opts.mutant_max_mutations_count),
+                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, #[cfg(feature = "random")] epsilon } => {
+                        #[cfg(feature = "random")]
+                        let mut rng = opts.mutation_batching_randomness.rng();
+                        #[cfg(feature = "random")]
+                        let epsilon = epsilon.map(|v| {
+                            if v < 0_f64 || v > 1_f64 { panic!("epsilon must be a valid probability"); }
+                            let random_attempts = opts.mutation_batching_randomness.attempts;
+                            (v, &mut rng, random_attempts)
+                        });
+                        mutest_emit::codegen::mutation::batch_mutations_greedy(mutations, &mutation_conflict_graph, ordering_heuristic, #[cfg(feature = "random")] epsilon, opts.mutant_max_mutations_count)
+                    }
 
                     #[cfg(feature = "random")]
-                    config::MutationBatchingAlgorithm::Random { seed, attempts } => {
-                        use rand::prelude::*;
-
-                        let mut rng = match seed {
-                            Some(seed) => StdRng::from_seed(seed),
-                            None => StdRng::from_entropy(),
-                        };
-
-                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng, attempts)
+                    config::MutationBatchingAlgorithm::Random => {
+                        let mut rng = opts.mutation_batching_randomness.rng();
+                        let random_attempts = opts.mutation_batching_randomness.attempts;
+                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng, random_attempts)
                     }
                 };
 
