@@ -155,8 +155,9 @@ pub fn main() {
 
             Some("greedy") => {
                 let ordering_heuristic = match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
-                    Some("conflicts") => config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc,
-                    Some("reverse-conflicts") => config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc,
+                    None | Some("none") => None,
+                    Some("conflicts") => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
+                    Some("reverse-conflicts") => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
                     _ => unreachable!(),
                 };
 

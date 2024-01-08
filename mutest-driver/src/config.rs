@@ -21,7 +21,7 @@ pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
 
 pub enum MutationBatchingAlgorithm {
     None,
-    Greedy { ordering_heuristic: GreedyMutationBatchingOrderingHeuristic, #[cfg(feature = "random")] epsilon: Option<f64> },
+    Greedy { ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>, #[cfg(feature = "random")] epsilon: Option<f64> },
 
     #[cfg(feature = "random")]
     Random,

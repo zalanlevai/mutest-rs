@@ -971,13 +971,13 @@ pub enum GreedyMutationBatchingOrderingHeuristic {
 pub fn batch_mutations_greedy<'trg, 'm>(
     mut mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
-    ordering_heuristic: GreedyMutationBatchingOrderingHeuristic,
+    ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>,
     #[cfg(feature = "random")] mut epsilon: Option<(f64, &mut impl rand::Rng, usize)>,
     mutant_max_mutations_count: usize,
 ) -> Vec<Mutant<'trg, 'm>> {
     use GreedyMutationBatchingOrderingHeuristic::*;
     match ordering_heuristic {
-        ConflictsAsc | ConflictsDesc => {
+        Some(ConflictsAsc | ConflictsDesc) => {
             let mutation_conflict_heuristic = mutations.iter()
                 .map(|mutation| {
                     let mut conflict_heuristic = 0_usize;
@@ -992,10 +992,12 @@ pub fn batch_mutations_greedy<'trg, 'm>(
                 .collect::<FxHashMap<_, _>>();
 
             mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)));
-            if let ConflictsDesc = ordering_heuristic {
+            if let Some(ConflictsDesc) = ordering_heuristic {
                 mutations.reverse();
             }
         }
+
+        None => {}
     }
 
     let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
