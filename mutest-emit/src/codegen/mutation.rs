@@ -560,7 +560,13 @@ pub fn all_mutable_fns<'tcx>(tcx: TyCtxt<'tcx>) -> impl Iterator<Item = hir::Loc
         })
 }
 
-pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, tests: &'tst [Test], depth: usize) -> Vec<Target<'tst>> {
+pub fn reachable_fns<'ast, 'tcx, 'tst>(
+    tcx: TyCtxt<'tcx>,
+    def_res: &ast_lowering::DefResolutions,
+    krate: &'ast ast::Crate,
+    tests: &'tst [Test],
+    depth: usize,
+) -> Vec<Target<'tst>> {
     type Callee<'tcx> = (hir::LocalDefId, ty::GenericArgsRef<'tcx>);
 
     /// A map from each entry point to the most severe unsafety source of any call path in its current call tree walk.
@@ -686,7 +692,15 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &'ast ast::Crate, targets: &'trg [Target<'trg>], ops: Operators<'_, 'm>, unsafe_targeting: UnsafeTargeting, verbosity: u8) -> Vec<Mut<'trg, 'm>> {
+pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(
+    tcx: TyCtxt<'tcx>,
+    def_res: &ast_lowering::DefResolutions,
+    krate: &'ast ast::Crate,
+    targets: &'trg [Target<'trg>],
+    ops: Operators<'_, 'm>,
+    unsafe_targeting: UnsafeTargeting,
+    verbosity: u8,
+) -> Vec<Mut<'trg, 'm>> {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
         DUMMY_SP,
@@ -916,7 +930,12 @@ pub enum GreedyMutationBatchingOrderingHeuristic {
     ConflictsDesc,
 }
 
-pub fn batch_mutations_greedy<'trg, 'm>(mut mutations: Vec<Mut<'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, ordering_heuristic: GreedyMutationBatchingOrderingHeuristic, mutant_max_mutations_count: usize) -> Vec<Mutant<'trg, 'm>> {
+pub fn batch_mutations_greedy<'trg, 'm>(
+    mut mutations: Vec<Mut<'trg, 'm>>,
+    mutation_conflict_graph: &MutationConflictGraph<'m>,
+    ordering_heuristic: GreedyMutationBatchingOrderingHeuristic,
+    mutant_max_mutations_count: usize,
+) -> Vec<Mutant<'trg, 'm>> {
     use GreedyMutationBatchingOrderingHeuristic::*;
     match ordering_heuristic {
         ConflictsAsc | ConflictsDesc => {
@@ -972,7 +991,13 @@ pub fn batch_mutations_greedy<'trg, 'm>(mut mutations: Vec<Mut<'trg, 'm>>, mutat
 }
 
 #[cfg(feature = "random")]
-pub fn batch_mutations_random<'trg, 'm>(mutations: Vec<Mut<'trg, 'm>>, mutation_conflict_graph: &MutationConflictGraph<'m>, mutant_max_mutations_count: usize, rng: &mut impl rand::Rng, random_attempts: usize) -> Vec<Mutant<'trg, 'm>> {
+pub fn batch_mutations_random<'trg, 'm>(
+    mutations: Vec<Mut<'trg, 'm>>,
+    mutation_conflict_graph: &MutationConflictGraph<'m>,
+    mutant_max_mutations_count: usize,
+    rng: &mut impl rand::Rng,
+    random_attempts: usize,
+) -> Vec<Mutant<'trg, 'm>> {
     use rand::prelude::*;
 
     let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
