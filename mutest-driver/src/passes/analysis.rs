@@ -320,8 +320,8 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         #[cfg(feature = "random")]
                         let epsilon = epsilon.map(|v| {
                             if v < 0_f64 || v > 1_f64 { panic!("epsilon must be a valid probability"); }
-                            let random_attempts = opts.mutation_batching_randomness.attempts;
-                            (v, random_attempts)
+                            let random_choice = opts.mutation_batching_randomness.choice;
+                            (v, random_choice)
                         });
                         mutest_emit::codegen::mutation::batch_mutations_greedy(
                             mutations,
@@ -336,8 +336,8 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     #[cfg(feature = "random")]
                     config::MutationBatchingAlgorithm::Random => {
                         let mut rng = opts.mutation_batching_randomness.rng();
-                        let random_attempts = opts.mutation_batching_randomness.attempts;
-                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng, random_attempts)
+                        let random_choice = opts.mutation_batching_randomness.choice;
+                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, random_choice, &mut rng)
                     }
                 };
 

@@ -17,7 +17,7 @@ pub enum Mode {
     Build,
 }
 
-pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
+pub use mutest_emit::codegen::mutation::{MutationBatchingRandomChoice, GreedyMutationBatchingOrderingHeuristic};
 
 pub enum MutationBatchingAlgorithm {
     None,
@@ -33,7 +33,7 @@ pub type RandomSeed = [u8; 32];
 #[cfg(feature = "random")]
 pub struct MutationBatchingRandomness {
     pub seed: Option<RandomSeed>,
-    pub attempts: usize,
+    pub choice: MutationBatchingRandomChoice,
 }
 
 #[cfg(feature = "random")]
