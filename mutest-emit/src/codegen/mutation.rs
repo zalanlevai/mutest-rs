@@ -966,13 +966,17 @@ fn pick_random_mutant<'trg, 'm, 'a>(
 pub enum GreedyMutationBatchingOrderingHeuristic {
     ConflictsAsc,
     ConflictsDesc,
+
+    #[cfg(feature = "random")]
+    Random,
 }
 
 pub fn batch_mutations_greedy<'trg, 'm>(
     mut mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
     ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>,
-    #[cfg(feature = "random")] mut epsilon: Option<(f64, &mut impl rand::Rng, usize)>,
+    #[cfg(feature = "random")] epsilon: Option<(f64, usize)>,
+    #[cfg(feature = "random")] mut rng: Option<&mut impl rand::Rng>,
     mutant_max_mutations_count: usize,
 ) -> Vec<Mutant<'trg, 'm>> {
     use GreedyMutationBatchingOrderingHeuristic::*;
@@ -997,6 +1001,14 @@ pub fn batch_mutations_greedy<'trg, 'm>(
             }
         }
 
+        #[cfg(feature = "random")]
+        Some(Random) => {
+            use rand::prelude::*;
+            let Some(ref mut rng) = rng else { panic!("random ordering requested but rng not provided") };
+
+            mutations.shuffle(rng);
+        }
+
         None => {}
     }
 
@@ -1010,7 +1022,9 @@ pub fn batch_mutations_greedy<'trg, 'm>(
 
             // Attempt to make a random choice if the optional epsilon parameter is used.
             #[cfg(feature = "random")]
-            if let Some((epsilon, ref mut rng, random_attempts)) = epsilon {
+            if let Some((epsilon, random_attempts)) = epsilon {
+                let Some(ref mut rng) = rng else { panic!("epsilon random choice requested but rng not provided") };
+
                 // When using epsilon greedy batching, a random choice with probability epsilon is made for every
                 // mutation. If the random choice is true, then instead of making a greedy choice, a random compatible
                 // mutant is picked the same way as in random batching.

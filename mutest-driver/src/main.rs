@@ -158,6 +158,10 @@ pub fn main() {
                     None | Some("none") => None,
                     Some("conflicts") => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
                     Some("reverse-conflicts") => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
+
+                    #[cfg(feature = "random")]
+                    Some("random") => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
+
                     _ => unreachable!(),
                 };
 
