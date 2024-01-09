@@ -554,7 +554,7 @@ pub fn all_mutable_fns<'tcx>(tcx: TyCtxt<'tcx>) -> impl Iterator<Item = hir::Loc
                 // fn;
                 && tcx.hir().get_by_def_id(local_def_id).body_id().is_some()
                 // #[test] functions
-                && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test))
+                && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test) || attr.has_name(sym::rustc_test_marker))
                 // #[mutest::skip] functions
                 && !tool_attr::skip(tcx.hir().attrs(hir_id))
         })
