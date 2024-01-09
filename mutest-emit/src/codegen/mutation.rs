@@ -924,6 +924,21 @@ pub fn batch_mutations_dummy<'trg, 'm>(mutations: Vec<Mut<'trg, 'm>>) -> Vec<Mut
     mutants
 }
 
+fn compatible_mutant<'trg, 'm>(
+    mutation: &Mut<'trg, 'm>,
+    mutant: &Mutant<'trg, 'm>,
+    mutation_conflict_graph: &MutationConflictGraph<'m>,
+    mutant_max_mutations_count: usize,
+) -> bool {
+    // Ensure the mutant has not already reached capacity.
+    if mutant.mutations.len() >= mutant_max_mutations_count { return false; }
+
+    // The mutation must not conflict with any other mutation already in the mutant.
+    if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { return false; }
+
+    true
+}
+
 /// Pick a compatible mutant for the mutation by randomly picking distinct mutants (i.e. without replacement) until a
 /// compatible mutant is rolled, within the specified number of maximum attempts.
 /// If every attempt fails, then the function returns `None`.
@@ -948,15 +963,9 @@ fn pick_random_mutant<'trg, 'm, 'a>(
 
     for idx in idx_attempts {
         // Pick random mutant, place into, if possible. If not, create new mutant.
-        let mutant = &mutants[idx];
-
-        // Ensure the mutant has not already reached capacity.
-        if mutant.mutations.len() >= mutant_max_mutations_count { continue; }
-
-        // The mutation must not conflict with any other mutation already in the mutant.
-        if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { continue; }
-
-        return Some(&mut mutants[idx]);
+        if compatible_mutant(mutation, &mutants[idx], mutation_conflict_graph, mutant_max_mutations_count) {
+            return Some(&mut mutants[idx]);
+        }
     }
 
     None
@@ -1034,15 +1043,7 @@ pub fn batch_mutations_greedy<'trg, 'm>(
             }
 
             // Pick the first mutant the current mutation is compatible with.
-            mutants.iter_mut().find(|mutant| {
-                // Ensure the mutant has not already reached capacity.
-                if mutant.mutations.len() >= mutant_max_mutations_count { return false; }
-
-                // The mutation must not conflict with any other mutation already in the mutant.
-                if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { return false; }
-
-                true
-            })
+            mutants.iter_mut().find(|mutant| compatible_mutant(&mutation, mutant, mutation_conflict_graph, mutant_max_mutations_count))
         };
 
         match mutant_candidate {
