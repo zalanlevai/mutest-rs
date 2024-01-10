@@ -46,7 +46,6 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(["greedy", #[cfg(feature = "random")] "random", "none"]).default_value("none").display_order(101))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(101))
         .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(["conflicts", "reverse-conflicts", #[cfg(feature = "random")] "random", "none"]).default_value("reverse-conflicts").display_order(101))
-        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)).display_order(101))
         .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
         .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
         // Information
@@ -58,7 +57,8 @@ pub fn command() -> clap::Command {
     #[cfg(feature = "random")]
     let cmd = cmd
         .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching.").display_order(101))
-        .arg(clap::arg!(--"mutant-batch-random-blind-attempts" [MUTANT_BATCH_RANDOM_BLIND_ATTEMPTS] "Number of blind attempts made to place a mutation into a random mutant for random choice during mutation batching. If 0, then a single random choice is made from all compatible mutants.").default_value("0").value_parser(clap::value_parser!(usize)).display_order(101));
+        .arg(clap::arg!(--"mutant-batch-random-blind-attempts" [MUTANT_BATCH_RANDOM_BLIND_ATTEMPTS] "Number of blind attempts made to place a mutation into a random mutant for random choice during mutation batching. If 0, then a single random choice is made from all compatible mutants.").default_value("0").value_parser(clap::value_parser!(usize)).display_order(101))
+        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)).display_order(101));
 
     cmd
 }
