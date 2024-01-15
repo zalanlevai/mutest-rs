@@ -174,6 +174,9 @@ pub fn main() {
             #[cfg(feature = "random")]
             Some("random") => config::MutationBatchingAlgorithm::Random,
 
+            #[cfg(feature = "random")]
+            Some("simulated-annealing") => config::MutationBatchingAlgorithm::SimulatedAnnealing,
+
             _ => unreachable!(),
         };
 

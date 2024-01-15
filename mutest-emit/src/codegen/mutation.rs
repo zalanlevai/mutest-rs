@@ -1126,3 +1126,92 @@ pub fn batch_mutations_random<'trg, 'm>(
 
     mutants
 }
+
+#[cfg(feature = "random")]
+pub fn optimize_batches_simulated_annealing<'trg, 'm>(
+    mutants: &mut Vec<Mutant<'trg, 'm>>,
+    mutation_conflict_graph: &MutationConflictGraph<'m>,
+    mutant_max_mutations_count: usize,
+    max_iterations: usize,
+    rng: &mut impl rand::Rng,
+) {
+    #[derive(Clone, Copy)]
+    enum StateChange {
+        MoveMutation { mutation_id: MutId, old_mutant_id: MutantId, new_mutant_id: MutantId },
+    }
+
+    impl StateChange {
+        fn apply<'trg, 'm>(&self, mutants: &mut Vec<Mutant<'trg, 'm>>) {
+            match self {
+                Self::MoveMutation { mutation_id, old_mutant_id, new_mutant_id } => {
+                    let Some(old_mutant_idx) = mutants.iter().position(|m| m.id == *old_mutant_id) else { unreachable!(); };
+                    let old_mutant = &mut mutants[old_mutant_idx];
+                    let Some(mutation) = old_mutant.mutations.extract_if(|m| m.id == *mutation_id).next() else { unreachable!() };
+                    if old_mutant.mutations.is_empty() { mutants.remove(old_mutant_idx); }
+
+                    let Some(new_mutant) = mutants.iter_mut().find(|m| m.id == *new_mutant_id) else { unreachable!(); };
+                    new_mutant.mutations.push(mutation);
+                }
+            }
+        }
+    }
+
+    fn random_neighbour_state<'trg, 'm>(
+        mutants: &mut Vec<Mutant<'trg, 'm>>,
+        mutation_conflict_graph: &MutationConflictGraph<'m>,
+        mutant_max_mutations_count: usize,
+        rng: &mut impl rand::Rng,
+    ) -> StateChange {
+        use rand::prelude::*;
+
+        let (random_mutant, random_mutation, new_random_mutant) = loop {
+            let Some(random_mutant) = mutants.choose(rng) else { unreachable!(); };
+            let Some(random_mutation) = random_mutant.mutations.choose(rng) else { unreachable!(); };
+
+            let compatible_mutants = mutants.iter()
+                .filter(|m| m.id != random_mutant.id)
+                .filter(|m| compatible_mutant(random_mutation, m, mutation_conflict_graph, mutant_max_mutations_count));
+            let Some(new_random_mutant) = compatible_mutants.choose_stable(rng) else { continue; };
+
+            break (random_mutant, random_mutation, new_random_mutant);
+        };
+
+        StateChange::MoveMutation { mutation_id: random_mutation.id, old_mutant_id: random_mutant.id, new_mutant_id: new_random_mutant.id }
+    }
+
+    fn temperature(iterations_expended: f64, max_iterations: usize) -> f64 {
+        max_iterations as f64 * (1_f64 - iterations_expended)
+    }
+
+    fn energy<'trg, 'm>(mutants: &[Mutant<'trg, 'm>], state_change: Option<StateChange>) -> f64 {
+        let mut mutants_count = mutants.len();
+
+        if let Some(state_change) = state_change {
+            match state_change {
+                StateChange::MoveMutation { mutation_id: _, old_mutant_id, new_mutant_id: _ } => {
+                    let Some(old_mutant) = mutants.iter().find(|m| m.id == old_mutant_id) else { unreachable!(); };
+                    if old_mutant.mutations.len() <= 1 { mutants_count -= 1; }
+                }
+            }
+        }
+
+        mutants_count as f64
+    }
+
+    fn acceptance_probability(curr_energy: f64, next_energy: f64, temp: f64) -> f64 {
+        if next_energy < curr_energy { return 1_f64; }
+        f64::exp(-(next_energy - curr_energy) / temp)
+    }
+
+    for i in 0..max_iterations {
+        let temp = temperature(1_f64 - ((i + 1) as f64 / max_iterations as f64), max_iterations);
+
+        let curr_energy = energy(mutants, None);
+
+        let state_change = random_neighbour_state(mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
+        let next_energy = energy(mutants, Some(state_change));
+        if acceptance_probability(curr_energy, next_energy, temp) >= rng.gen_range(0_f64..1_f64) {
+            state_change.apply(mutants);
+        }
+    }
+}

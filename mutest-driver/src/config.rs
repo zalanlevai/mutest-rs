@@ -25,6 +25,8 @@ pub enum MutationBatchingAlgorithm {
 
     #[cfg(feature = "random")]
     Random,
+    #[cfg(feature = "random")]
+    SimulatedAnnealing,
 }
 
 #[cfg(feature = "random")]

@@ -339,6 +339,16 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         let random_choice = opts.mutation_batching_randomness.choice;
                         mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, random_choice, &mut rng)
                     }
+
+                    #[cfg(feature = "random")]
+                    config::MutationBatchingAlgorithm::SimulatedAnnealing => {
+                        let mut mutants = mutest_emit::codegen::mutation::batch_mutations_dummy(mutations);
+
+                        let mut rng = opts.mutation_batching_randomness.rng();
+                        mutest_emit::codegen::mutation::optimize_batches_simulated_annealing(&mut mutants, &mutation_conflict_graph, opts.mutant_max_mutations_count, 5000, &mut rng);
+
+                        mutants
+                    }
                 };
 
                 mutation_batching_duration = t_mutation_batching_start.elapsed();
