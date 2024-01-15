@@ -939,38 +939,6 @@ fn compatible_mutant<'trg, 'm>(
     true
 }
 
-/// Pick a compatible mutant for the mutation by randomly picking distinct mutants (i.e. without replacement) until a
-/// compatible mutant is rolled, within the specified number of maximum attempts.
-/// If every attempt fails, then the function returns `None`.
-#[cfg(feature = "random")]
-fn pick_random_mutant_blind<'trg, 'm, 'a>(
-    mutation: &Mut<'trg, 'm>,
-    mutants: &'a mut [Mutant<'trg, 'm>],
-    mutation_conflict_graph: &MutationConflictGraph<'m>,
-    mutant_max_mutations_count: usize,
-    rng: &mut impl rand::Rng,
-    attempts: usize,
-) -> Option<&'a mut Mutant<'trg, 'm>> {
-    use rand::prelude::*;
-
-    if mutants.is_empty() { return None; }
-
-    // Unsafe mutations are isolated into their own mutant.
-    if mutation_conflict_graph.is_unsafe(mutation.id) { return None; }
-
-    // Sample random mutants to attempt, ensuring that they are all distinct (i.e. without replacement).
-    let idx_attempts = (0..mutants.len()).choose_multiple(rng, attempts);
-
-    for idx in idx_attempts {
-        // Pick random mutant, place into, if possible. If none are, create new mutant.
-        if compatible_mutant(mutation, &mutants[idx], mutation_conflict_graph, mutant_max_mutations_count) {
-            return Some(&mut mutants[idx]);
-        }
-    }
-
-    None
-}
-
 /// Pick a compatible mutant for the mutation by randomly picking one from all compatible mutants.
 /// If no compatible mutants are available, then the function returns `None`.
 #[cfg(feature = "random")]
@@ -988,30 +956,10 @@ fn choose_random_mutant<'trg, 'm, 'a>(
     // Unsafe mutations are isolated into their own mutant.
     if mutation_conflict_graph.is_unsafe(mutation.id) { return None; }
 
+    // Filter out mutants so that we only consider compatible mutants.
     let possible_mutants = mutants.iter_mut().filter(|mutant| compatible_mutant(mutation, mutant, mutation_conflict_graph, mutant_max_mutations_count));
+    // Choose random compatible mutant, if available.
     possible_mutants.choose_stable(rng)
-}
-
-#[derive(Clone, Copy)]
-pub enum MutationBatchingRandomChoice {
-    Blind { attempts: usize },
-    Choose,
-}
-
-impl MutationBatchingRandomChoice {
-    fn pick_random_mutant<'trg, 'm, 'a>(
-        &self,
-        mutation: &Mut<'trg, 'm>,
-        mutants: &'a mut [Mutant<'trg, 'm>],
-        mutation_conflict_graph: &MutationConflictGraph<'m>,
-        mutant_max_mutations_count: usize,
-        rng: &mut impl rand::Rng,
-    ) -> Option<&'a mut Mutant<'trg, 'm>> {
-        match self {
-            Self::Blind { attempts } => pick_random_mutant_blind(mutation, mutants, mutation_conflict_graph, mutant_max_mutations_count, rng, *attempts),
-            Self::Choose => choose_random_mutant(mutation, mutants, mutation_conflict_graph, mutant_max_mutations_count, rng),
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -1027,7 +975,7 @@ pub fn batch_mutations_greedy<'trg, 'm>(
     mut mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
     ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>,
-    #[cfg(feature = "random")] epsilon: Option<(f64, MutationBatchingRandomChoice)>,
+    #[cfg(feature = "random")] epsilon: Option<f64>,
     #[cfg(feature = "random")] mut rng: Option<&mut impl rand::Rng>,
     mutant_max_mutations_count: usize,
 ) -> Vec<Mutant<'trg, 'm>> {
@@ -1074,14 +1022,14 @@ pub fn batch_mutations_greedy<'trg, 'm>(
 
             // Attempt to make a random choice if the optional epsilon parameter is used.
             #[cfg(feature = "random")]
-            if let Some((epsilon, random_choice)) = epsilon {
+            if let Some(epsilon) = epsilon {
                 let Some(ref mut rng) = rng else { panic!("epsilon random choice requested but rng not provided") };
 
                 // When using epsilon greedy batching, a random choice with probability epsilon is made for every
                 // mutation. If the random choice is true, then instead of making a greedy choice, a random compatible
                 // mutant is picked the same way as in random batching.
                 if rng.gen_bool(epsilon) {
-                    break 'mutant_candidate random_choice.pick_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
+                    break 'mutant_candidate choose_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
                 }
             }
 
@@ -1106,14 +1054,13 @@ pub fn batch_mutations_random<'trg, 'm>(
     mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
     mutant_max_mutations_count: usize,
-    random_choice: MutationBatchingRandomChoice,
     rng: &mut impl rand::Rng,
 ) -> Vec<Mutant<'trg, 'm>> {
     let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
     let mut next_mutant_index = 1;
 
     for mutation in mutations {
-        let mutant_candidate = random_choice.pick_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
+        let mutant_candidate = choose_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
 
         match mutant_candidate {
             Some(mutant) => mutant.mutations.push(mutation),

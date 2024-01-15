@@ -57,7 +57,6 @@ pub fn command() -> clap::Command {
     #[cfg(feature = "random")]
     let cmd = cmd
         .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching.").display_order(101))
-        .arg(clap::arg!(--"mutant-batch-random-blind-attempts" [MUTANT_BATCH_RANDOM_BLIND_ATTEMPTS] "Number of blind attempts made to place a mutation into a random mutant for random choice during mutation batching. If 0, then a single random choice is made from all compatible mutants.").default_value("0").value_parser(clap::value_parser!(usize)).display_order(101))
         .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)).display_order(101));
 
     cmd

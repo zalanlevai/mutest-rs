@@ -187,12 +187,7 @@ pub fn main() {
             let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
             let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<config::RandomSeed>());
 
-            let choice = match *mutest_arg_matches.get_one::<usize>("mutant-batch-random-blind-attempts").unwrap() {
-                0 => config::MutationBatchingRandomChoice::Choose,
-                attempts => config::MutationBatchingRandomChoice::Blind { attempts },
-            };
-
-            config::MutationBatchingRandomness { seed, choice }
+            config::MutationBatchingRandomness { seed }
         };
 
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
