@@ -402,6 +402,18 @@ pub mod visit {
                     visit_matching_expr(visitor, expr_ast, expr_hir);
                 }
             }
+            (ast::ExprKind::Yeet(_), _) => {
+                // TODO
+            }
+            (ast::ExprKind::Become(expr_ast), hir::ExprKind::Become(expr_hir)) => {
+                visit_matching_expr(visitor, expr_ast, expr_hir);
+            }
+            (ast::ExprKind::IncludedBytes(_), _) => {
+                // TODO
+            }
+            (ast::ExprKind::FormatArgs(_), _) => {
+                // TODO
+            }
 
             (ast::ExprKind::Err, _) | (_, hir::ExprKind::Err(_)) => {}
             _ => unreachable!(),
