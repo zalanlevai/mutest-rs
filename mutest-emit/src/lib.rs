@@ -1,5 +1,6 @@
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
+#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
