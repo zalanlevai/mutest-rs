@@ -68,8 +68,10 @@ fn main() {
         _ => unreachable!(),
     };
 
-    let mut cmd = Command::new("cargo");
-    cmd.arg(format!("+{}", build::RUST_TOOLCHAIN_VERSION));
+    let mut cmd = Command::new("rustup");
+    cmd.arg("run");
+    cmd.arg(build::RUST_TOOLCHAIN_VERSION);
+    cmd.arg("cargo");
     cmd.arg(cargo_subcommand);
     cmd.args(cargo_args);
 
