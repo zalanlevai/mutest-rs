@@ -32,7 +32,7 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session, unsafe_targeting:
             ast::mk::expr_str(sp, &mutation.display_name())
         }),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_location, sp), {
-            ast::mk::expr_str(sp, &mutation.display_location(sess))
+            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.display_location(sess)))
         }),
 
         ast::mk::expr_struct_field(sp, Ident::new(*sym::reachable_from, sp), {
