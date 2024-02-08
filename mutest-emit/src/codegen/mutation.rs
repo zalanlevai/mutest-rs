@@ -188,7 +188,7 @@ impl<'trg, 'm> Hash for Mut<'trg, 'm> {
 /// | ---------- | --------------------- | ----------- | --------------- | ---- |
 /// | --safe     | None                  |             |                 | M    |
 /// | --cautious | OnlyEnclosing(Unsafe) |             | unsafe M        | M    |
-/// | (default)  | OnlyEnclosing(Normal) |             | M               | M    |
+/// | --risky    | OnlyEnclosing(Normal) |             | M               | M    |
 /// | --unsafe   | All                   | unsafe M    | M               | M    |
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnsafeTargeting {

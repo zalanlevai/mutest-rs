@@ -144,8 +144,9 @@ pub fn main() {
         let unsafe_targeting = match () {
             _ if mutest_arg_matches.get_flag("safe") => UnsafeTargeting::None,
             _ if mutest_arg_matches.get_flag("cautious") => UnsafeTargeting::OnlyEnclosing(Unsafety::Unsafe),
+            _ if mutest_arg_matches.get_flag("risky") => UnsafeTargeting::OnlyEnclosing(Unsafety::Normal),
             _ if mutest_arg_matches.get_flag("unsafe") => UnsafeTargeting::All,
-            _ => UnsafeTargeting::OnlyEnclosing(Unsafety::Normal),
+            _ => UnsafeTargeting::None,
         };
 
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
