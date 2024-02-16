@@ -20,11 +20,15 @@ pub struct AnalysisPassResult {
     pub generated_crate_code: String,
 }
 
-fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: UnsafeTargeting) {
+fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'trg Target<'trg>>, unsafe_targeting: UnsafeTargeting) {
     let mut unsafe_targets_count = 0;
     let mut tainted_targets_count = 0;
 
+    let mut targets_count = 0;
+
     for target in targets {
+        targets_count += 1;
+
         let mut unsafe_marker = "";
         match (target.unsafety.is_unsafe(unsafe_targeting), target.unsafety) {
             (true, Unsafety::Tainted(_)) => {
@@ -60,8 +64,8 @@ fn print_targets<'tcx>(tcx: TyCtxt<'tcx>, targets: &[Target], unsafe_targeting: 
     }
 
     println!("targets: {total} total; {safe} safe; {unsafe} unsafe ({tainted} tainted)",
-        total = targets.len(),
-        safe = targets.len() - unsafe_targets_count,
+        total = targets_count,
+        safe = targets_count - unsafe_targets_count,
         r#unsafe = unsafe_targets_count,
         tainted = tainted_targets_count,
     );
@@ -221,18 +225,19 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx).count();
 
                 let t_target_analysis_start = Instant::now();
-                let targets = mutest_emit::codegen::mutation::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, opts.mutation_depth);
+                let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, opts.call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
-                        reached_pct = targets.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
-                        reached = targets.len(),
+                        reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
+                        reached = reachable_fns.len(),
                         total = all_mutable_fns_count,
                     );
                 }
+                let targets = reachable_fns.iter().filter(|f| f.distance <= opts.mutation_depth);
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
                 if let config::Mode::PrintMutationTargets = opts.mode {
-                    print_targets(tcx, &targets, opts.unsafe_targeting);
+                    print_targets(tcx, targets, opts.unsafe_targeting);
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?})",
                             total = t_start.elapsed(),
@@ -243,7 +248,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 let t_mutation_analysis_start = Instant::now();
-                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting, opts.verbosity);
+                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, opts.verbosity);
                 if opts.verbosity >= 1 {
                     let mutated_fns = mutations.iter().map(|m| m.target.def_id).unique();
                     let mutated_fns_count = mutated_fns.count();

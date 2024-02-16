@@ -55,6 +55,7 @@ pub struct Options<'op, 'm> {
     pub report_timings: bool,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
+    pub call_graph_depth: usize,
     pub mutation_depth: usize,
     pub mutation_batching_algorithm: MutationBatchingAlgorithm,
     #[cfg(feature = "random")] pub mutation_batching_randomness: MutationBatchingRandomness,

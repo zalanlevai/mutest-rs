@@ -696,7 +696,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
     def_res: &ast_lowering::DefResolutions,
     krate: &'ast ast::Crate,
-    targets: &'trg [Target<'trg>],
+    targets: impl Iterator<Item = &'trg Target<'trg>>,
     ops: Operators<'_, 'm>,
     unsafe_targeting: UnsafeTargeting,
     verbosity: u8,

@@ -149,6 +149,7 @@ pub fn main() {
             _ => UnsafeTargeting::None,
         };
 
+        let call_graph_depth = *mutest_arg_matches.get_one::<usize>("call-graph-depth").unwrap();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
         let mutation_batching_algorithm = match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
@@ -222,6 +223,7 @@ pub fn main() {
                     &mutest_operators::RelationalOpEqSwap,
                     &mutest_operators::RelationalOpInvert,
                 ],
+                call_graph_depth,
                 mutation_depth,
                 mutation_batching_algorithm,
                 #[cfg(feature = "random")] mutation_batching_randomness,
