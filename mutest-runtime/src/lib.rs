@@ -29,6 +29,7 @@ pub mod build {
 }
 
 pub mod test_runner;
+pub mod thread_pool;
 
 mod config;
 pub use config::*;

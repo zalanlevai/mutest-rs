@@ -11,6 +11,7 @@ use crate::MutationSafety;
 use crate::config::{self, Options};
 use crate::metadata::{MutantMeta, MutationMeta};
 use crate::test_runner;
+use crate::thread_pool::ThreadPool;
 
 mod test {
     pub use ::test::*;
@@ -124,7 +125,7 @@ fn profile_tests(tests: Vec<test::TestDescAndFn>) -> Result<Vec<ProfiledTest>, I
         Ok(test_runner::Flow::Continue)
     };
 
-    test_runner::run_tests(tests_to_run, on_test_event, test_runner::TestRunStrategy::InProcess, false)?;
+    test_runner::run_tests(tests_to_run, on_test_event, test_runner::TestRunStrategy::InProcess(None), false)?;
 
     Ok(profiled_tests)
 }
@@ -178,7 +179,7 @@ pub enum MutationTestResult {
     Crashed,
 }
 
-fn run_tests<S>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
+fn run_tests<S>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
     let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
@@ -232,7 +233,7 @@ fn run_tests<S>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>) -> Re
     };
 
     let test_run_strategy = match mutant.is_unsafe() {
-        false => test_runner::TestRunStrategy::InProcess,
+        false => test_runner::TestRunStrategy::InProcess(thread_pool),
         true => test_runner::TestRunStrategy::InIsolatedChildProcess({
             let mutant_id = mutant.id;
             Arc::new(move |cmd| {
@@ -260,6 +261,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
     let opts = Options {
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
+        use_thread_pool: args.contains(&"--use-thread-pool"),
         report_timings: args.contains(&"--timings"),
     };
 
@@ -313,6 +315,11 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         })
         .collect::<Vec<_>>();
 
+    let thread_pool = opts.use_thread_pool.then(|| {
+        let concurrency = test_runner::concurrency();
+        ThreadPool::new(concurrency, Some("test_thread_pool".to_owned()), None)
+    });
+
     let mut all_test_runs_failed_successfully = true;
     let mut total_mutations_count = 0;
     let mut total_safe_mutations_count = 0;
@@ -352,7 +359,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        match run_tests(tests, mutant) {
+        match run_tests(tests, mutant, thread_pool.clone()) {
             Ok(results) => {
                 for &mutation in mutant.mutations {
                     total_mutations_count += 1;

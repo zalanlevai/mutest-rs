@@ -13,6 +13,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::thread_pool::{self, ThreadPool};
+
 mod test {
     pub use ::test::*;
     pub use ::test::test::*;
@@ -20,18 +22,43 @@ mod test {
 
 #[derive(Clone)]
 pub enum TestRunStrategy {
-    InProcess,
+    InProcess(Option<ThreadPool>),
     InIsolatedChildProcess(Arc<dyn Fn(&mut process::Command) + Send + Sync>),
 }
 
 impl fmt::Debug for TestRunStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InProcess => write!(f, "InProcess"),
+            Self::InProcess(thread_pool) => {
+                f.debug_tuple("InProcess")
+                    .field(thread_pool).finish()
+            }
             Self::InIsolatedChildProcess(_) => {
                 f.debug_tuple("InIsolatedChildProcess")
                     .field(&format_args!("_")).finish()
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ThreadHandle {
+    StandaloneThread(thread::JoinHandle<()>),
+    ThreadPoolThread(thread_pool::JobHandle),
+}
+
+impl ThreadHandle {
+    pub fn join(self) -> Result<(), Box<dyn Any + Send + 'static>> {
+        match self {
+            Self::StandaloneThread(join_handle) => join_handle.join(),
+            Self::ThreadPoolThread(job_handle) => job_handle.join(),
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        match self {
+            Self::StandaloneThread(join_handle) => join_handle.is_finished(),
+            Self::ThreadPoolThread(job_handle) => job_handle.is_finished(),
         }
     }
 }
@@ -354,7 +381,7 @@ fn run_test(
     monitor_ch: mpsc::Sender<CompletedTest>,
     test_run_strategy: TestRunStrategy,
     no_capture: bool,
-) -> Option<thread::JoinHandle<()>> {
+) -> Option<ThreadHandle> {
     let Test { desc, test_fn, timeout } = test;
 
     let ignore_because_no_process_support = match desc.should_panic {
@@ -380,11 +407,16 @@ fn run_test(
         monitor_ch: mpsc::Sender<CompletedTest>,
         test_timeout: Option<Duration>,
         no_capture: bool,
-    ) -> Option<thread::JoinHandle<()>> {
+    ) -> Option<ThreadHandle> {
+        let thread_pool = match &test_run_strategy {
+            TestRunStrategy::InProcess(thread_pool) => thread_pool.clone(),
+            TestRunStrategy::InIsolatedChildProcess(_) => None,
+        };
+
         let name = desc.name.clone();
         let run_test = move || {
             match test_run_strategy {
-                TestRunStrategy::InProcess
+                TestRunStrategy::InProcess(_)
                 => run_test_in_process(id, desc, test_fn, monitor_ch, test_timeout, no_capture),
 
                 TestRunStrategy::InIsolatedChildProcess(cmd_hook)
@@ -395,20 +427,28 @@ fn run_test(
         let supports_threads = !cfg!(target_os = "emscripten") && !cfg!(target_family = "wasm");
 
         if supports_threads {
-            let thread = thread::Builder::new().name(name.as_slice().to_owned());
-
             let mut run_test = Arc::new(Mutex::new(Some(run_test)));
             let run_test_on_thread = run_test.clone();
+            let job = move || run_test_on_thread.lock().unwrap().take().unwrap()();
 
-            match thread.spawn(move || run_test_on_thread.lock().unwrap().take().unwrap()()) {
-                Ok(handle) => Some(handle),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // `ErrorKind::WouldBlock` means hitting the thread limit on some platforms, so run the test
-                    // synchronously on this thread instead.
-                    Arc::get_mut(&mut run_test).unwrap().get_mut().unwrap().take().unwrap()();
-                    None
+            match thread_pool {
+                Some(thread_pool) => {
+                    let handle = thread_pool.execute(job);
+                    Some(ThreadHandle::ThreadPoolThread(handle))
                 }
-                Err(e) => panic!("failed to spawn thread for test run: {e}"),
+                None => {
+                    let thread = thread::Builder::new().name(name.as_slice().to_owned());
+                    match thread.spawn(job) {
+                        Ok(handle) => Some(ThreadHandle::StandaloneThread(handle)),
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            // `ErrorKind::WouldBlock` means hitting the thread limit on some platforms, so run the test
+                            // synchronously on this thread instead.
+                            Arc::get_mut(&mut run_test).unwrap().get_mut().unwrap().take().unwrap()();
+                            None
+                        }
+                        Err(e) => panic!("failed to spawn thread for test run: {e}"),
+                    }
+                }
             }
         } else {
             run_test();
@@ -435,13 +475,23 @@ fn run_test(
     }
 }
 
+pub fn concurrency() -> usize {
+    match env::var("RUST_TEST_THREADS").ok() {
+        Some(value) => {
+            value.parse::<NonZeroUsize>().ok().map(NonZeroUsize::get)
+                .expect("RUST_TEST_THREADS must be a positive, non-zero integer")
+        }
+        None => thread::available_parallelism().map(NonZeroUsize::get).unwrap_or(1)
+    }
+}
+
 #[derive(Debug)]
 pub struct RunningTest {
     pub desc: test::TestDesc,
     pub timeout: Option<Duration>,
     pub start_time: Instant,
     pub control_tx: mpsc::Sender<ControlMsg>,
-    pub join_handle: Option<thread::JoinHandle<()>>,
+    pub join_handle: Option<ThreadHandle>,
 }
 
 #[derive(Debug)]
@@ -471,12 +521,9 @@ where
         .filter(|(_, test)| matches!(test.test_fn, test::TestFn::StaticTestFn(_) | test::TestFn::DynTestFn(_)))
         .collect::<Vec<_>>();
 
-    let concurrency = match env::var("RUST_TEST_THREADS").ok() {
-        Some(value) => {
-            value.parse::<NonZeroUsize>().ok().map(NonZeroUsize::get)
-                .expect("RUST_TEST_THREADS must be a positive, non-zero integer")
-        }
-        None => thread::available_parallelism().map(NonZeroUsize::get).unwrap_or(1)
+    let concurrency = match &test_run_strategy {
+        TestRunStrategy::InProcess(Some(thread_pool)) => thread_pool.max_thread_count(),
+        _ => concurrency(),
     };
 
     let mut remaining_tests = tests;
@@ -577,7 +624,7 @@ where
                 running_tests.insert(id, RunningTest { desc, timeout, start_time: Instant::now(), control_tx, join_handle });
             }
 
-            if let TestRunStrategy::InProcess = &test_run_strategy {
+            if let TestRunStrategy::InProcess(_) = &test_run_strategy {
                 let running_test_ids = running_tests.keys().cloned().collect::<Vec<_>>();
                 for test_id in running_test_ids {
                     let running_test = running_tests.get(&test_id).unwrap();
@@ -611,7 +658,7 @@ where
 
             let deadline = running_tests.values().filter_map(|test| test.timeout.map(|test_timeout| test.start_time + test_timeout)).reduce(Ord::min);
             let mut completed_test = match (deadline, &test_run_strategy) {
-                (Some(deadline), TestRunStrategy::InProcess) => {
+                (Some(deadline), TestRunStrategy::InProcess(_)) => {
                     match test_rx.recv_deadline(deadline) {
                         Err(mpsc::RecvTimeoutError::Timeout) => { continue; }
                         Err(mpsc::RecvTimeoutError::Disconnected) => panic!("test monitor channel disconnected"),

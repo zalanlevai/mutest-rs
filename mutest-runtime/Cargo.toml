@@ -12,6 +12,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 phf = { version = "0.11.2", features = ["macros"], default-features = false }
+atomic-wait = "1.1"
 
 [build-dependencies]
 cargo_metadata = "0.18"

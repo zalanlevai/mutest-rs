@@ -34,6 +34,8 @@ fn main() {
         .subcommand(clap::Command::new("run")
             .display_order(0)
             .about("Build and run the test harness.")
+            // Arguments
+            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool."))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
@@ -62,7 +64,8 @@ fn main() {
         Some(("print-code", _)) => ("check", &["--profile", "test"], "print-code", None),
         Some(("build", _)) => ("test", &["--no-run"], "build", None),
         Some(("run", matches)) => {
-            let passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
+            let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
+            if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
             ("test", &[], "build", Some(passed_args))
         }
         _ => unreachable!(),
@@ -88,7 +91,7 @@ fn main() {
 
     let mut mutest_args = args.clone();
     let i = mutest_args.iter().position(|arg| matches.subcommand_name().is_some_and(|subcommand| arg == subcommand)).expect("subcommand not found in args");
-    mutest_args.splice(i..(i + 1), [mutest_driver_subcommand.to_owned()]);
+    mutest_args.splice(i.., [mutest_driver_subcommand.to_owned()]);
 
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
 
