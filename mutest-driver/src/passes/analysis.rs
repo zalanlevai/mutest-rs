@@ -233,7 +233,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         total = all_mutable_fns_count,
                     );
                 }
-                let targets = reachable_fns.iter().filter(|f| f.distance <= opts.mutation_depth);
+                let targets = reachable_fns.iter().filter(|f| f.distance < opts.mutation_depth);
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
                 if let config::Mode::PrintMutationTargets = opts.mode {
