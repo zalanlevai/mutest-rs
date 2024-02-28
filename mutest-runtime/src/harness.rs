@@ -319,6 +319,10 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         let concurrency = test_runner::concurrency();
         ThreadPool::new(concurrency, Some("test_thread_pool".to_owned()), None)
     });
+    if let Some(thread_pool) = &thread_pool {
+        println!("using thread pool of size {} for running tests", thread_pool.max_thread_count());
+        println!();
+    }
 
     let mut all_test_runs_failed_successfully = true;
     let mut total_mutations_count = 0;
