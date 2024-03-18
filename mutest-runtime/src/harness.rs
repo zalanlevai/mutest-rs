@@ -275,8 +275,12 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
     };
     let test_profiling_duration = t_test_profiling_start.elapsed();
 
-    if profiled_tests.iter().any(|test| !matches!(test.result, test_runner::TestResult::Ignored | test_runner::TestResult::Ok)) {
-        println!("not all tests passed");
+    let failed_profiled_tests = profiled_tests.iter().filter(|test| !matches!(test.result, test_runner::TestResult::Ignored | test_runner::TestResult::Ok)).collect::<Vec<_>>();
+    if !failed_profiled_tests.is_empty() {
+        for failed_profiled_test in failed_profiled_tests {
+            println!("  test {} ... fail", failed_profiled_test.test.desc.name.as_slice());
+        }
+        println!("not all tests passed, cannot continue");
         process::exit(ERROR_EXIT_CODE);
     }
 
@@ -291,6 +295,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
     println!();
 
     let tests = profiled_tests.into_iter()
+        .filter(|profiled_test| !matches!(profiled_test.result, test_runner::TestResult::Ignored))
         .map(|profiled_test| {
             let test::TestDescAndFn { desc, testfn: test_fn } = profiled_test.test;
 
