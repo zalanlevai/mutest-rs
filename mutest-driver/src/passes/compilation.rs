@@ -73,6 +73,14 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
             force,
         });
     }
+    // Externs for some std macros may have to be loaded.
+    externs.insert("std_detect".to_owned(), ExternEntry {
+        location: ExternLocation::FoundInLibrarySearchDirectories,
+        is_private_dep: false,
+        add_prelude: true,
+        nounused_dep: false,
+        force: false,
+    });
     compiler_config.opts.externs = Externs::new(externs);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {

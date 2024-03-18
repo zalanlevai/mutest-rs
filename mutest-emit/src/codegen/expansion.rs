@@ -68,6 +68,7 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(derive_eq)]
 #![feature(coverage_attribute)]
 #![feature(rustc_private)]
+#![feature(stdsimd)]
 #![feature(structural_match)]
 #![feature(thread_local)]
 "#;
