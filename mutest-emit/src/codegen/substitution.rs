@@ -261,3 +261,35 @@ pub fn write_substitutions<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate
     let mut subst_writer = SubstWriter { sess: tcx.sess, substitutions, def_site };
     subst_writer.visit_crate(krate);
 }
+
+struct SyntaxAmbiguityResolver<'tcx> {
+    sess: &'tcx Session,
+    def_site: Span,
+}
+
+impl<'tcx> ast::mut_visit::MutVisitor for SyntaxAmbiguityResolver<'tcx> {
+    fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
+        ast::mut_visit::noop_visit_expr(expr, self);
+
+        match &expr.kind {
+            // Expressions compared with a cast expression may be misinterpreted as type arguments for the type in the
+            // cast expression. To avoid this, we simply parenthesize every cast expression.
+            ast::ExprKind::Cast(_, _) => {
+                *expr = ast::mk::expr_paren(expr.span, expr.clone())
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn resolve_syntax_ambiguities<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
+    let expn_id = tcx.expansion_for_ast_pass(
+        AstPass::TestHarness,
+        DUMMY_SP,
+        &[sym::rustc_attrs],
+    );
+    let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
+
+    let mut syntax_amiguity_resolver = SyntaxAmbiguityResolver { sess: tcx.sess, def_site };
+    syntax_amiguity_resolver.visit_crate(krate);
+}

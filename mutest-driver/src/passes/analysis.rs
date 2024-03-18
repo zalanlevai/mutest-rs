@@ -400,6 +400,8 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
                 mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
 
+                mutest_emit::codegen::substitution::resolve_syntax_ambiguities(tcx, &mut generated_crate_ast);
+
                 mutest_emit::codegen::harness::generate_harness(tcx, &mutants, &mut generated_crate_ast, opts.unsafe_targeting);
 
                 codegen_duration = t_codegen_start.elapsed();
