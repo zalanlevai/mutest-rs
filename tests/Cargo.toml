@@ -1,0 +1,10 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "mutest-tests"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["cargo"] }
+similar = { version = "2", features = ["inline"] }

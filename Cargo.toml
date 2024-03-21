@@ -7,4 +7,5 @@ members = [
     "mutest-emit",
     "mutest-operators",
     "mutest-runtime",
+    "tests",
 ]
