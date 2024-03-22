@@ -542,19 +542,25 @@ impl<'tst> Target<'tst> {
 /// All functions we can introduce mutations in.
 /// Does not include closures, as they are (currently) considered part of their containing function, rather than
 /// standalone functions. This might change in the future.
-pub fn all_mutable_fns<'tcx>(tcx: TyCtxt<'tcx>) -> impl Iterator<Item = hir::LocalDefId> + 'tcx {
+pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> impl Iterator<Item = hir::LocalDefId> + 'tcx {
+    let entry_fn = tcx.entry_fn(());
+    let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
+
     tcx.hir_crate_items(()).definitions()
         .filter(move |&local_def_id| {
             let def_id = local_def_id.to_def_id();
             let hir_id = tcx.hir().local_def_id_to_hir_id(local_def_id);
 
             matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn | hir::DefKind::Generator)
+                // fn main() {}
+                && !entry_fn.map(|(entry_def_id, _)| def_id == entry_def_id).unwrap_or(false)
                 // const fn
                 && !tcx.is_const_fn(def_id)
                 // fn;
-                && tcx.hir().get_by_def_id(local_def_id).body_id().is_some()
+                && !tcx.hir().get_by_def_id(local_def_id).body_id().is_none()
                 // #[test] functions
                 && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test) || attr.has_name(sym::rustc_test_marker))
+                && !test_def_ids.contains(&local_def_id)
                 // #[mutest::skip] functions
                 && !tool_attr::skip(tcx.hir().attrs(hir_id))
         })
@@ -592,8 +598,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
     for test in tests {
-        let Some(def_id) = def_res.node_id_to_def_id.get(&test.item.id).copied() else { continue; };
-        let body = tcx.hir().body(tcx.hir().get_by_def_id(def_id).body_id().unwrap());
+        let body = tcx.hir().body(tcx.hir().get_by_def_id(test.def_id).body_id().unwrap());
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 

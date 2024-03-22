@@ -218,11 +218,11 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     (generated_crate_ast, def_res)
                 };
 
-                let tests = mutest_emit::analysis::tests::collect_tests(&generated_crate_ast);
+                let tests = mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res);
 
                 tcx.analysis(())?;
 
-                let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx).count();
+                let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx, &tests).count();
 
                 let t_target_analysis_start = Instant::now();
                 let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, opts.call_graph_depth);
