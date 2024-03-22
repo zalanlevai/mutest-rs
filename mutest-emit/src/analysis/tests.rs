@@ -2,6 +2,8 @@ use std::fmt::{self, Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter;
 
+use rustc_middle::ty::TyCtxt;
+
 use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::codegen::ast;
@@ -112,4 +114,12 @@ pub fn collect_tests(krate: &ast::Crate, def_res: &ast_lowering::DefResolutions)
     collector.visit_crate(krate);
 
     collector.tests
+}
+
+pub fn is_in_cfg_test<'tcx>(tcx: TyCtxt<'tcx>, id: hir::HirId) -> bool {
+    tcx.hir().parent_id_iter(id).any(|parent_id| {
+        tcx.hir().attrs(parent_id).iter().any(|attr| {
+            ast::inspect::is_list_attr_with_ident(attr, None, sym::cfg, sym::test)
+        })
+    })
 }

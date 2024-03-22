@@ -1,0 +1,5 @@
+reached 100.00% of functions from tests (1 out of 1 functions)
+tests -(0)-> help_program at tests/ui/avoid_mutating_test_helpers.rs:5:1: 5:18 (#0)
+  (0) tests::test1
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
