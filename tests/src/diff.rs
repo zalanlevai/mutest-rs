@@ -25,7 +25,7 @@ pub fn display_diff(expected: &str, actual: &str) -> Result<String, fmt::Error> 
             for change in diff.iter_inline_changes(op) {
                 let (sign, ctrl, ctrl_emph) = match change.tag() {
                     ChangeTag::Delete => ("-", "\x1b[0;31m", "\x1b[4;31m"),
-                    ChangeTag::Insert => ("+", "\x1b[0;32m", "\x1b[4;31m"),
+                    ChangeTag::Insert => ("+", "\x1b[0;32m", "\x1b[4;32m"),
                     ChangeTag::Equal => (" ", "\x1b[2m", "\x1b[2;4m"),
                 };
 
