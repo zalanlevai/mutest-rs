@@ -248,6 +248,7 @@ fn main() {
 
         // TODO: Some tests may expect to fail
         if output.status.code() != Some(expected_exit_code) {
+            failed_tests_count += 1;
             eprintln!("test {name} ... \x1b[1;31mFAILED\x1b[0m ({reason})",
                 reason = match output.status.code() {
                     Some(exit_code) => format!("process exited with code {exit_code}"),
