@@ -16,6 +16,7 @@ pub struct Test {
     pub descriptor: P<ast::Item>,
     pub item: P<ast::Item>,
     pub def_id: hir::LocalDefId,
+    pub ignore: bool,
 }
 
 impl Test {
@@ -70,11 +71,14 @@ fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident]
 
         let Some(def_id) = def_res.node_id_to_def_id.get(&test_item.id).copied() else { unreachable!(); };
 
+        let ignore = test_item.attrs.iter().any(|attr| attr.has_name(sym::ignore));
+
         tests.push(Test {
             path: path.iter().copied().chain(iter::once(test_case.ident)).collect(),
             descriptor: test_case.to_owned(),
             item: test_item.to_owned(),
             def_id,
+            ignore,
         });
     }
 

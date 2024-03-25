@@ -600,6 +600,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
     for test in tests {
+        if test.ignore { continue; }
+
         let body = tcx.hir().body(tcx.hir().get_by_def_id(test.def_id).body_id().unwrap());
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));

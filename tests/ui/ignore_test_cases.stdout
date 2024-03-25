@@ -1,0 +1,5 @@
+reached 50.00% of functions from tests (1 out of 2 functions)
+tests -(0)-> tested_fn at tests/ui/ignore_test_cases.rs:5:1: 5:15 (#0)
+  (0) tests::active_test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
