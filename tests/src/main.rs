@@ -113,6 +113,7 @@ impl Expectation {
 }
 
 struct Opts {
+    pub filters: Option<Vec<String>>,
     pub bless: bool,
     pub dry_run: bool,
     pub verbosity: u8,
@@ -135,7 +136,11 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
 
     let display_path = path.strip_prefix(root_dir).expect("cannot strip root dir prefix").with_extension("");
 
-    let name = display_path.to_string_lossy();
+    let name = display_path.to_string_lossy().into_owned();
+
+    if let Some(filters) = &opts.filters {
+        if !filters.iter().any(|filter| name.contains(filter)) { return; }
+    }
 
     let test_crate_name = format!("mutest_test_{crate_name}",
         crate_name = display_path.components()
@@ -343,6 +348,7 @@ fn main() {
         .disable_version_flag(true)
         .arg(clap::arg!(--bless "Update expectation snapshots for new and existing tests."))
         .arg(clap::arg!(--"dry-run" "Do not modify the file system when blessing expectations."))
+        .arg(clap::arg!(--filter [FILTER] "Only run tests matching any of one or more filter(s)."))
         .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
         .arg(clap::arg!(-h --help "Print help information; this message.").action(clap::ArgAction::Help).display_order(999).global(true))
         .get_matches();
@@ -351,7 +357,10 @@ fn main() {
     let dry_run = matches.get_flag("dry-run");
     let verbosity = matches.get_count("verbose");
 
+    let filters = matches.get_one::<String>("filter").map(|s| s.split(",").map(|f| f.trim().to_owned()).collect::<Vec<_>>());
+
     let opts = Opts {
+        filters,
         bless,
         dry_run,
         verbosity,
