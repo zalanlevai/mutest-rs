@@ -30,38 +30,49 @@ enum BlessVerdict {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Expectation {
     /// //@ stdout
-    StdOut,
+    StdOut { empty: bool },
     /// //@ stderr
-    StdErr,
+    StdErr { empty: bool },
 }
 
 impl Expectation {
     pub fn display_name(&self) -> &str {
         match self {
-            Expectation::StdOut => "stdout",
-            Expectation::StdErr => "stderr",
+            Expectation::StdOut { .. } => "stdout",
+            Expectation::StdErr { .. } => "stderr",
         }
     }
 
     pub fn check(&self, path: &Path, stdout: &str, stderr: &str) -> ExpectationVerdict {
         match self {
-            Expectation::StdOut | Expectation::StdErr => {
+            &Expectation::StdOut { empty: expect_empty } | &Expectation::StdErr { empty: expect_empty } => {
                 let (out_name, out, out_path) = match self {
-                    Expectation::StdOut => ("stdout", stdout, path.with_extension("stdout")),
-                    Expectation::StdErr => ("stderr", stderr, path.with_extension("stderr")),
+                    Expectation::StdOut { .. } => ("stdout", stdout, path.with_extension("stdout")),
+                    Expectation::StdErr { .. } => ("stderr", stderr, path.with_extension("stderr")),
                     _ => unreachable!(),
                 };
 
-                if !out_path.exists() { return ExpectationVerdict::Unblessed; }
+                if expect_empty {
+                    if !out.is_empty() {
+                        let diff_text = diff::display_diff("", out).unwrap();
+                        return ExpectationVerdict::Unmet {
+                            reason: format!("{out_name} is not empty"),
+                            error: Some(diff_text),
+                        };
+                    }
+                } else {
+                    if !out_path.exists() { return ExpectationVerdict::Unblessed; }
 
-                let expected_out = fs::read_to_string(&out_path).expect(&format!("cannot read {}", out_path.display()));
-                if *out != expected_out {
-                    let diff_text = diff::display_diff(&expected_out, out).unwrap();
-                    return ExpectationVerdict::Unmet {
-                        reason: format!("{out_name} does not match expected output"),
-                        error: Some(diff_text),
-                    };
+                    let expected_out = fs::read_to_string(&out_path).expect(&format!("cannot read {}", out_path.display()));
+                    if *out != expected_out {
+                        let diff_text = diff::display_diff(&expected_out, out).unwrap();
+                        return ExpectationVerdict::Unmet {
+                            reason: format!("{out_name} does not match expected output"),
+                            error: Some(diff_text),
+                        };
+                    }
                 }
+
 
                 ExpectationVerdict::Met
             }
@@ -70,10 +81,12 @@ impl Expectation {
 
     pub fn bless(&self, path: &Path, stdout: &str, stderr: &str, dry_run: bool) -> BlessVerdict {
         match self {
-            Expectation::StdOut | Expectation::StdErr => {
+            &Expectation::StdOut { empty: expect_empty } | &Expectation::StdErr { empty: expect_empty } => {
+                if expect_empty { return BlessVerdict::UpToDate; }
+
                 let (out_name, out, out_path) = match self {
-                    Expectation::StdOut => ("stdout", stdout, path.with_extension("stdout")),
-                    Expectation::StdErr => ("stderr", stderr, path.with_extension("stderr")),
+                    Expectation::StdOut { .. } => ("stdout", stdout, path.with_extension("stdout")),
+                    Expectation::StdErr { .. } => ("stderr", stderr, path.with_extension("stderr")),
                     _ => unreachable!(),
                 };
 
@@ -170,8 +183,10 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
                     mutest_subcommand = Some(subcommand);
                 }
 
-                "stdout" => { expectations.insert(Expectation::StdOut); }
-                "stderr" => { expectations.insert(Expectation::StdErr); }
+                "stdout" => { expectations.insert(Expectation::StdOut { empty: false }); }
+                "stdout: empty" => { expectations.insert(Expectation::StdOut { empty: true }); }
+                "stderr" => { expectations.insert(Expectation::StdErr { empty: false }); }
+                "stderr: empty" => { expectations.insert(Expectation::StdErr { empty: true }); }
 
                 _ if directive.starts_with("mutest-flags:") => {}
                 _ if directive.starts_with("mutest-subcommand-flags:") => {}
