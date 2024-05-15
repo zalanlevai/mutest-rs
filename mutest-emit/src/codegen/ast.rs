@@ -7,6 +7,8 @@ pub use rustc_ast::tokenstream::*;
 use rustc_span::Span;
 use rustc_span::symbol::Ident;
 
+use crate::analysis::Descr;
+
 #[derive(Clone, Debug)]
 pub struct FnItem {
     pub id: ast::NodeId,
@@ -815,6 +817,71 @@ pub mod mk {
 
     pub fn token_stream(token_trees: Vec<ast::tokenstream::TokenTree>) -> ast::tokenstream::TokenStream {
         ast::tokenstream::TokenStream::new(token_trees)
+    }
+}
+
+impl Descr for ast::StmtKind {
+    fn descr(&self) -> &'static str {
+        match self {
+            ast::StmtKind::Item(..) => "item",
+            ast::StmtKind::Local(..) => "local",
+            ast::StmtKind::Semi(..) => "statement expression",
+            ast::StmtKind::Expr(..) => "trailing expression",
+            ast::StmtKind::MacCall(..) => "macro call",
+            ast::StmtKind::Empty => "empty",
+        }
+    }
+}
+
+impl Descr for ast::ExprKind {
+    fn descr(&self) -> &'static str {
+        match self {
+            ast::ExprKind::Array(..) => "array literal",
+            ast::ExprKind::ConstBlock(..) => "const block",
+            ast::ExprKind::Call(..) => "call",
+            ast::ExprKind::MethodCall(..) => "method call",
+            ast::ExprKind::Tup(..) => "tuple literal",
+            ast::ExprKind::Binary(..) => "binary operation",
+            ast::ExprKind::Unary(..) => "unary operation",
+            ast::ExprKind::Lit(..) => "literal",
+            ast::ExprKind::Cast(..) => "cast",
+            ast::ExprKind::Type(..) => "type ascription",
+            ast::ExprKind::Let(..) => "let",
+            ast::ExprKind::If(..) => "if",
+            ast::ExprKind::While(..) => "while",
+            ast::ExprKind::ForLoop { .. } => "for loop",
+            ast::ExprKind::Loop(..) => "loop",
+            ast::ExprKind::Match(..) => "match",
+            ast::ExprKind::Closure(..) => "closure",
+            ast::ExprKind::Block(..) => "block",
+            ast::ExprKind::Async(..) => "async",
+            ast::ExprKind::Await(..) => "await",
+            ast::ExprKind::TryBlock(..) => "try block",
+            ast::ExprKind::Assign(..) => "assignment",
+            ast::ExprKind::AssignOp(..) => "assignment with operator",
+            ast::ExprKind::Field(..) => "field access",
+            ast::ExprKind::Index(..) => "index",
+            ast::ExprKind::Range(..) => "range",
+            ast::ExprKind::Underscore => "_",
+            ast::ExprKind::Path(..) => "path",
+            ast::ExprKind::AddrOf(..) => "reference",
+            ast::ExprKind::Break(..) => "break",
+            ast::ExprKind::Continue(..) => "continue",
+            ast::ExprKind::Ret(..) => "return",
+            ast::ExprKind::InlineAsm(..) => "inline assembly",
+            ast::ExprKind::OffsetOf(..) => "field offset",
+            ast::ExprKind::MacCall(..) => "macro call",
+            ast::ExprKind::Struct(..) => "struct literal",
+            ast::ExprKind::Repeat(..) => "array from repetition",
+            ast::ExprKind::Paren(..) => "parentheses",
+            ast::ExprKind::Try(..) => "try",
+            ast::ExprKind::Yield(..) => "yield",
+            ast::ExprKind::Yeet(..) => "yeet",
+            ast::ExprKind::Become(..) => "become",
+            ast::ExprKind::IncludedBytes(..) => "included bytes",
+            ast::ExprKind::FormatArgs(..) => "format_args",
+            ast::ExprKind::Err => "error",
+        }
     }
 }
 

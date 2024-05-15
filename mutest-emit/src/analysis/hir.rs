@@ -8,6 +8,8 @@ use rustc_middle::ty::TyCtxt;
 use rustc_span::Span;
 use rustc_span::symbol::Ident;
 
+use crate::analysis::Descr;
+
 #[derive(Clone, Copy, Debug)]
 pub struct FnItem<'hir> {
     pub owner_id: hir::OwnerId,
@@ -89,6 +91,57 @@ impl<'hir> DefItem<'hir> {
             Self::ForeignItem(item) => item.span,
             Self::TraitItem(item) => item.span,
             Self::ImplItem(item) => item.span,
+        }
+    }
+}
+
+impl<'hir> Descr for hir::StmtKind<'hir> {
+    fn descr(&self) -> &'static str {
+        match self {
+            hir::StmtKind::Item(..) => "item",
+            hir::StmtKind::Local(..) => "local",
+            hir::StmtKind::Semi(..) => "statement expression",
+            hir::StmtKind::Expr(..) => "trailing expression",
+        }
+    }
+}
+
+impl<'hir> Descr for hir::ExprKind<'hir> {
+    fn descr(&self) -> &'static str {
+        match self {
+            hir::ExprKind::ConstBlock(..) => "const block",
+            hir::ExprKind::Array(..) => "array literal",
+            hir::ExprKind::Call(..) => "call",
+            hir::ExprKind::MethodCall(..) => "method call",
+            hir::ExprKind::Tup(..) => "tuple literal",
+            hir::ExprKind::Binary(..) => "binary operation",
+            hir::ExprKind::Unary(..) => "unary operation",
+            hir::ExprKind::Lit(..) => "literal",
+            hir::ExprKind::Cast(..) => "cast",
+            hir::ExprKind::Type(..) => "type ascription",
+            hir::ExprKind::DropTemps(..) => "drop temporaries",
+            hir::ExprKind::Let(..) => "let",
+            hir::ExprKind::If(..) => "if",
+            hir::ExprKind::Loop(..) => "loop",
+            hir::ExprKind::Match(..) => "match",
+            hir::ExprKind::Closure(..) => "closure",
+            hir::ExprKind::Block(..) => "block",
+            hir::ExprKind::Assign(..) => "assignment",
+            hir::ExprKind::AssignOp(..) => "assignment with operator",
+            hir::ExprKind::Field(..) => "field access",
+            hir::ExprKind::Index(..) => "index",
+            hir::ExprKind::Path(..) => "path",
+            hir::ExprKind::AddrOf(..) => "reference",
+            hir::ExprKind::Break(..) => "break",
+            hir::ExprKind::Continue(..) => "continue",
+            hir::ExprKind::Ret(..) => "return",
+            hir::ExprKind::Become(..) => "become",
+            hir::ExprKind::InlineAsm(..) => "inline assembly",
+            hir::ExprKind::OffsetOf(..) => "field offset",
+            hir::ExprKind::Struct(..) => "struct literal",
+            hir::ExprKind::Repeat(..) => "array from repetition",
+            hir::ExprKind::Yield(..) => "yield",
+            hir::ExprKind::Err(..) => "error",
         }
     }
 }

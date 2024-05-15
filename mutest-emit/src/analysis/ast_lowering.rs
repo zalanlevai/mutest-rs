@@ -41,11 +41,16 @@ pub mod visit {
     use rustc_hir as hir;
     use rustc_hir::intravisit::Map;
     use rustc_hir::intravisit::nested_filter::{self, NestedFilter};
+    use rustc_middle::ty::TyCtxt;
     use rustc_span::Span;
+
+    use crate::analysis::Descr;
 
     pub trait AstHirVisitor<'ast, 'hir>: Sized {
         type Map: hir::intravisit::Map<'hir> = <Self::NestedFilter as NestedFilter<'hir>>::Map;
         type NestedFilter: NestedFilter<'hir> = nested_filter::None;
+
+        fn tcx(&mut self) -> TyCtxt<'hir>;
 
         fn nested_visit_map(&mut self) -> Self::Map {
             panic!(
@@ -175,7 +180,13 @@ pub mod visit {
             }
 
             (ast::StmtKind::Empty, _) | (ast::StmtKind::MacCall(_), _) => {}
-            _ => unreachable!(),
+
+            (ast_kind, hir_kind) => {
+                let mut diagnostic = visitor.tcx().sess.struct_warn("unrecognized AST-HIR node pair");
+                diagnostic.span_note(stmt_ast.span, format!("AST node: {}", ast_kind.descr()));
+                diagnostic.span_note(stmt_hir.span, format!("HIR node: {}", hir_kind.descr()));
+                diagnostic.emit();
+            }
         }
     }
 
@@ -423,7 +434,13 @@ pub mod visit {
             }
 
             (ast::ExprKind::Err, _) | (_, hir::ExprKind::Err(_)) => {}
-            _ => unreachable!(),
+
+            (ast_kind, hir_kind) => {
+                let mut diagnostic = visitor.tcx().sess.struct_warn("unrecognized AST-HIR node pair");
+                diagnostic.span_note(expr_ast.span, format!("AST node: {}", ast_kind.descr()));
+                diagnostic.span_note(expr_hir.span, format!("HIR node: {}", hir_kind.descr()));
+                diagnostic.emit();
+            }
         }
     }
 }
@@ -472,6 +489,10 @@ struct BodyResolutionsCollector<'tcx> {
 
 impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'hir> {
     type NestedFilter = rustc_middle::hir::nested_filter::OnlyBodies;
+
+    fn tcx(&mut self) -> TyCtxt<'hir> {
+        self.tcx
+    }
 
     fn nested_visit_map(&mut self) -> Self::Map {
         self.tcx.hir()
