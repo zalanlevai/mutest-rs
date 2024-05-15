@@ -3,6 +3,7 @@ use std::iter;
 
 use itertools::Itertools;
 use rustc_data_structures::sync::HashMapExt;
+use rustc_data_structures::unord::UnordMap;
 use rustc_hash::FxHashMap;
 use rustc_index::IndexVec;
 use rustc_middle::ty::ResolverAstLowering;
@@ -16,6 +17,7 @@ use crate::codegen::symbols::Span;
 pub struct DefResolutions {
     pub node_id_to_def_id: FxHashMap<ast::NodeId, hir::LocalDefId>,
     pub def_id_to_node_id: IndexVec<hir::LocalDefId, ast::NodeId>,
+    pub partial_res_map: UnordMap<ast::NodeId, hir::PartialRes>,
 }
 
 impl DefResolutions {
@@ -23,7 +25,12 @@ impl DefResolutions {
         Self {
             node_id_to_def_id: resolver.node_id_to_def_id.clone(),
             def_id_to_node_id: resolver.def_id_to_node_id.clone(),
+            partial_res_map: resolver.partial_res_map.clone(),
         }
+    }
+
+    pub fn node_res(&self, node_id: ast::NodeId) -> Option<hir::Res<ast::NodeId>> {
+        self.partial_res_map.get(&node_id).and_then(|partial_res| partial_res.full_res())
     }
 }
 

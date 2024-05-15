@@ -50,6 +50,8 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(["conflicts", "reverse-conflicts", #[cfg(feature = "random")] "random", "none"]).default_value("reverse-conflicts").display_order(199))
         .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
         .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
+        // Experimental Flags
+        .arg(clap::arg!(--"Zsanitize-macro-expns" "Sanitize the identifiers and paths in the expanded output of bang-style macro invocations.").display_order(500))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
         //        of the help flags.

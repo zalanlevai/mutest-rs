@@ -517,7 +517,7 @@ trait PrinterExt<'tcx>: ty::print::Printer<'tcx> + Copy {
                 }
             }
 
-            let visible_paths = res::visible_paths(printer.tcx(), def_id);
+            let visible_paths = res::visible_paths(printer.tcx(), def_id, None);
             if let Some(visible_path) = visible_paths.into_iter().next() {
                 return Some(printer.print_path(visible_path)).transpose();
             }

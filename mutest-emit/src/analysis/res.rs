@@ -1,32 +1,63 @@
 use std::hash::Hash;
 
 use rustc_hash::FxHashSet;
+use thin_vec::{ThinVec, thin_vec};
 
-use crate::analysis::hir::{self, CRATE_DEF_ID};
+use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, kw};
 
-pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
-    fn item_child_by_symbol(tcx: TyCtxt<'_>, def_id: hir::DefId, symbol: Symbol) -> Option<Res> {
-        match tcx.def_kind(def_id) {
-            DefKind::Mod | DefKind::Enum | DefKind::Trait => {
-                tcx.module_children(def_id).iter()
-                    .find(|item| item.ident.name == symbol)
-                    .map(|child| child.res.expect_non_local())
-            }
-            DefKind::Impl { of_trait: _ } => {
-                tcx.associated_item_def_ids(def_id).iter().copied()
-                    .find(|assoc_def_id| tcx.item_name(*assoc_def_id) == symbol)
-                    .map(|assoc_def_id| Res::Def(tcx.def_kind(assoc_def_id), assoc_def_id))
-            }
-            _ => None,
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct ItemChild {
+    pub ident: Ident,
+    pub vis: ty::Visibility<hir::DefId>,
+    pub res: Res,
+}
 
+pub fn item_children<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Box<dyn Iterator<Item = ItemChild> + 'tcx> {
+    match tcx.def_kind(def_id) {
+        DefKind::Mod | DefKind::Enum | DefKind::Trait => {
+            let mod_children = match def_id.as_local() {
+                Some(local_def_id) => tcx.module_children_local(local_def_id),
+                None => tcx.module_children(def_id),
+            };
+
+            let iter = mod_children.iter()
+                .map(|child| {
+                    let res = child.res.expect_non_local();
+                    ItemChild { ident: child.ident, vis: child.vis, res }
+                });
+            Box::new(iter)
+        }
+        DefKind::Impl { of_trait: _ } => {
+            let iter = tcx.associated_item_def_ids(def_id).iter().copied()
+                .map(move |assoc_def_id| {
+                    let ident = tcx.opt_item_ident(assoc_def_id).unwrap();
+                    let vis = tcx.visibility(assoc_def_id);
+                    let res = Res::Def(tcx.def_kind(assoc_def_id), assoc_def_id);
+                    ItemChild { ident, vis, res }
+                });
+            Box::new(iter)
+        }
+        _ => Box::new(std::iter::empty()),
+    }
+}
+
+pub fn item_child_by_symbol<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, symbol: Symbol) -> Option<ItemChild> {
+    item_children(tcx, def_id).find(|child| child.ident.name == symbol)
+}
+
+pub fn item_child_by_ident<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, ident: Ident) -> Option<ItemChild> {
+    item_children(tcx, def_id).find(|child| child.ident == ident)
+}
+
+pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
     fn find_crate(tcx: TyCtxt<'_>, symbol: Symbol) -> Option<hir::DefId> {
+        if tcx.crate_name(LOCAL_CRATE) == symbol { return Some(LOCAL_CRATE.as_def_id()); }
+
         tcx.crates(()).iter().copied()
             .find(|&num| tcx.crate_name(num) == symbol)
             .map(hir::CrateNum::as_def_id)
@@ -41,14 +72,15 @@ pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
     let Some(first) = find_crate(tcx, base).and_then(|id| item_child_by_symbol(tcx, id, first)) else { return Res::Err };
 
     path.iter().copied()
-        .try_fold(first, |res, segment| {
+        .try_fold(first.res, |res, segment| {
             let def_id = res.def_id();
 
             if let Some(item) = item_child_by_symbol(tcx, def_id, segment) {
-                Some(item)
+                Some(item.res)
             } else if matches!(res, Res::Def(DefKind::Enum | DefKind::Struct, _)) {
                 tcx.inherent_impls(def_id).iter()
                     .find_map(|&impl_def_id| item_child_by_symbol(tcx, impl_def_id, segment))
+                    .map(|child| child.res)
             } else {
                 None
             }
@@ -68,6 +100,17 @@ pub fn fn_def_id<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Option<hir::DefId>
         Res::Def(DefKind::Fn | DefKind::AssocFn, trait_id) => Some(trait_id),
         _ => None,
     }
+}
+
+pub fn def_id_path<'tcx>(tcx: TyCtxt<'tcx>, mut def_id: hir::DefId) -> Vec<hir::DefId> {
+    let mut path = vec![def_id];
+    while let Some(parent) = tcx.opt_parent(def_id) {
+        path.push(parent);
+        def_id = parent;
+    }
+    path.reverse();
+
+    path
 }
 
 pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hir::HirId, hir::Node)> {
@@ -195,42 +238,74 @@ where
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
 }
 
-pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Vec<ast::Path> {
-    let root = match def_id.as_local() {
-        Some(_) => (CRATE_DEF_ID.to_def_id(), vec![Ident::new(kw::Crate, DUMMY_SP)]),
-        None => (def_id.krate.as_def_id(), vec![Ident::new(tcx.crate_name(def_id.krate), DUMMY_SP)]),
+#[derive(Clone, Debug)]
+pub struct DefPathSegment {
+    pub def_id: hir::DefId,
+    pub ident: Ident,
+}
+
+#[derive(Clone, Debug)]
+pub struct DefPath {
+    pub segments: Vec<DefPathSegment>,
+}
+
+impl DefPath {
+    pub fn def_id_path(&self) -> impl Iterator<Item = hir::DefId> + '_ {
+        self.segments.iter().map(|segment| segment.def_id)
+    }
+
+    pub fn ast_path(&self) -> ast::Path {
+        let segments = self.segments.iter().map(|segment| {
+            ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: segment.ident, args: None }
+        }).collect::<ThinVec<_>>();
+
+        ast::Path { span: DUMMY_SP, segments, tokens: None }
+    }
+}
+
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> ThinVec<DefPath> {
+    let (root_def_id, root_ident) = match def_id.as_local() {
+        Some(_) => (CRATE_DEF_ID.to_def_id(), Ident::new(kw::Crate, DUMMY_SP)),
+        None => (def_id.krate.as_def_id(), Ident::new(tcx.crate_name(def_id.krate), DUMMY_SP)),
     };
+    let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident }] };
 
-    let mut paths = vec![];
+    if root_def_id == def_id {
+        return thin_vec![root_def_path];
+    }
 
-    let mut seen_modules: FxHashSet<hir::DefId> = Default::default();
-    let mut worklist = vec![root];
+    let mut paths = thin_vec![];
+
+    let mut seen_containers: FxHashSet<hir::DefId> = Default::default();
+    let mut worklist = vec![(root_def_id, root_def_path)];
     while !worklist.is_empty() {
-        let mut new_worklist: Vec<(hir::DefId, Vec<Ident>)> = vec![];
+        let mut new_worklist: Vec<(hir::DefId, DefPath)> = vec![];
 
-        for (mod_def_id, mod_path) in worklist.drain(..) {
-            let mod_children = match mod_def_id.as_local() {
-                Some(mod_def_id) => tcx.module_children_local(mod_def_id),
-                None => tcx.module_children(mod_def_id),
-            };
+        for (container_def_id, container_def_path) in worklist.drain(..) {
+            let children = item_children(tcx, container_def_id);
 
-            for mod_child in mod_children {
-                if mod_child.vis != ty::Visibility::Public && mod_child.vis != ty::Visibility::Restricted(CRATE_DEF_ID.to_def_id()) { continue; }
-                if mod_child.ident.name == kw::Underscore { continue; }
+            for child in children {
+                let visible = false
+                    || child.vis == ty::Visibility::Public
+                    || child.vis == ty::Visibility::Restricted(CRATE_DEF_ID.to_def_id())
+                    || scope.is_some_and(|scope| child.vis.is_accessible_from(scope, tcx));
 
-                if mod_child.res.opt_def_id() == Some(def_id) {
-                    let mut path = mod_path.clone();
-                    path.push(mod_child.ident);
-                    paths.push(ast::mk::path(DUMMY_SP, true, path));
+                if !visible { continue; }
+                if child.ident.name == kw::Underscore { continue; }
+
+                if child.res.opt_def_id() == Some(def_id) {
+                    let mut path = container_def_path.clone();
+                    path.segments.push(DefPathSegment { def_id, ident: child.ident });
+                    paths.push(path);
                 }
 
-                match mod_child.res {
-                    Res::Def(DefKind::Mod, child_def_id) => {
-                        if seen_modules.contains(&child_def_id) { continue; }
-                        seen_modules.insert(child_def_id);
+                match child.res {
+                    Res::Def(DefKind::Mod | DefKind::Enum | DefKind::Trait | DefKind::Impl { .. }, child_def_id) => {
+                        if seen_containers.contains(&child_def_id) { continue; }
+                        seen_containers.insert(child_def_id);
 
-                        let mut path = mod_path.clone();
-                        path.push(mod_child.ident);
+                        let mut path = container_def_path.clone();
+                        path.segments.push(DefPathSegment { def_id: child_def_id, ident: child.ident });
                         new_worklist.push((child_def_id, path));
                     }
                     _ => {}
@@ -242,6 +317,10 @@ pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Vec<ast::Pa
     }
 
     paths
+}
+
+pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> ThinVec<ast::Path> {
+    visible_def_paths(tcx, def_id, scope).into_iter().map(|path| path.ast_path()).collect::<ThinVec<_>>()
 }
 
 macro interned {

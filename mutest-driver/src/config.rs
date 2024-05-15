@@ -60,6 +60,8 @@ pub struct Options<'op, 'm> {
     pub mutation_batching_algorithm: MutationBatchingAlgorithm,
     #[cfg(feature = "random")] pub mutation_batching_randomness: MutationBatchingRandomness,
     pub mutant_max_mutations_count: usize,
+
+    pub sanitize_macro_expns: bool,
 }
 
 pub struct Config<'op, 'm> {

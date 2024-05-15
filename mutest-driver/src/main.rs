@@ -194,6 +194,8 @@ pub fn main() {
 
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
+        let sanitize_macro_expns = mutest_arg_matches.get_flag("Zsanitize-macro-expns");
+
         let config = Config {
             compiler_config,
             invocation_fingerprint: mutest_args,
@@ -228,6 +230,8 @@ pub fn main() {
                 mutation_batching_algorithm,
                 #[cfg(feature = "random")] mutation_batching_randomness,
                 mutant_max_mutations_count,
+
+                sanitize_macro_expns,
             },
         };
 
