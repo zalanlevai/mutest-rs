@@ -3,9 +3,7 @@ use std::iter;
 
 use itertools::Itertools;
 use rustc_data_structures::sync::HashMapExt;
-use rustc_data_structures::unord::UnordMap;
 use rustc_hash::FxHashMap;
-use rustc_index::IndexVec;
 use rustc_middle::ty::ResolverAstLowering;
 
 use crate::analysis::hir;
@@ -15,16 +13,14 @@ use crate::codegen::ast;
 use crate::codegen::symbols::Span;
 
 pub struct DefResolutions {
-    pub node_id_to_def_id: FxHashMap<ast::NodeId, hir::LocalDefId>,
-    pub def_id_to_node_id: IndexVec<hir::LocalDefId, ast::NodeId>,
-    pub partial_res_map: UnordMap<ast::NodeId, hir::PartialRes>,
+    pub node_id_to_def_id: ast::node_id::NodeMap<hir::LocalDefId>,
+    pub partial_res_map: ast::node_id::NodeMap<hir::PartialRes>,
 }
 
 impl DefResolutions {
     pub fn from_resolver(resolver: &ResolverAstLowering) -> Self {
         Self {
             node_id_to_def_id: resolver.node_id_to_def_id.clone(),
-            def_id_to_node_id: resolver.def_id_to_node_id.clone(),
             partial_res_map: resolver.partial_res_map.clone(),
         }
     }
@@ -163,7 +159,7 @@ pub mod visit {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
             }
 
-            (ast::StmtKind::Local(local_ast), hir::StmtKind::Local(local_hir)) => {
+            (ast::StmtKind::Let(local_ast), hir::StmtKind::Let(local_hir)) => {
                 match (&local_ast.kind, local_hir.init) {
                     | (ast::LocalKind::Init(expr_ast), Some(expr_hir))
                     | (ast::LocalKind::InitElse(expr_ast, _), Some(expr_hir)) => {
@@ -182,7 +178,7 @@ pub mod visit {
             (ast::StmtKind::Empty, _) | (ast::StmtKind::MacCall(_), _) => {}
 
             (ast_kind, hir_kind) => {
-                let mut diagnostic = visitor.tcx().sess.struct_warn("unrecognized AST-HIR node pair");
+                let mut diagnostic = visitor.tcx().dcx().struct_warn("unrecognized AST-HIR node pair");
                 diagnostic.span_note(stmt_ast.span, format!("AST node: {}", ast_kind.descr()));
                 diagnostic.span_note(stmt_hir.span, format!("HIR node: {}", hir_kind.descr()));
                 diagnostic.emit();
@@ -276,36 +272,45 @@ pub mod visit {
                     }
                 }
             }
-            (ast::ExprKind::ForLoop(_pat_ast, cond_ast, block_ast, _label_ast), hir::ExprKind::Match(expr_hir, [arm_hir], hir::MatchSource::ForLoopDesugar)) => {
-                if let hir::ExprKind::Loop(block_hir, _label_hir, hir::LoopSource::ForLoop, _) = arm_hir.body.kind {
+            (ast::ExprKind::ForLoop { pat: _, iter: iter_ast, body: body_ast, label: _, kind: kind_ast }, hir::ExprKind::Match(outer_match_expr_hir, [outer_match_arm_hir], hir::MatchSource::ForLoopDesugar)) => {
+                if let hir::ExprKind::Loop(inner_loop_block_hir, _inner_loop_label_hir, hir::LoopSource::ForLoop, _) = outer_match_arm_hir.body.kind {
                     // TODO: Visit label
-                    if let [block_stmt_hir] = block_hir.stmts
-                        && let hir::StmtKind::Expr(block_expr_hir) = block_stmt_hir.kind
-                        && let hir::ExprKind::Match(_, [_, some_arm_hir], hir::MatchSource::ForLoopDesugar) = block_expr_hir.kind
+                    if let [inner_loop_block_stmt_hir] = inner_loop_block_hir.stmts
+                        && let hir::StmtKind::Expr(inner_loop_block_expr_hir) = inner_loop_block_stmt_hir.kind
+                        && let hir::ExprKind::Match(_, [_, inner_loop_match_some_arm_hir], hir::MatchSource::ForLoopDesugar) = inner_loop_block_expr_hir.kind
                     {
-                        if let hir::PatKind::TupleStruct(_, [_pat_hir], _) = some_arm_hir.pat.kind {
+                        if let hir::PatKind::TupleStruct(_, [_inner_loop_match_some_arm_pat_hir], _) = inner_loop_match_some_arm_hir.pat.kind {
                             // TODO: Visit pattern
                         }
-                        if let hir::ExprKind::Call(_, [cond_hir]) = expr_hir.kind {
-                            visit_matching_expr(visitor, cond_ast, cond_hir);
+                        match kind_ast {
+                            ast::ForLoopKind::For => {
+                                if let hir::ExprKind::Call(_, [outer_match_expr_iter_hir]) = outer_match_expr_hir.kind {
+                                    visit_matching_expr(visitor, iter_ast, outer_match_expr_iter_hir);
+                                }
+                            }
+                            ast::ForLoopKind::ForAwait => {
+                                // TODO
+                            }
                         }
-                        visit_block_expr(visitor, block_ast, some_arm_hir.body);
+                        visit_block_expr(visitor, body_ast, inner_loop_match_some_arm_hir.body);
                     }
                 }
             }
             (ast::ExprKind::Loop(block_ast, _, _), hir::ExprKind::Loop(block_hir, _, hir::LoopSource::Loop, _)) => {
                 visitor.visit_block(block_ast, block_hir);
             }
-            (ast::ExprKind::Match(expr_ast, arms_ast), hir::ExprKind::Match(expr_hir, arms_hir, hir::MatchSource::Normal)) => {
+            (ast::ExprKind::Match(expr_ast, arms_ast, _), hir::ExprKind::Match(expr_hir, arms_hir, hir::MatchSource::Normal)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
                 for (arm_ast, arm_hir) in iter::zip(arms_ast, *arms_hir) {
                     // TODO: Visit pattern
-                    visit_matching_expr(visitor, &arm_ast.body, arm_hir.body);
+                    if let Some(arm_body_ast) = &arm_ast.body {
+                        visit_matching_expr(visitor, arm_body_ast, arm_hir.body);
+                    }
                 }
             }
             (ast::ExprKind::Closure(closure_ast), hir::ExprKind::Closure(closure_hir)) => {
-                let ast::Closure { binder: _, capture_clause: _, constness: _, asyncness: _, movability: _, fn_decl: decl_ast, body: expr_ast, fn_decl_span: _, fn_arg_span: _ } = &**closure_ast;
-                let hir::Closure { def_id: _, binder: _, constness: _, capture_clause: _, bound_generic_params: _, fn_decl: _, body: body_hir, fn_decl_span: _, fn_arg_span: _, movability: _ } = closure_hir;
+                let ast::Closure { binder: _, capture_clause: _, constness: _, coroutine_kind: _, movability: _, fn_decl: decl_ast, body: expr_ast, fn_decl_span: _, fn_arg_span: _ } = &**closure_ast;
+                let hir::Closure { def_id: _, binder: _, constness: _, capture_clause: _, bound_generic_params: _, fn_decl: _, body: body_hir, fn_decl_span: _, fn_arg_span: _, kind: _ } = closure_hir;
 
                 if let Some(body_hir) = visitor.nested_body(*body_hir) {
                     for (param_ast, param_hir) in iter::zip(&decl_ast.inputs, body_hir.params) {
@@ -317,7 +322,13 @@ pub mod visit {
             (ast::ExprKind::Block(block_ast, _), hir::ExprKind::Block(block_hir, _)) => {
                 visitor.visit_block(block_ast, block_hir);
             }
-            (ast::ExprKind::Async(_, _), _) => {
+            (ast::ExprKind::Gen(_, _, ast::GenBlockKind::Async), _) => {
+                // TODO
+            }
+            (ast::ExprKind::Gen(_, _, ast::GenBlockKind::Gen), _) => {
+                // TODO
+            }
+            (ast::ExprKind::Gen(_, _, ast::GenBlockKind::AsyncGen), _) => {
                 // TODO
             }
             (ast::ExprKind::Await(expr_ast, _), hir::ExprKind::Match(expr_hir, _, hir::MatchSource::AwaitDesugar)) => {
@@ -343,7 +354,7 @@ pub mod visit {
             }
             (ast::ExprKind::Range(Some(start_ast), Some(end_ast), ast::RangeLimits::Closed), hir::ExprKind::Call(path_expr_hir, [start_hir, end_hir])) => {
                 if let hir::ExprKind::Path(qpath_hir) = &path_expr_hir.kind
-                    && let hir::QPath::LangItem(hir::LangItem::RangeInclusiveNew, _, _) = qpath_hir
+                    && let hir::QPath::LangItem(hir::LangItem::RangeInclusiveNew, _) = qpath_hir
                 {
                     visit_matching_expr(visitor, start_ast, start_hir);
                     visit_matching_expr(visitor, end_ast, end_hir);
@@ -359,7 +370,7 @@ pub mod visit {
                     _ => unreachable!(),
                 };
 
-                if let hir::QPath::LangItem(lang_item_hir, _, _) = qpath_hir && *lang_item_hir == expected_lang_item {
+                if let hir::QPath::LangItem(lang_item_hir, _) = qpath_hir && *lang_item_hir == expected_lang_item {
                     let mut fields_hir_iter = fields_hir.iter();
                     if let Some(start_ast) = start_ast && let Some(start_field_hir) = fields_hir_iter.next() {
                         visit_matching_expr(visitor, start_ast, start_field_hir.expr);
@@ -410,7 +421,7 @@ pub mod visit {
             (ast::ExprKind::Try(expr_ast), hir::ExprKind::Match(expr_hir, _, hir::MatchSource::TryDesugar(_))) => {
                 if let hir::ExprKind::Call(path_expr_hir, [expr_hir]) = &expr_hir.kind
                     && let hir::ExprKind::Path(qpath_hir) = &path_expr_hir.kind
-                    && let hir::QPath::LangItem(lang_item_hir, _, _) = qpath_hir && *lang_item_hir == hir::LangItem::TryTraitBranch
+                    && let hir::QPath::LangItem(lang_item_hir, _) = qpath_hir && *lang_item_hir == hir::LangItem::TryTraitBranch
                 {
                     visit_matching_expr(visitor, expr_ast, expr_hir);
                 }
@@ -433,10 +444,10 @@ pub mod visit {
                 // TODO
             }
 
-            (ast::ExprKind::Err, _) | (_, hir::ExprKind::Err(_)) => {}
+            (ast::ExprKind::Err(_), _) | (_, hir::ExprKind::Err(_)) => {}
 
             (ast_kind, hir_kind) => {
-                let mut diagnostic = visitor.tcx().sess.struct_warn("unrecognized AST-HIR node pair");
+                let mut diagnostic = visitor.tcx().dcx().struct_warn("unrecognized AST-HIR node pair");
                 diagnostic.span_note(expr_ast.span, format!("AST node: {}", ast_kind.descr()));
                 diagnostic.span_note(expr_hir.span, format!("HIR node: {}", hir_kind.descr()));
                 diagnostic.emit();
@@ -461,7 +472,7 @@ impl<'tcx> BodyResolutions<'tcx> {
     }
 
     pub fn hir_node(&self, node_id: ast::NodeId) -> Option<hir::Node<'tcx>> {
-        self.node_id_to_hir_id.get(&node_id).map(|&hir_id| self.tcx.hir().get(hir_id))
+        self.node_id_to_hir_id.get(&node_id).map(|&hir_id| self.tcx.hir_node(hir_id))
     }
 
     pub fn hir_param(&self, param: &ast::Param) -> Option<&'tcx hir::Param<'tcx>> {
@@ -545,7 +556,7 @@ pub fn resolve_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &hir:
     let decl_hir = fn_hir.sig.decl;
     let body_hir = fn_hir.body.id();
     let span_hir = fn_hir.span;
-    let id_hir = tcx.hir().local_def_id_to_hir_id(fn_hir.owner_id.def_id);
+    let id_hir = tcx.local_def_id_to_hir_id(fn_hir.owner_id.def_id);
     visit::AstHirVisitor::visit_fn(&mut collector, kind_ast, span_ast, id_ast, kind_hir, decl_hir, body_hir, span_hir, id_hir);
 
     BodyResolutions {
@@ -620,46 +631,46 @@ fn hir_body_child_items<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) ->
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 struct DefDisambiguator {
-    pub kind: hir::definitions::DefPathData,
+    pub kind: hir::DefPathData,
     pub disambiguator: usize,
 }
 
 fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path: &[hir::Node]) -> Vec<Option<DefDisambiguator>> {
-    fn disambiguated_kind<'hir>(def_item: hir::DefItem<'hir>) -> Option<hir::definitions::DefPathData> {
+    fn disambiguated_kind<'hir>(def_item: hir::DefItem<'hir>) -> Option<hir::DefPathData> {
         match def_item {
             hir::DefItem::Item(item) => match item.kind {
-                hir::ItemKind::ExternCrate(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::ExternCrate(_) => Some(hir::DefPathData::TypeNs(item.ident.name)),
                 hir::ItemKind::Use(_, _) => None,
-                hir::ItemKind::Static(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ItemKind::Const(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ItemKind::Fn(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ItemKind::Macro(_, _) => Some(hir::definitions::DefPathData::MacroNs(item.ident.name)),
-                hir::ItemKind::Mod(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::ForeignMod { .. } => Some(hir::definitions::DefPathData::ForeignMod),
-                hir::ItemKind::GlobalAsm(_) => Some(hir::definitions::DefPathData::GlobalAsm),
-                hir::ItemKind::TyAlias(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::OpaqueTy(_) => Some(hir::definitions::DefPathData::ImplTrait),
-                hir::ItemKind::Enum(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::Struct(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::Union(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::Trait(_, _, _, _, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::TraitAlias(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
-                hir::ItemKind::Impl(_) => Some(hir::definitions::DefPathData::Impl),
+                hir::ItemKind::Static(_, _, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ItemKind::Const(_, _, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ItemKind::Fn(_, _, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ItemKind::Macro(_, _) => Some(hir::DefPathData::MacroNs(item.ident.name)),
+                hir::ItemKind::Mod(_) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::ForeignMod { .. } => Some(hir::DefPathData::ForeignMod),
+                hir::ItemKind::GlobalAsm(_) => Some(hir::DefPathData::GlobalAsm),
+                hir::ItemKind::TyAlias(_, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::OpaqueTy(_) => Some(hir::DefPathData::OpaqueTy),
+                hir::ItemKind::Enum(_, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Struct(_, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Union(_, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Trait(_, _, _, _, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::TraitAlias(_, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
+                hir::ItemKind::Impl(_) => Some(hir::DefPathData::Impl),
             }
             hir::DefItem::ForeignItem(item) => match item.kind {
-                hir::ForeignItemKind::Fn(_, _, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ForeignItemKind::Static(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ForeignItemKind::Type => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ForeignItemKind::Fn(_, _, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ForeignItemKind::Static(_, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ForeignItemKind::Type => Some(hir::DefPathData::TypeNs(item.ident.name)),
             }
             hir::DefItem::TraitItem(item) => match item.kind {
-                hir::TraitItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::TraitItemKind::Fn(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::TraitItemKind::Type(_, _) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::TraitItemKind::Const(_, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::TraitItemKind::Fn(_, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::TraitItemKind::Type(_, _) => Some(hir::DefPathData::TypeNs(item.ident.name)),
             }
             hir::DefItem::ImplItem(item) => match item.kind {
-                hir::ImplItemKind::Const(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ImplItemKind::Fn(_, _) => Some(hir::definitions::DefPathData::ValueNs(item.ident.name)),
-                hir::ImplItemKind::Type(_) => Some(hir::definitions::DefPathData::TypeNs(item.ident.name)),
+                hir::ImplItemKind::Const(_, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ImplItemKind::Fn(_, _) => Some(hir::DefPathData::ValueNs(item.ident.name)),
+                hir::ImplItemKind::Type(_) => Some(hir::DefPathData::TypeNs(item.ident.name)),
             }
         }
     }
@@ -776,7 +787,7 @@ where
             hir::ItemKind::ForeignMod { abi: _, items: _ } => {
                 let Some(disambiguator) = disambiguator else { return None; };
 
-                let hir::definitions::DefPathData::ForeignMod = disambiguator.kind else { return None; };
+                let hir::DefPathData::ForeignMod = disambiguator.kind else { return None; };
                 let index = disambiguator.disambiguator;
 
                 items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::ForeignMod(_))).nth(index)
@@ -784,7 +795,7 @@ where
             hir::ItemKind::GlobalAsm(_) => {
                 let Some(disambiguator) = disambiguator else { return None; };
 
-                let hir::definitions::DefPathData::GlobalAsm = disambiguator.kind else { return None; };
+                let hir::DefPathData::GlobalAsm = disambiguator.kind else { return None; };
                 let index = disambiguator.disambiguator;
 
                 items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::GlobalAsm(_))).nth(index)
@@ -811,7 +822,7 @@ where
             hir::ItemKind::Impl(_) => {
                 let Some(disambiguator) = disambiguator else { return None; };
 
-                let hir::definitions::DefPathData::Impl = disambiguator.kind else { return None; };
+                let hir::DefPathData::Impl = disambiguator.kind else { return None; };
                 let index = disambiguator.disambiguator;
 
                 items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::Impl(_))).nth(index)

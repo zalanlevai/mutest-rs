@@ -46,7 +46,7 @@ struct EntryPointCleaner<'tcx> {
 
 impl<'tcx> ast::mut_visit::MutVisitor for EntryPointCleaner<'tcx> {
     fn flat_map_item(&mut self, i: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        let g = &self.sess.parse_sess.attr_id_generator;
+        let g = &self.sess.psess.attr_id_generator;
 
         self.depth += 1;
         let item = ast::mut_visit::noop_flat_map_item(i, self).expect_one("noop did something");
@@ -65,7 +65,7 @@ impl<'tcx> ast::mut_visit::MutVisitor for EntryPointCleaner<'tcx> {
                 let allow_dead_code_attr = ast::mk::attr_outer(g, item.span,
                     Ident::new(sym::allow, item.span),
                     ast::mk::attr_args_delimited(item.span, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                        ast::mk::tt_token_joint(item.span, ast::token::TokenKind::Ident(sym::dead_code, false)),
+                        ast::mk::tt_token_joint(item.span, ast::token::TokenKind::Ident(sym::dead_code, ast::token::IdentIsRaw::No)),
                     ])),
                 );
 

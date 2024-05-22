@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 use crate::thread_pool::{self, ThreadPool};
 
 mod test {
+    #![allow(unused_imports)]
+
     pub use ::test::*;
     pub use ::test::test::*;
 }

@@ -51,14 +51,14 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
                 ast::mk::expr_field_deep(sp, ast::mk::expr_ident(sp, subst_ident), vec![Ident::new(*sym::mutation, sp), Ident::new(*sym::id, sp)]),
                 ast::mk::expr_field(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)])), Ident::new(*sym::id, sp)),
             );
-            ast::mk::arm(sp, pat_some_subst, Some(guard), subst)
+            ast::mk::arm(sp, pat_some_subst, Some(guard), Some(subst))
         })
         .collect::<ThinVec<_>>();
 
     // _ => $default
     arms.push(ast::mk::arm(sp, ast::mk::pat_wild(sp), None, match default {
-        Some(expr) => expr,
-        None => ast::mk::expr_noop(sp),
+        Some(expr) => Some(expr),
+        None => Some(ast::mk::expr_noop(sp)),
     }));
 
     // crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow()
@@ -145,13 +145,13 @@ struct SubstWriter<'tcx, 'op> {
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
     fn visit_crate(&mut self, krate: &mut ast::Crate) {
-        let g = &self.sess.parse_sess.attr_id_generator;
+        let g = &self.sess.psess.attr_id_generator;
 
         // #[allow(unused_parens)]
         let allow_unused_parens_attr = ast::mk::attr_inner(g, self.def_site,
             Ident::new(sym::allow, self.def_site),
             ast::mk::attr_args_delimited(self.def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(self.def_site, ast::TokenKind::Ident(*sym::unused_parens, false)),
+                ast::mk::tt_token_joint(self.def_site, ast::TokenKind::Ident(*sym::unused_parens, ast::token::IdentIsRaw::No)),
             ])),
         );
 

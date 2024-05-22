@@ -11,14 +11,14 @@ pub struct RelationalOpInvertMutation {
 impl Mutation for RelationalOpInvertMutation {
     fn display_name(&self) -> String {
         format!("invert relational operator `{original_bin_op}` for `{replacement_bin_op}`",
-            original_bin_op = self.original_bin_op.to_string(),
-            replacement_bin_op = self.replacement_bin_op.to_string(),
+            original_bin_op = self.original_bin_op.as_str(),
+            replacement_bin_op = self.replacement_bin_op.as_str(),
         )
     }
 
     fn span_label(&self) -> String {
         format!("invert relational operator for `{replacement_bin_op}`",
-            replacement_bin_op = self.replacement_bin_op.to_string(),
+            replacement_bin_op = self.replacement_bin_op.as_str(),
         )
     }
 }

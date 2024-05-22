@@ -46,7 +46,7 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
         println!("tests -({distance})-> {unsafe_marker}{def_path} at {span:#?}",
             distance = target.distance,
             def_path = tcx.def_path_str(target.def_id.to_def_id()),
-            span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(target.def_id)),
+            span = tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)),
         );
 
         for (&test, entry_point) in &target.reachable_from {
@@ -149,7 +149,7 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
             println!("{unsafe_marker}{display_name} in {def_path} at {span:#?}",
                 display_name = mutation.display_name(),
                 def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
-                span = tcx.hir().span(tcx.hir().local_def_id_to_hir_id(mutation.target.def_id)),
+                span = tcx.hir().span(tcx.local_def_id_to_hir_id(mutation.target.def_id)),
             );
 
             for (&test, entry_point) in &mutation.target.reachable_from {
@@ -187,7 +187,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
     let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
-            let sess = compiler.session();
+            let sess = &compiler.sess;
 
             let t_start = Instant::now();
             let mut target_analysis_duration = Duration::ZERO;
@@ -207,7 +207,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             queries.global_ctxt()?.enter(|tcx| {
                 let (mut generated_crate_ast, def_res) = {
-                    let (resolver, expanded_crate_ast) = &*tcx.resolver_for_lowering(()).borrow();
+                    let (resolver, expanded_crate_ast) = &*tcx.resolver_for_lowering().borrow();
                     let def_res = mutest_emit::analysis::ast_lowering::DefResolutions::from_resolver(resolver);
 
                     // TODO: Generate code based on the original, unexpanded AST instead of the
@@ -267,13 +267,13 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         use mutest_emit::codegen::mutation::MutationError::*;
                         match error {
                             DummySubsts(mutation, dummy_substs) => {
-                                let mut diagnostic = sess.struct_err(format!("mutation operator attempted to write {desc}",
+                                let mut diagnostic = tcx.dcx().struct_err(format!("mutation operator attempted to write {desc}",
                                     desc = match dummy_substs.len() {
                                         1 => "dummy substitution".to_owned(),
                                         n => format!("{n} dummy substitutions"),
                                     },
                                 ));
-                                diagnostic.set_span(mutation.span);
+                                diagnostic.span(mutation.span);
                                 diagnostic.span_label(mutation.span, format!("invalid mutation: {}", mutation.mutation.span_label()));
                                 diagnostic.emit();
                             }
@@ -360,7 +360,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         use mutest_emit::codegen::mutation::MutationBatchesValidationError::*;
                         match error {
                             ConflictingMutationsInBatch(mutant, mutations) => {
-                                let mut diagnostic = sess.struct_err("mutant contains conflicting mutations");
+                                let mut diagnostic = tcx.dcx().struct_err("mutant contains conflicting mutations");
                                 for mutation in mutations {
                                     diagnostic.span_warn(mutation.span, format!("incompatible mutation: {}", mutation.mutation.span_label()));
                                 }
@@ -413,6 +413,8 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 // HACK: The generated code is currently based on the expanded AST and contains references to the internals
                 //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
                 //       set of crate references (above).
+                struct NoAnn;
+                impl rustc_ast_pretty::pprust::state::PpAnn for NoAnn {}
                 let generated_crate_code = format!("{prelude}\n{code}",
                     prelude = mutest_emit::codegen::expansion::GENERATED_CODE_PRELUDE,
                     code = rustc_ast_pretty::pprust::print_crate(
@@ -420,10 +422,10 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         &generated_crate_ast,
                         source_name,
                         "".to_owned(),
-                        &rustc_ast_pretty::pprust::state::NoAnn,
+                        &NoAnn,
                         true,
                         Edition::Edition2021,
-                        &sess.parse_sess.attr_id_generator,
+                        &sess.psess.attr_id_generator,
                     ),
                 );
 

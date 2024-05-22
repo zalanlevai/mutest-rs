@@ -1,10 +1,11 @@
 use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
+use std::sync::Arc;
+use std::sync::atomic::{self, AtomicBool};
 
-use rustc_hash::FxHashMap;
 use rustc_interface::Config as CompilerConfig;
 use rustc_interface::interface::Result as CompilerResult;
-use rustc_session::config::{CheckCfg, ExpectedValues, Input};
+use rustc_session::config::Input;
 use rustc_session::parse::ParseSess;
 use rustc_span::Symbol;
 use rustc_span::source_map::RealFileLoader;
@@ -68,21 +69,6 @@ impl<T, E, F: From<E>> From<Flow<T, E>> for Result<Option<T>, F> {
 }
 
 pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
-    let crate_check_cfg = CheckCfg {
-        exhaustive_names: config.crate_check_cfg.exhaustive_names,
-        exhaustive_values: config.crate_check_cfg.exhaustive_values,
-        expecteds: {
-            let mut expecteds: FxHashMap<String, ExpectedValues<String>> = Default::default();
-            for (key, value) in config.crate_check_cfg.expecteds.iter() {
-                expecteds.insert(key.clone(), match value {
-                    ExpectedValues::Some(v) => ExpectedValues::Some(v.clone()),
-                    ExpectedValues::Any => ExpectedValues::Any,
-                });
-            }
-            expecteds
-        },
-    };
-
     let input = match &config.input {
         Input::File(f) => Input::File(f.clone()),
         Input::Str { name, input } => Input::Str { name: name.clone(), input: input.clone() },
@@ -91,7 +77,7 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
     CompilerConfig {
         opts: config.opts.clone(),
         crate_cfg: config.crate_cfg.clone(),
-        crate_check_cfg,
+        crate_check_cfg: config.crate_check_cfg.clone(),
         input,
         output_file: config.output_file.clone(),
         output_dir: config.output_dir.clone(),
@@ -99,11 +85,13 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
         file_loader: Some(Box::new(RealFileLoader)),
         locale_resources: config.locale_resources,
         lint_caps: config.lint_caps.clone(),
-        parse_sess_created: None,
+        psess_created: None,
+        hash_untracked_state: None,
         register_lints: None,
         override_queries: None,
         make_codegen_backend: None,
         registry: rustc_driver::diagnostics_registry(),
+        using_internal_features: Arc::new(AtomicBool::new(config.using_internal_features.load(atomic::Ordering::Relaxed))),
         expanded_args: config.expanded_args.clone(),
     }
 }
@@ -143,11 +131,11 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
     let mut compiler_config = copy_compiler_settings(&config.compiler_config);
 
     let invocation_fingerprint = config.invocation_fingerprint.clone();
-    compiler_config.parse_sess_created = Some(Box::new(move |parse_sess| {
+    compiler_config.psess_created = Some(Box::new(move |parse_sess| {
         track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
     }));
 
-    compiler_config.crate_cfg.insert(("mutest".to_owned(), None));
+    compiler_config.crate_cfg.push("mutest".to_owned());
 
     compiler_config
 }

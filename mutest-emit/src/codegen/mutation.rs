@@ -161,7 +161,7 @@ impl<'trg, 'm> Mut<'trg, 'm> {
     }
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
-        let mut diagnostic = sess.struct_span_warn(self.span, "mutation was not detected");
+        let mut diagnostic = sess.dcx().struct_span_warn(self.span, "mutation was not detected");
         diagnostic.span_label(self.span, self.mutation.span_label());
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
@@ -259,10 +259,10 @@ fn is_local_span(source_map: &SourceMap, sp: Span) -> bool {
 }
 
 fn report_unmatched_ast_node<'tcx>(tcx: TyCtxt<'tcx>, node_kind: &str, def_id: hir::LocalDefId, span: Span) {
-    let mut diagnostic = tcx.sess.struct_warn(format!("unmatched {node_kind} in {def_path}",
+    let mut diagnostic = tcx.dcx().struct_warn(format!("unmatched {node_kind} in {def_path}",
         def_path = tcx.def_path_debug_str(def_id.to_def_id()),
     ));
-    diagnostic.set_span(span);
+    diagnostic.span(span);
     diagnostic.span_label(span, "no matching HIR node found");
     diagnostic.emit();
 }
@@ -273,7 +273,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let fn_ast = ast::FnItem { id, span, ctx, vis: vis.clone(), ident, generics: generics.clone(), sig: sig.clone(), body: body.cloned() };
 
         let Some(fn_def_id) = self.def_res.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
-        let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir().get_by_def_id(fn_def_id)) else { unreachable!() };
+        let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(fn_def_id)) else { unreachable!() };
 
         let body_res = ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir);
 
@@ -422,17 +422,17 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
                 self.visit_expr(rhs);
             }
             // Only the matched expression, and each arm's guard and body expressions can be mutated.
-            ast::ExprKind::Match(expr, arms) => {
+            ast::ExprKind::Match(expr, arms, _) => {
                 self.visit_expr(expr);
                 for arm in arms {
                     if let Some(guard) = &arm.guard { self.visit_expr(guard); }
-                    self.visit_expr(&arm.body);
+                    if let Some(body) = &arm.body { self.visit_expr(body); }
                 }
             }
             // The `else` branch of an `if` conditional must be either another `if` conditional or a block, so we do
             // not mutate `else` blocks directly, instead visiting its contents.
             ast::ExprKind::If(_, _, _) => {
-                fn inner_visit_if<'ast, T: ast::visit::Visitor<'ast>>(visitor: &mut T, expr: &'ast ast::Expr) {
+                fn inner_visit_if<'ast, T: ast::visit::Visitor<'ast, Result = ()>>(visitor: &mut T, expr: &'ast ast::Expr) {
                     let ast::ExprKind::If(cond, then, els) = &expr.kind else { unreachable!() };
 
                     visitor.visit_expr(cond);
@@ -549,15 +549,15 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
     tcx.hir_crate_items(()).definitions()
         .filter(move |&local_def_id| {
             let def_id = local_def_id.to_def_id();
-            let hir_id = tcx.hir().local_def_id_to_hir_id(local_def_id);
+            let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
 
-            matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn | hir::DefKind::Generator)
+            matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
                 // fn main() {}
                 && !entry_fn.map(|(entry_def_id, _)| def_id == entry_def_id).unwrap_or(false)
                 // const fn
                 && !tcx.is_const_fn(def_id)
                 // fn;
-                && !tcx.hir().get_by_def_id(local_def_id).body_id().is_none()
+                && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
                 // #[test] functions
                 && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test) || attr.has_name(sym::rustc_test_marker))
                 && !test_def_ids.contains(&local_def_id)
@@ -602,7 +602,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     for test in tests {
         if test.ignore { continue; }
 
-        let body = tcx.hir().body(tcx.hir().get_by_def_id(test.def_id).body_id().unwrap());
+        let body = tcx.hir().body(tcx.hir_node_by_def_id(test.def_id).body_id().unwrap());
 
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
@@ -632,12 +632,12 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             // `const` functions, like other `const` scopes, cannot be mutated.
             if tcx.is_const_fn(caller_def_id.to_def_id()) { continue; }
 
-            let Some(body_id) = tcx.hir().get_by_def_id(caller_def_id).body_id() else { continue; };
+            let Some(body_id) = tcx.hir_node_by_def_id(caller_def_id).body_id() else { continue; };
             let body = tcx.hir().body(body_id);
 
             let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, caller_def_id, krate) else { continue; };
 
-            let hir_id = tcx.hir().local_def_id_to_hir_id(caller_def_id);
+            let hir_id = tcx.local_def_id_to_hir_id(caller_def_id);
             let skip = false
                 // function in #[cfg(test)] module
                 || tests::is_in_cfg_test(tcx, hir_id)

@@ -99,7 +99,7 @@ impl<'hir> Descr for hir::StmtKind<'hir> {
     fn descr(&self) -> &'static str {
         match self {
             hir::StmtKind::Item(..) => "item",
-            hir::StmtKind::Local(..) => "local",
+            hir::StmtKind::Let(..) => "let",
             hir::StmtKind::Semi(..) => "statement expression",
             hir::StmtKind::Expr(..) => "trailing expression",
         }

@@ -78,7 +78,7 @@ pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
             if let Some(item) = item_child_by_symbol(tcx, def_id, segment) {
                 Some(item.res)
             } else if matches!(res, Res::Def(DefKind::Enum | DefKind::Struct, _)) {
-                tcx.inherent_impls(def_id).iter()
+                tcx.inherent_impls(def_id).unwrap().iter()
                     .find_map(|&impl_def_id| item_child_by_symbol(tcx, impl_def_id, segment))
                     .map(|child| child.res)
             } else {
@@ -114,12 +114,12 @@ pub fn def_id_path<'tcx>(tcx: TyCtxt<'tcx>, mut def_id: hir::DefId) -> Vec<hir::
 }
 
 pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hir::HirId, hir::Node)> {
-    let def_hir_id = tcx.hir().local_def_id_to_hir_id(def_id);
+    let def_hir_id = tcx.local_def_id_to_hir_id(def_id);
 
     let mut path = tcx.hir().parent_iter(def_hir_id).collect::<Vec<_>>();
     path.reverse();
 
-    let def_node = tcx.hir().get(def_hir_id);
+    let def_node = tcx.hir_node(def_hir_id);
     path.push((def_hir_id, def_node));
 
     path
@@ -192,7 +192,7 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
 pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> Vec<Call<'tcx>> {
     let typeck = tcx.typeck_body(body.id());
 
-    let body_owner = tcx.hir().get(tcx.hir().body_owner(body.id()));
+    let body_owner = tcx.hir_node(tcx.hir().body_owner(body.id()));
     let body_unsafety = match body_owner {
         hir::Node::Item(item) => {
             match &item.kind {

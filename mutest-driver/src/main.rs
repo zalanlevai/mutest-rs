@@ -25,7 +25,7 @@ struct RustcCallbacks {
 impl rustc_driver::Callbacks for RustcCallbacks {
     fn config(&mut self, config: &mut CompilerConfig) {
         let args = self.mutest_args.take();
-        config.parse_sess_created = Some(Box::new(move |parse_sess| {
+        config.psess_created = Some(Box::new(move |parse_sess| {
             mutest_driver::passes::track_invocation_fingerprint(parse_sess, &args);
         }));
     }

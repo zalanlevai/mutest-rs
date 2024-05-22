@@ -16,7 +16,7 @@ impl Mutation for RelationalOpEqSwapMutation {
                 ast::BinOpKind::Lt | ast::BinOpKind::Gt => "remove equality from",
                 _ => unreachable!(),
             },
-            original_bin_op = self.original_bin_op.to_string(),
+            original_bin_op = self.original_bin_op.as_str(),
         )
     }
 

@@ -6,8 +6,9 @@ use rustc_feature::UnstableFeatures;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_interface::run_compiler;
 use rustc_lint_defs::Level as LintLevel;
-use rustc_session::EarlyErrorHandler;
+use rustc_session::EarlyDiagCtxt;
 use rustc_session::config::{ExternEntry, ExternLocation, Externs, Input, OutputFilenames};
+use rustc_session::filesearch;
 use rustc_session::search_paths::SearchPath;
 use rustc_session::utils::CanonicalizedPath;
 
@@ -35,10 +36,12 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     compiler_config.opts.lint_cap = Some(LintLevel::Allow);
 
     // The generated crate code relies on the `mutest_runtime` crate (and its dependencies), which must be loaded.
-    let early_error_handler = EarlyErrorHandler::new(compiler_config.opts.error_format);
-    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&early_error_handler, &format!("crate={}", config.mutest_search_path.display())));
-    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&early_error_handler, &format!("dependency={}", config.mutest_search_path.join("deps").display())));
-    early_error_handler.abort_if_errors();
+    let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
+    let sysroot = filesearch::materialize_sysroot(compiler_config.opts.maybe_sysroot.clone());
+    let triple = &compiler_config.opts.target_triple;
+    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&sysroot, &triple, &early_dcx, &format!("crate={}", config.mutest_search_path.display()), true));
+    compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&sysroot, &triple, &early_dcx, &format!("dependency={}", config.mutest_search_path.join("deps").display()), true));
+    drop(early_dcx);
     // The externs (paths to dependencies) of the `mutest_runtime` crate are baked into it at compile time. These must
     // be propagated to any crate which depends on it.
     let mut externs = BTreeMap::<String, ExternEntry>::new();
@@ -86,11 +89,14 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
         let t_start = Instant::now();
 
+        let sess = &compiler.sess;
+        let codegen_backend = &*compiler.codegen_backend;
+
         let (linker, outputs) = compiler.enter(|queries| {
             queries.parse()?;
 
             let outputs = queries.global_ctxt()?.enter(|tcx| {
-                let _ = tcx.resolver_for_lowering(());
+                let _ = tcx.resolver_for_lowering();
 
                 let outputs = tcx.output_filenames(());
 
@@ -99,13 +105,11 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
                 Ok(outputs.clone())
             })?;
 
-            let ongoing_codegen = queries.ongoing_codegen()?;
-
-            let linker = queries.linker(ongoing_codegen)?;
+            let linker = queries.codegen_and_build_linker()?;
             Ok((linker, outputs))
         })?;
 
-        linker.link()?;
+        linker.link(sess, codegen_backend)?;
 
         Ok(CompilationPassResult {
             duration: t_start.elapsed(),

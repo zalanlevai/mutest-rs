@@ -235,7 +235,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::GlobalAsm
                     | hir::DefKind::Impl { .. }
                     | hir::DefKind::Closure
-                    | hir::DefKind::Generator
                     => {}
                 }
             }

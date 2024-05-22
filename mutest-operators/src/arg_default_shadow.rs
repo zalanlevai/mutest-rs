@@ -40,7 +40,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         if param.is_self() { return None; };
 
         let ast::PatKind::Ident(
-            ast::BindingAnnotation(_, param_mutbl),
+            ast::BindingMode(_, param_mutbl),
             param_ident,
             _,
         ) = param.pat.kind else { return None; };

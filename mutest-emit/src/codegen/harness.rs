@@ -98,7 +98,7 @@ fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
 }
 
 fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>, unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
-    let g = &sess.parse_sess.attr_id_generator;
+    let g = &sess.psess.attr_id_generator;
 
     let items = iter::once(ast::mk::item_extern_crate(sp, *sym::mutest_runtime, None))
         .chain(mutations.iter().map(|mutation| {
@@ -115,7 +115,7 @@ fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>, unsafe_targ
     let allow_non_upper_case_globals_attr = ast::mk::attr_outer(g, sp,
         Ident::new(sym::allow, sp),
         ast::mk::attr_args_delimited(sp, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-            ast::mk::tt_token_joint(sp, ast::TokenKind::Ident(*sym::non_upper_case_globals, false)),
+            ast::mk::tt_token_joint(sp, ast::TokenKind::Ident(*sym::non_upper_case_globals, ast::token::IdentIsRaw::No)),
         ])),
     );
 
@@ -232,7 +232,7 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
     fn visit_crate(&mut self, c: &mut ast::Crate) {
         ast::mut_visit::noop_visit_crate(c, self);
 
-        let g = &self.sess.parse_sess.attr_id_generator;
+        let g = &self.sess.psess.attr_id_generator;
 
         let def = self.def_site;
 
@@ -243,14 +243,14 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
         let feature_test_attr = ast::mk::attr_inner(g, def,
             Ident::new(sym::feature, def),
             ast::mk::attr_args_delimited(def, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(def, ast::TokenKind::Ident(sym::test, false)),
+                ast::mk::tt_token_joint(def, ast::TokenKind::Ident(sym::test, ast::token::IdentIsRaw::No)),
             ])),
         );
         // #![feature(custom_test_frameworks)]
         let feature_custom_test_frameworks_attr = ast::mk::attr_inner(g, def,
             Ident::new(sym::feature, def),
             ast::mk::attr_args_delimited(def, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(def, ast::TokenKind::Ident(sym::custom_test_frameworks, false)),
+                ast::mk::tt_token_joint(def, ast::TokenKind::Ident(sym::custom_test_frameworks, ast::token::IdentIsRaw::No)),
             ])),
         );
         // #![test_runner(mutest_generated::harness)]

@@ -56,6 +56,7 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(const_fmt_arguments_new)]
 #![feature(str_internals)]
 #![feature(sort_internals)]
+#![feature(panic_internals)]
 #![feature(print_internals)]
 #![feature(allocator_internals)]
 #![feature(libstd_sys_internals)]
@@ -64,14 +65,13 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![feature(allocator_api)]
 #![feature(cfg_target_thread_local)]
 #![feature(core_intrinsics)]
-#![feature(core_panic)]
 #![feature(error_in_core)]
 #![feature(derive_clone_copy)]
 #![feature(derive_eq)]
 #![feature(coverage_attribute)]
 #![feature(rt)]
 #![feature(rustc_private)]
-#![feature(stdsimd)]
+#![feature(stdarch_internal)]
 #![feature(structural_match)]
 #![feature(thread_local)]
 "#;
@@ -171,7 +171,7 @@ fn mod_file_path(
         DirOwnership::UnownedViaBlock => None,
     };
 
-    let module_path = default_submod_path(&sess.parse_sess, ident, relative, dir_path);
+    let module_path = default_submod_path(&sess.psess, ident, relative, dir_path);
 
     match dir_ownership {
         DirOwnership::Owned { .. } => module_path,
@@ -233,7 +233,7 @@ fn parse_external_mod(
 ) -> ExternalMod {
     let module_path = mod_file_path(sess, dir_path, dir_ownership, ident, attrs);
 
-    let mut parser = rustc_parse::new_parser_from_file(&sess.parse_sess, &module_path.file_path, Some(span));
+    let mut parser = rustc_parse::new_parser_from_file(&sess.psess, &module_path.file_path, Some(span));
     let (mut inner_attrs, items, inner_span) = parser.parse_mod(&ast::token::Eof).expect("parsing module failed");
     attrs.append(&mut inner_attrs);
 
@@ -341,7 +341,7 @@ fn remove_macro_attrs_from_item(item: &mut ast::Item) {
         | ast::ItemKind::Struct(variant_data, _)
         | ast::ItemKind::Union(variant_data, _) => {
             match variant_data {
-                | ast::VariantData::Struct(fields, _)
+                | ast::VariantData::Struct { fields, recovered: _ }
                 | ast::VariantData::Tuple(fields, _)
                 => {
                     for field in fields {
@@ -527,7 +527,7 @@ impl<'tcx, 'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tcx, 'tst> {
         }
 
         if let Some(_test) = self.tests.iter().find(|&test| test.item.id == item.id) {
-            let g = &self.sess.parse_sess.attr_id_generator;
+            let g = &self.sess.psess.attr_id_generator;
 
             // #[test]
             let test_attr = ast::mk::attr_outer(g, item.span, Ident::new(sym::test, item.span), ast::AttrArgs::Empty);

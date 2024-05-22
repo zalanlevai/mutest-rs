@@ -233,8 +233,8 @@ pub mod mk {
         }
     }
 
-    pub fn trait_bound(modifier: ast::TraitBoundModifier, path: ast::Path) -> ast::GenericBound {
-        ast::GenericBound::Trait(self::poly_trait_ref(path.span, path), modifier)
+    pub fn trait_bound(modifiers: ast::TraitBoundModifiers, path: ast::Path) -> ast::GenericBound {
+        ast::GenericBound::Trait(self::poly_trait_ref(path.span, path), modifiers)
     }
 
     pub fn lifetime_bound(lifetime: ast::Lifetime) -> ast::GenericBound {
@@ -332,12 +332,12 @@ pub mod mk {
         self::pat(sp, ast::PatKind::Lit(expr))
     }
 
-    pub fn pat_ident_binding_mode(sp: Span, ident: Ident, binding: ast::BindingAnnotation) -> P<ast::Pat> {
+    pub fn pat_ident_binding_mode(sp: Span, ident: Ident, binding: ast::BindingMode) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::Ident(binding, ident.with_span_pos(sp), None))
     }
 
     pub fn pat_ident(sp: Span, ident: Ident) -> P<ast::Pat> {
-        self::pat_ident_binding_mode(sp, ident, ast::BindingAnnotation::NONE)
+        self::pat_ident_binding_mode(sp, ident, ast::BindingMode::NONE)
     }
 
     pub fn pat_path(sp: Span, path: ast::Path) -> P<ast::Pat> {
@@ -352,11 +352,11 @@ pub mod mk {
         self::pat(sp, ast::PatKind::TupleStruct(None, path, pats))
     }
 
-    pub fn pat_struct(sp: Span, path: ast::Path, field_pats: ThinVec<ast::PatField>, rest: bool) -> P<ast::Pat> {
+    pub fn pat_struct(sp: Span, path: ast::Path, field_pats: ThinVec<ast::PatField>, rest: ast::PatFieldsRest) -> P<ast::Pat> {
         self::pat(sp, ast::PatKind::Struct(None, path, field_pats, rest))
     }
 
-    pub fn arm(sp: Span, pat: P<ast::Pat>, guard: Option<P<ast::Expr>>, expr: P<ast::Expr>) -> ast::Arm {
+    pub fn arm(sp: Span, pat: P<ast::Pat>, guard: Option<P<ast::Expr>>, expr: Option<P<ast::Expr>>) -> ast::Arm {
         ast::Arm {
             id: ast::DUMMY_NODE_ID,
             span: sp,
@@ -369,7 +369,7 @@ pub mod mk {
     }
 
     pub fn expr_match(span: Span, expr: P<ast::Expr>, arms: ThinVec<ast::Arm>) -> P<ast::Expr> {
-        self::expr(span, ast::ExprKind::Match(expr, arms))
+        self::expr(span, ast::ExprKind::Match(expr, arms, ast::MatchKind::Prefix))
     }
 
     pub fn expr_if(sp: Span, cond: P<ast::Expr>, then: P<ast::Block>, els: Option<P<ast::Block>>) -> P<ast::Expr> {
@@ -459,7 +459,7 @@ pub mod mk {
             binder: ast::ClosureBinder::NotPresent,
             capture_clause: ast::CaptureBy::Ref,
             constness: ast::Const::No,
-            asyncness: ast::Async::No,
+            coroutine_kind: None,
             movability: ast::Movability::Movable,
             fn_decl,
             body,
@@ -694,7 +694,7 @@ pub mod mk {
 
     pub fn item_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: ThinVec<ast::FieldDef>) -> P<ast::Item> {
         self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
-            ast::VariantData::Struct(fields, false),
+            ast::VariantData::Struct { fields, recovered: ast::Recovered::No },
             generics.unwrap_or_default(),
         ))
     }
@@ -723,17 +723,20 @@ pub mod mk {
 
     pub fn stmt_local(sp: Span, mutbl: bool, ident: Ident, ty: Option<P<ast::Ty>>, kind: ast::LocalKind) -> ast::Stmt {
         let pat = match mutbl {
-            true => self::pat_ident_binding_mode(sp, ident, ast::BindingAnnotation::MUT),
+            true => self::pat_ident_binding_mode(sp, ident, ast::BindingMode::MUT),
             false => self::pat_ident(sp, ident),
         };
 
-        self::stmt(sp, ast::StmtKind::Local(P(ast::Local {
+        let has_ty = ty.is_some();
+
+        self::stmt(sp, ast::StmtKind::Let(P(ast::Local {
             id: ast::DUMMY_NODE_ID,
             span: sp,
             attrs: ast::AttrVec::new(),
             pat,
             ty,
             kind,
+            colon_sp: has_ty.then_some(sp),
             tokens: None,
         })))
     }
@@ -790,15 +793,21 @@ pub mod mk {
         ast::tokenstream::TokenTree::Token(self::token(sp, kind), ast::tokenstream::Spacing::Joint)
     }
 
+    pub fn tt_token_joint_hidden(sp: Span, kind: ast::token::TokenKind) -> ast::tokenstream::TokenTree {
+        ast::tokenstream::TokenTree::Token(self::token(sp, kind), ast::tokenstream::Spacing::JointHidden)
+    }
+
     pub fn tt_delimited(sp: Span, delimiter: ast::token::Delimiter, token_stream: ast::tokenstream::TokenStream) -> ast::tokenstream::TokenTree {
-        ast::tokenstream::TokenTree::Delimited(ast::tokenstream::DelimSpan::from_single(sp), delimiter, token_stream)
+        let delim_span = ast::tokenstream::DelimSpan::from_single(sp);
+        let delim_spacing = ast::tokenstream::DelimSpacing::new(ast::tokenstream::Spacing::Joint, ast::tokenstream::Spacing::Alone);
+        ast::tokenstream::TokenTree::Delimited(delim_span, delim_spacing, delimiter, token_stream)
     }
 
     pub fn ts_path(sp: Span, mut path: ast::Path) -> Vec<ast::tokenstream::TokenTree> {
         assert!(path.segments.last().is_some_and(|s| s.args.is_none()));
 
-        let path_sep_token = |sp: Span| self::tt_token_joint(sp, ast::token::TokenKind::ModSep);
-        let segment_token = |sp: Span, segment: ast::PathSegment| self::tt_token_joint(sp, ast::token::TokenKind::Ident(segment.ident.name, false));
+        let path_sep_token = |sp: Span| self::tt_token_joint(sp, ast::token::TokenKind::PathSep);
+        let segment_token = |sp: Span, segment: ast::PathSegment| self::tt_token_joint_hidden(sp, ast::token::TokenKind::Ident(segment.ident.name, ast::token::IdentIsRaw::No));
 
         let is_global = !path.segments[0].ident.is_path_segment_keyword();
         let mut tokens = Vec::with_capacity(2 * path.segments.len() - 1 + is_global as usize);
@@ -824,7 +833,7 @@ impl Descr for ast::StmtKind {
     fn descr(&self) -> &'static str {
         match self {
             ast::StmtKind::Item(..) => "item",
-            ast::StmtKind::Local(..) => "local",
+            ast::StmtKind::Let(..) => "let",
             ast::StmtKind::Semi(..) => "statement expression",
             ast::StmtKind::Expr(..) => "trailing expression",
             ast::StmtKind::MacCall(..) => "macro call",
@@ -854,7 +863,9 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::Match(..) => "match",
             ast::ExprKind::Closure(..) => "closure",
             ast::ExprKind::Block(..) => "block",
-            ast::ExprKind::Async(..) => "async",
+            ast::ExprKind::Gen(.., ast::GenBlockKind::Async) => "async block",
+            ast::ExprKind::Gen(.., ast::GenBlockKind::Gen) => "generator block",
+            ast::ExprKind::Gen(.., ast::GenBlockKind::AsyncGen) => "async generator block",
             ast::ExprKind::Await(..) => "await",
             ast::ExprKind::TryBlock(..) => "try block",
             ast::ExprKind::Assign(..) => "assignment",
@@ -880,7 +891,8 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::Become(..) => "become",
             ast::ExprKind::IncludedBytes(..) => "included bytes",
             ast::ExprKind::FormatArgs(..) => "format_args",
-            ast::ExprKind::Err => "error",
+            ast::ExprKind::Err(..) => "error",
+            ast::ExprKind::Dummy => "dummy",
         }
     }
 }
@@ -934,5 +946,42 @@ pub mod inspect {
         }
 
         false
+    }
+}
+
+pub mod mut_visit {
+    pub use rustc_ast::mut_visit::*;
+
+    use rustc_ast::*;
+
+    // Copy of `rustc_ast::mut_visit::noop_visit_vis`, which has been made private.
+    pub fn noop_visit_vis<T: MutVisitor>(visibility: &mut Visibility, vis: &mut T) {
+        match &mut visibility.kind {
+            VisibilityKind::Public | VisibilityKind::Inherited => {}
+            VisibilityKind::Restricted { path, id, shorthand: _ } => {
+                vis.visit_path(path);
+                vis.visit_id(id);
+            }
+        }
+        vis.visit_span(&mut visibility.span);
+    }
+
+    // Copy of `rustc_ast::mut_visit::noop_visit_constraint`, which has been made private.
+    pub fn noop_visit_constraint<T: MutVisitor>(assoc_constraint: &mut AssocConstraint, vis: &mut T) {
+        vis.visit_id(&mut assoc_constraint.id);
+        vis.visit_ident(&mut assoc_constraint.ident);
+        if let Some(gen_args) = &mut assoc_constraint.gen_args { vis.visit_generic_args(gen_args); }
+        match &mut assoc_constraint.kind {
+            AssocConstraintKind::Equality { term } => match term {
+                Term::Ty(ty) => vis.visit_ty(ty),
+                Term::Const(c) => vis.visit_anon_const(c),
+            }
+            AssocConstraintKind::Bound { bounds } => {
+                for bound in bounds {
+                    vis.visit_param_bound(bound);
+                }
+            }
+        }
+        vis.visit_span(&mut assoc_constraint.span);
     }
 }

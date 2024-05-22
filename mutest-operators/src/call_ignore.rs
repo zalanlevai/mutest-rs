@@ -33,7 +33,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     let ty_default = (res::fns::default(tcx), tcx.mk_args_trait(expr_ty, vec![]));
     if let Some(ty_default_impl) = tcx.resolve_instance(tcx.param_env(f).and(ty_default)).ok().flatten()
         && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
-        && let Some(ty_default_impl_body_id) = tcx.hir().get_by_def_id(ty_default_impl_def_id).body_id()
+        && let Some(ty_default_impl_body_id) = tcx.hir_node_by_def_id(ty_default_impl_def_id).body_id()
     {
         let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
             .flat_map(|call| tcx.resolve_instance(tcx.param_env(call.def_id).and((call.def_id, call.generic_args))).ok().flatten());
@@ -89,7 +89,9 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
 
         // A type annotation with the originally resolved type has to be added to the ignoring
         // `let _ = $expr` statement to guarantee the same callee resolution.
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, def, expr_ty, ty::DefPathHandling::PreferVisible(ty::ScopedItemPaths::Trimmed), ty::OpaqueTyHandling::Infer) else { return None; };
+        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
+        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
+        let Some(expr_ty_ast) = ty::ast_repr(tcx, def, expr_ty, def_path_handling, opaque_ty_handling) else { return None; };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);

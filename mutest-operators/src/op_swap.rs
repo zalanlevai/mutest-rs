@@ -50,15 +50,15 @@ macro define_op_swap_operator(
         fn display_name(&self) -> String {
             format!(concat!("swap ", $($bin_op_group, " ",)? "{op_kind} `{original_bin_op}` for `{replacement_bin_op}`"),
                 op_kind = self.op_kind.desc(),
-                original_bin_op = self.original_bin_op.to_string(),
-                replacement_bin_op = self.replacement_bin_op.to_string(),
+                original_bin_op = self.original_bin_op.as_str(),
+                replacement_bin_op = self.replacement_bin_op.as_str(),
             )
         }
 
         fn span_label(&self) -> String {
             format!(concat!("swap ", $($bin_op_group, " ",)? "{op_kind} for `{replacement_bin_op}`"),
                 op_kind = self.op_kind.desc(),
-                replacement_bin_op = self.replacement_bin_op.to_string(),
+                replacement_bin_op = self.replacement_bin_op.as_str(),
             )
         }
     }

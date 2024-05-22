@@ -11,14 +11,14 @@ pub struct EqOpInvertMutation {
 impl Mutation for EqOpInvertMutation {
     fn display_name(&self) -> String {
         format!("invert equality operator `{original_bin_op}` to `{replacement_bin_op}`",
-            original_bin_op = self.original_bin_op.to_string(),
-            replacement_bin_op = self.replacement_bin_op.to_string(),
+            original_bin_op = self.original_bin_op.as_str(),
+            replacement_bin_op = self.replacement_bin_op.as_str(),
         )
     }
 
     fn span_label(&self) -> String {
         format!("invert equality operator to `{replacement_bin_op}`",
-            replacement_bin_op = self.replacement_bin_op.to_string(),
+            replacement_bin_op = self.replacement_bin_op.as_str(),
         )
     }
 }

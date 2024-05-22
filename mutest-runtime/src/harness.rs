@@ -14,6 +14,8 @@ use crate::test_runner;
 use crate::thread_pool::ThreadPool;
 
 mod test {
+    #![allow(unused_imports)]
+
     pub use ::test::*;
     pub use ::test::test::*;
 }
