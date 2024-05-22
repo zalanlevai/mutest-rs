@@ -255,9 +255,24 @@ impl DefPath {
     }
 
     pub fn ast_path(&self) -> ast::Path {
-        let segments = self.segments.iter().map(|segment| {
-            ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: segment.ident, args: None }
+        let Some(first_segment) = self.segments.first() else { panic!("empty def path") };
+        let mut global = first_segment.def_id.is_crate_root();
+
+        let mut segments = self.segments.iter().map(|segment| {
+            let mut ident = segment.ident;
+
+            if segment.def_id == LOCAL_CRATE.as_def_id() {
+                ident = Ident::new(kw::Crate, DUMMY_SP);
+                // We must not make the path global if we use the `crate` keyword.
+                global = false;
+            }
+
+            ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None }
         }).collect::<ThinVec<_>>();
+
+        if global {
+            segments.insert(0, ast::PathSegment::path_root(DUMMY_SP));
+        }
 
         ast::Path { span: DUMMY_SP, segments, tokens: None }
     }
