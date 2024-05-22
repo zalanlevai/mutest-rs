@@ -31,6 +31,8 @@ pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty:
 pub use print::ast_repr;
 
 pub mod print {
+    use std::iter;
+
     use rustc_middle::mir;
     use rustc_middle::ty::{self, Ty, TyCtxt};
     use rustc_session::cstore::{ExternCrate, ExternCrateSource};
@@ -60,7 +62,12 @@ pub mod print {
 
         fn path_crate(&mut self, cnum: hir::CrateNum) -> Result<Self::Path, Self::Error>;
         fn path_append(&mut self, path: Self::Path, disambiguated_data: &hir::DisambiguatedDefPathData) -> Result<Self::Path, Self::Error>;
-        fn path_generic_args(&mut self, path: Self::Path, args: &[ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error>;
+        fn path_generic_args(
+            &mut self,
+            path: Self::Path,
+            args: &[ty::GenericArg<'tcx>],
+            assoc_constraints: impl Iterator<Item = ty::ExistentialProjection<'tcx>>,
+        ) -> Result<Self::Path, Self::Error>;
 
         fn print_res_def_path(&mut self, def_path: res::DefPath) -> Result<Self::Path, Self::Error>;
 
@@ -217,9 +224,16 @@ pub mod print {
             Ok(path)
         }
 
-        fn path_generic_args(&mut self, mut path: Self::Path, args: &[ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error> {
-            let args_ast = args.iter()
-                .map(|arg| -> Result<_, Self::Error> {
+        fn path_generic_args(
+            &mut self,
+            mut path: Self::Path,
+            args: &[ty::GenericArg<'tcx>],
+            assoc_constraints: impl Iterator<Item = ty::ExistentialProjection<'tcx>>,
+        ) -> Result<Self::Path, Self::Error> {
+            let mut errors = vec![];
+
+            let mut args_ast = args.iter()
+                .map(|arg: &ty::GenericArg<'tcx>| -> Result<Option<ast::AngleBracketedArg>, Self::Error> {
                     match arg.unpack() {
                         ty::GenericArgKind::Type(ty) => {
                             let ty_ast = self.print_ty(ty)?;
@@ -235,8 +249,43 @@ pub mod print {
                         }
                     }
                 })
-                .flat_map(Result::transpose)
-                .try_collect()?;
+                .filter_map(|res| {
+                    if let Err(err) = res { errors.push(err); return None; }
+                    res.ok().flatten()
+                })
+                .collect::<ThinVec<_>>();
+
+            assoc_constraints
+                .map(|assoc_constraint| -> Result<_, Self::Error> {
+                    let name = self.tcx.associated_item(assoc_constraint.def_id).name;
+
+                    let term_ast = match assoc_constraint.term.unpack() {
+                        ty::TermKind::Ty(ty) => ast::Term::Ty(self.print_ty(ty)?),
+                        ty::TermKind::Const(ct) => ast::Term::Const(self.print_const(ct)?),
+                    };
+
+                    Ok(ast::AngleBracketedArg::Constraint(ast::AssocConstraint {
+                        id: ast::DUMMY_NODE_ID,
+                        ident: Ident::new(name, self.sp),
+                        kind: ast::AssocConstraintKind::Equality { term: term_ast },
+                        gen_args: None,
+                        span: self.sp,
+                    }))
+                })
+                .filter_map(|res| {
+                    if let Err(err) = res { errors.push(err); return None; }
+                    res.ok()
+                })
+                .collect_into(&mut args_ast);
+
+            match errors.len() {
+                0 => {}
+                1 => return Err(errors.remove(0)),
+                _ => return Err(format!("encountered {errors} errors: {errs}",
+                    errors = errors.len(),
+                    errs = errors.into_iter().intersperse("; ".to_owned()).collect::<String>(),
+                )),
+            }
 
             let Some(last_segment) = path.segments.last_mut() else { return Err("encountered empty path".to_owned()) };
             last_segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: self.sp, args: args_ast })));
@@ -252,7 +301,7 @@ pub mod print {
             if let DefPathHandling::PreferVisible(scoped_item_paths) | DefPathHandling::ForceVisible(scoped_item_paths) = self.def_path_handling {
                 if let Some(path) = self.try_print_visible_def_path(def_id, scoped_item_paths)? {
                     if args.is_empty() { return Ok(path); }
-                    return self.path_generic_args(path, args);
+                    return self.path_generic_args(path, args, iter::empty());
                 }
 
                 if let DefPathHandling::ForceVisible(_) = self.def_path_handling {
@@ -426,7 +475,8 @@ pub mod print {
                 let principal = principal.with_self_ty(self.tcx, dummy_self_ty);
 
                 let args = self.tcx.generics_of(principal.def_id).own_args_no_defaults(self.tcx, principal.args);
-                let path = self.path_generic_args(def_path, args)?;
+                let assoc_constraints = predicates.projection_bounds().map(|bounds| bounds.skip_binder());
+                let path = self.path_generic_args(def_path, args, assoc_constraints)?;
                 Ok(Some(ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, path)))
             })?;
 

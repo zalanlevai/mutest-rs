@@ -4,6 +4,7 @@
 #![feature(f16)]
 #![feature(f128)]
 #![feature(if_let_guard)]
+#![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
 #![feature(lazy_cell)]
