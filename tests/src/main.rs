@@ -112,6 +112,8 @@ impl Expectation {
     }
 }
 
+const BUILD_OUT_DIR: &str = "target/mutest_test/debug/deps";
+
 struct Opts {
     pub filters: Option<Vec<String>>,
     pub bless: bool,
@@ -217,7 +219,7 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
 
     cmd.args(["--crate-type", "lib"]);
 
-    cmd.args(["--out-dir", "target/mutest_test/debug/deps"]);
+    cmd.args(["--out-dir", BUILD_OUT_DIR]);
 
     // Trick mutest-driver into invoking its behaviour, rather than falling back to a rustc invocation.
     cmd.env("CARGO_PRIMARY_PACKAGE", "1");
@@ -387,6 +389,9 @@ fn main() {
     };
 
     let t_tests_start = Instant::now();
+
+    // Ensure build output directory exists.
+    fs::create_dir_all(BUILD_OUT_DIR).expect("cannot create build output directory");
 
     fn run_tests_in_dir(dir_path: &Path, opts: &Opts, results: &mut TestRunResults) {
         fn run_tests_in_dir_impl(root_dir: &Path, dir_path: &Path, opts: &Opts, results: &mut TestRunResults) {
