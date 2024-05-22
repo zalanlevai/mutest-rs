@@ -162,10 +162,9 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
     let mut directives = vec![];
     let mut line = String::new();
     while reader.read_line(&mut line).expect(&format!("cannot read contents of `{}`", path.display())) >= 1 {
-        let Some(directive) = line.trim_start().strip_prefix("//@").map(str::trim) else { continue; };
-
-        directives.push(directive.to_owned());
-
+        if let Some(directive) = line.trim_start().strip_prefix("//@").map(str::trim) {
+            directives.push(directive.to_owned());
+        }
         line.clear();
     }
 
