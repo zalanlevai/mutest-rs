@@ -22,12 +22,12 @@ impl OpKind {
     }
 }
 
-fn impls_matching_op<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, lhs_ty: Ty<'tcx>, rhs_ty: Ty<'tcx>, expr_ty: Ty<'tcx>, op_trait: hir::DefId, op_kind: OpKind) -> bool {
+fn impls_matching_op<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, caller_def_id: hir::LocalDefId, lhs_ty: Ty<'tcx>, rhs_ty: Ty<'tcx>, expr_ty: Ty<'tcx>, op_trait: hir::DefId, op_kind: OpKind) -> bool {
     if !ty::impls_trait_with_env(tcx, param_env, lhs_ty, op_trait, vec![rhs_ty.into()]) { return false; }
 
     match op_kind {
         OpKind::Standalone => {
-            ty::impl_assoc_ty(tcx, param_env, lhs_ty, op_trait, vec![rhs_ty.into()], sym::Output)
+            ty::impl_assoc_ty(tcx, param_env, caller_def_id, lhs_ty, op_trait, vec![rhs_ty.into()], sym::Output)
                 .map(|ty| ty == expr_ty).unwrap_or(false)
         }
         OpKind::Assign => true,
@@ -93,8 +93,9 @@ macro define_op_swap_operator(
                 _ => unreachable!(),
             };
 
+            let caller_def_id = f_hir.owner_id.def_id;
             #[allow(unused_variables)]
-            let expr_impls_matching_op = |op_trait| impls_matching_op(tcx, param_env, lhs_ty, rhs_ty, expr_ty, op_trait, op_kind);
+            let expr_impls_matching_op = |op_trait| impls_matching_op(tcx, param_env, caller_def_id, lhs_ty, rhs_ty, expr_ty, op_trait, op_kind);
 
             let mapped_bin_op = match (bin_op, op_kind) {
                 $(

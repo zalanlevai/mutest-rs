@@ -19,11 +19,12 @@ pub fn impls_trait<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::Def
     impls_trait_with_env(tcx, ty::ParamEnv::empty(), ty, trait_def_id, args)
 }
 
-pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>, assoc_ty: Symbol) -> Option<Ty<'tcx>> {
+pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, caller_def_id: hir::LocalDefId, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>, assoc_ty: Symbol) -> Option<Ty<'tcx>> {
     tcx.associated_items(trait_def_id)
         .find_by_name_and_kind(tcx, Ident::new(assoc_ty, DUMMY_SP), ty::AssocKind::Type, trait_def_id)
         .and_then(|assoc_item| {
-            let proj = Ty::new_projection(tcx, assoc_item.def_id, tcx.mk_args_trait(ty, args));
+            let args = tcx.with_opt_host_effect_param(caller_def_id, trait_def_id, tcx.mk_args_trait(ty, args));
+            let proj = Ty::new_projection(tcx, assoc_item.def_id, args);
             tcx.try_normalize_erasing_regions(param_env, proj).ok()
         })
 }
