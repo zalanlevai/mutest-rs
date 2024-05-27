@@ -78,6 +78,17 @@ cargo mutest -p <PACKAGE> run
 
 See `--help` for more options and subcommands.
 
+### Using `cfg(mutest)`
+
+When running `cargo mutest`, the `mutest` cfg is set. This can be used to detect if code is running under mutest-rs, and enable conditional compilation based on it.
+
+Starting with Rust 1.80, cfgs are checked against a known set of config names and values. If your Cargo package is checked with a regular Cargo command, it will warn you about the "unexpected" `mutest` cfg. To [let rustc know that this custom cfg is expected](https://blog.rust-lang.org/2024/05/06/check-cfg.html#expecting-custom-cfgs), ensure that `cfg(mutest)` is present in the `[lints.rust.unexpected_cfgs.check-cfg]` array in the package's `Cargo.toml`, like so:
+
+```toml
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(mutest)"] }
+```
+
 ### Annotating code with tool attributes
 
 mutest-rs provides [tool attributes](https://doc.rust-lang.org/reference/attributes.html#tool-attributes) that can be used to optionally annotate your code for use with the tool. Note, that these attributes are only available when running `cargo mutest`, so they need to be wrapped in `#[cfg_attr(mutest, <MUTEST_ATTRIBUTE>)]` for regular Cargo commands to run.

@@ -135,6 +135,9 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
         track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
     }));
 
+    // Register #[cfg(mutest)] as a valid cfg.
+    compiler_config.crate_check_cfg.push("cfg(mutest, values(none()))".to_owned());
+    // Enable #[cfg(mutest)].
     compiler_config.crate_cfg.push("mutest".to_owned());
 
     compiler_config
