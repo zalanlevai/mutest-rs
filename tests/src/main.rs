@@ -194,6 +194,7 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
                 "stderr" => { expectations.insert(Expectation::StdErr { empty: false }); }
                 "stderr: empty" => { expectations.insert(Expectation::StdErr { empty: true }); }
 
+                _ if directive.starts_with("rustc-flags:") => {}
                 _ if directive.starts_with("mutest-flags:") => {}
                 _ if directive.starts_with("mutest-subcommand-flags:") => {}
 
@@ -225,6 +226,10 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
     cmd.arg("--test");
 
     cmd.env("MUTEST_SEARCH_PATH", "target/release");
+
+    let rustc_flags = directives.iter().filter_map(|d| d.strip_prefix("rustc-flags:").map(str::trim))
+        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
+    cmd.args(rustc_flags);
 
     let mut mutest_args = vec![];
     directives.iter().filter_map(|d| d.strip_prefix("mutest-flags:").map(str::trim))
