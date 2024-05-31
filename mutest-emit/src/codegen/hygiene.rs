@@ -56,6 +56,10 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
 
     /// Keep track of the current scope (e.g. items and bodies) for relative name resolution.
     current_scope: Option<hir::DefId>,
+    /// Keep track of the current body's resolutions for interfacing with the HIR.
+    current_body_res: Option<ast_lowering::BodyResolutions<'tcx>>,
+    /// Keep track of the current type checking context for type-dependent name resolution.
+    current_typeck_ctx: Option<&'tcx ty::TypeckResults<'tcx>>,
     /// We do not want to sanitize some idents (mostly temporarily) in the AST.
     /// During the visit we keep track of these so that they can be exluded from sanitization.
     protected_idents: FxHashSet<Ident>,
@@ -256,9 +260,33 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         // Skip generated items corresponding to compiler (and mutest-rs) internals.
         if item.id == ast::DUMMY_NODE_ID || item.span == DUMMY_SP { return smallvec![item]; }
 
-        let Some(def_id) = self.def_res.node_id_to_def_id.get(&item.id) else { unreachable!() };
+        let Some(&def_id) = self.def_res.node_id_to_def_id.get(&item.id) else { unreachable!() };
+
+        // Store new context scope.
         let previous_scope = mem::replace(&mut self.current_scope, Some(def_id.to_def_id()));
+
+        // Store new typeck scope, if needed.
+        let previous_typeck_ctx = self.current_typeck_ctx;
+        let typeck_root_def_id = self.tcx.typeck_root_def_id(def_id.to_def_id());
+        let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
+        if let Some(typeck_root_body_id) = self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
+            if !previous_typeck_ctx.is_some_and(|previous_typeck_ctx| typeck_root_def_id == previous_typeck_ctx.hir_owner.to_def_id()) {
+                self.current_typeck_ctx = Some(self.tcx.typeck_body(typeck_root_body_id));
+            }
+        }
+
+        // Store new body resolution scope, if available.
+        let previous_body_res = self.current_body_res.take();
+        if let Some(fn_ast) = ast::FnItem::from_item(&item) {
+            let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+            self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
+        }
+
         let item = ast::mut_visit::noop_flat_map_item(item, self);
+
+        // Restore previous context.
+        self.current_body_res = previous_body_res;
+        self.current_typeck_ctx = previous_typeck_ctx;
         self.current_scope = previous_scope;
 
         item
@@ -279,6 +307,11 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
     fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
         let mut protected_ident = None;
+
+        // HACK: Even though NodeId is a Copy type, the copy itself
+        //       counts as an immutable borrow, so we have to do it
+        //       before `&mut expr.kind`.
+        let expr_id = expr.id;
 
         match &mut expr.kind {
             ast::ExprKind::Struct(struct_expr) => 'arm: {
@@ -301,7 +334,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     field.is_shorthand = false;
                 }
             }
-            ast::ExprKind::Field(_, field_ident) => 'arm: {
+            ast::ExprKind::Field(base_expr, field_ident) => 'arm: {
                 // Idents cannot start with a digit, therefore they must correspond
                 // to an unnamed field reference which must not be sanitized.
                 if field_ident.name.as_str().starts_with(|c: char| c.is_ascii_digit()) {
@@ -309,19 +342,38 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     break 'arm;
                 }
 
-                // NOTE: We need to eventually resolve fields through the typed HIR, as these are
-                //       highly type-dependent and their name resolution is performed during type checking.
-                // TODO: Use the HIR Field node to call `tcx.typeck_results().field_index(expr_hir.hir_id)`.
-                //       Sanitize the field ident if the referenced field is from a macro expansion.
+                let Some(typeck) = &self.current_typeck_ctx else { break 'arm; };
+                let Some(body_res) = &self.current_body_res else { break 'arm; };
+
+                let Some(base_expr_hir) = body_res.hir_expr(&base_expr) else { break 'arm; };
+                // HACK: The borrow checker does not allow for immutably referencing
+                //       the expression for the `hir_expr` call because of
+                //       the `&mut expr.kind` partial borrow above.
+                let Some(expr_hir) = body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+
+                let field_idx = typeck.field_index(expr_hir.hir_id);
+
+                let base_ty = typeck.expr_ty(base_expr_hir);
+                let ty::TyKind::Adt(adt_def, _) = base_ty.kind() else { unreachable!() };
+                let field_def = &adt_def.non_enum_variant().fields[field_idx];
+
+                // HACK: Copy ident from definition for correct sanitization later.
+                *field_ident = field_def.ident(self.tcx);
             }
-            ast::ExprKind::MethodCall(call) => {
-                // NOTE: We need to eventually resolve method calls through the typed HIR, as these are
-                //       highly type-dependent and their name resolution is performed during type checking.
-                // TODO: Use the HIR MethodCall node to call `tcx.typeck_results().type_dependent_def_id(expr_hir.hir_id)`.
-                //       Sanitize the function ident if the called definition is from a macro expansion.
-                // HACK: For now, we do not sanitize method call idents, which is the more likely scenario
-                //       (i.e. the associated function is not defined in a trait defined by a macro).
-                protected_ident = Some(call.seg.ident);
+            ast::ExprKind::MethodCall(call) => 'arm: {
+                let Some(typeck) = &self.current_typeck_ctx else { break 'arm; };
+                let Some(body_res) = &self.current_body_res else { break 'arm; };
+
+                // HACK: The borrow checker does not allow for immutably referencing
+                //       the expression for the `hir_expr` call because of
+                //       the `&mut expr.kind` partial borrow above.
+                let Some(expr_hir) = body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+
+                let Some(call_def_id) = typeck.type_dependent_def_id(expr_hir.hir_id) else { unreachable!() };
+
+                // HACK: Copy ident from definition for correct sanitization later.
+                let Some(call_item_ident) = self.tcx.opt_item_ident(call_def_id) else { unreachable!() };
+                call.seg.ident = call_item_ident;
             }
             _ => {}
         }
@@ -403,6 +455,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
         tcx,
         def_res,
         current_scope: Some(LOCAL_CRATE.as_def_id()),
+        current_body_res: None,
+        current_typeck_ctx: None,
         protected_idents: Default::default(),
     };
     sanitizer.visit_crate(krate);

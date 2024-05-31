@@ -21,6 +21,24 @@ pub struct FnItem {
     pub body: Option<ast::Block>,
 }
 
+impl FnItem {
+    pub fn from_item(item: &ast::Item) -> Option<Self> {
+        let &ast::Item { id, span, ref vis, ident, ref kind, .. } = item;
+        let ast::ItemKind::Fn(fn_item) = kind else { return None; };
+        let ast::Fn { generics, sig, body, .. } = &**fn_item;
+        Some(Self {
+            id,
+            span,
+            ctx: visit::FnCtxt::Free,
+            vis: vis.clone(),
+            ident,
+            generics: generics.clone(),
+            sig: sig.clone(),
+            body: body.clone().map(P::into_inner),
+        })
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum DefItem<'ast> {
     Item(&'ast ast::Item),
