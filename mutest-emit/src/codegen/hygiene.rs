@@ -50,6 +50,13 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident) {
     ));
 }
 
+/// Copy syntax context of definition-site ident span to use-site ident
+/// so that the use-site ident can be appropriately sanitized by
+/// `sanitize_ident_if_from_expansion`.
+fn copy_def_span_ctxt(ident: &mut Ident, def_ident_span: &Span) {
+    ident.span = ident.span.with_ctxt(def_ident_span.ctxt());
+}
+
 struct MacroExpansionSanitizer<'tcx, 'op> {
     tcx: TyCtxt<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
@@ -119,8 +126,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             .find(|assoc_item| assoc_item.kind == assoc_kind)
                                         {
                                             // Copy and sanitize assoc item definition ident.
-                                            let Some(assoc_item_ident) = self.tcx.opt_item_ident(assoc_item.def_id) else { unreachable!() };
-                                            assoc_constraint.ident = assoc_item_ident;
+                                            let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
+                                            copy_def_span_ctxt(&mut assoc_constraint.ident, &assoc_item_ident_span);
                                             sanitize_ident_if_from_expansion(&mut assoc_constraint.ident);
                                         }
                                     }
@@ -327,8 +334,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                             variant_def_id = variant_def.def_id,
                         );
                     };
-                    // HACK: Copy ident from definition for correct sanitization later.
-                    field.ident = field_def.ident(self.tcx);
+                    // HACK: Copy ident syntax context from definition for correct sanitization later.
+                    copy_def_span_ctxt(&mut field.ident, &field_def.ident(self.tcx).span);
                     // NOTE: We have to disable shorthand syntax to ensure that
                     //       the correct field ident appears in printed code.
                     field.is_shorthand = false;
@@ -357,8 +364,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 let ty::TyKind::Adt(adt_def, _) = base_ty.kind() else { unreachable!() };
                 let field_def = &adt_def.non_enum_variant().fields[field_idx];
 
-                // HACK: Copy ident from definition for correct sanitization later.
-                *field_ident = field_def.ident(self.tcx);
+                // HACK: Copy ident syntax context from definition for correct sanitization later.
+                copy_def_span_ctxt(field_ident, &field_def.ident(self.tcx).span);
             }
             ast::ExprKind::MethodCall(call) => 'arm: {
                 let Some(typeck) = &self.current_typeck_ctx else { break 'arm; };
@@ -371,9 +378,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
                 let Some(call_def_id) = typeck.type_dependent_def_id(expr_hir.hir_id) else { unreachable!() };
 
-                // HACK: Copy ident from definition for correct sanitization later.
-                let Some(call_item_ident) = self.tcx.opt_item_ident(call_def_id) else { unreachable!() };
-                call.seg.ident = call_item_ident;
+                // HACK: Copy ident syntax context from definition for correct sanitization later.
+                let Some(call_item_ident_span) = self.tcx.def_ident_span(call_def_id) else { unreachable!() };
+                copy_def_span_ctxt(&mut call.seg.ident, &call_item_ident_span);
             }
             _ => {}
         }
@@ -398,8 +405,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                             variant_def_id = variant_def.def_id,
                         );
                     };
-                    // HACK: Copy ident from definition for correct sanitization later.
-                    field.ident = field_def.ident(self.tcx);
+                    // HACK: Copy ident syntax context from definition for correct sanitization later.
+                    copy_def_span_ctxt(&mut field.ident, &field_def.ident(self.tcx).span);
                     // NOTE: We have to disable shorthand syntax to ensure that
                     //       the correct field ident appears in printed code.
                     field.is_shorthand = false;
