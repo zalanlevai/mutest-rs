@@ -897,6 +897,16 @@ impl Descr for ast::ExprKind {
     }
 }
 
+pub mod print {
+    pub use rustc_ast_pretty::pprust::*;
+
+    use rustc_ast as ast;
+
+    pub fn stmt_to_string(stmt: &ast::Stmt) -> String {
+        State::new().stmt_to_string(stmt)
+    }
+}
+
 pub mod inspect {
     use std::iter;
 

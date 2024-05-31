@@ -80,6 +80,27 @@ pub enum Subst {
     AstLocal(Ident, ast::Mutability, Option<P<ast::Ty>>, P<ast::Expr>, Option<P<ast::Expr>>),
 }
 
+impl Subst {
+    pub fn descr(&self) -> String {
+        match self {
+            Subst::AstExpr(_) => "expression".to_owned(),
+            Subst::AstStmt(_) => "statement".to_owned(),
+            Subst::AstLocal(ident, _, _, _, _) => format!("local `{ident}`"),
+        }
+    }
+
+    pub fn to_source_string(&self) -> String {
+        match self {
+            Subst::AstExpr(expr) => ast::print::expr_to_string(expr),
+            Subst::AstStmt(stmt) => ast::print::stmt_to_string(stmt),
+            Subst::AstLocal(ident, mutbl, ty, init_expr, _default_expr) => {
+                let local_stmt = ast::mk::stmt_local(DUMMY_SP, mutbl.is_mut(), *ident, ty.clone(), ast::LocalKind::Init(init_expr.clone()));
+                ast::print::stmt_to_string(&local_stmt)
+            }
+        }
+    }
+}
+
 pub struct SubstDef {
     pub location: SubstLoc,
     pub substitute: Subst,
@@ -163,6 +184,23 @@ impl<'trg, 'm> Mut<'trg, 'm> {
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
         let mut diagnostic = sess.dcx().struct_span_warn(self.span, "mutation was not detected");
         diagnostic.span_label(self.span, self.mutation.span_label());
+
+        for subst in &self.substs {
+            let action = match &subst.location {
+                SubstLoc::InsertBefore(_) | SubstLoc::InsertAfter(_) => "inserted",
+                SubstLoc::Replace(_) => "replaced with",
+            };
+            let node_kind = subst.substitute.descr();
+            let new_node = subst.substitute.to_source_string();
+            diagnostic.note(format!("{node_kind} {action}: {new_node}",
+                new_node = match new_node.lines().count() {
+                    0 => "<empty>".to_owned(),
+                    1 => format!("`{new_node}`"),
+                    _ => format!("\n```\n{new_node}\n```"),
+                },
+            ));
+        }
+
         diagnostic::emit_str(diagnostic, sess.rc_source_map())
     }
 
