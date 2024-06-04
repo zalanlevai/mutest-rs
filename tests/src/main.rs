@@ -113,6 +113,7 @@ impl Expectation {
 }
 
 const BUILD_OUT_DIR: &str = "target/mutest_test/debug/deps";
+const AUX_OUT_DIR: &str = "target/mutest_test/debug/deps/auxiliary";
 
 struct Opts {
     pub filters: Option<Vec<String>>,
@@ -130,7 +131,7 @@ struct TestRunResults {
     pub total_tests_count: usize,
 }
 
-fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResults) {
+fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResults) {
     if !path.is_file() { return; }
     if !path.extension().is_some_and(|v| v == "rs") { return; }
 
@@ -194,6 +195,7 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
                 "stderr" => { expectations.insert(Expectation::StdErr { empty: false }); }
                 "stderr: empty" => { expectations.insert(Expectation::StdErr { empty: true }); }
 
+                _ if directive.starts_with("aux-build:") => {}
                 _ if directive.starts_with("rustc-flags:") => {}
                 _ if directive.starts_with("mutest-flags:") => {}
                 _ if directive.starts_with("mutest-subcommand-flags:") => {}
@@ -208,6 +210,53 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
 
         mutest_subcommand.unwrap_or("build")
     };
+
+    let mut aux = false;
+    for directive in &directives {
+        let Some(aux_build) = directive.strip_prefix("aux-build:").map(str::trim) else { continue; };
+        aux = true;
+
+        let aux_path = aux_dir_path.join(aux_build);
+        let aux_crate_name = Path::new(aux_build).file_stem().expect("invalid aux path").to_str().expect("invalid aux path");
+
+        let mut cmd = Command::new("target/release/mutest-driver");
+        // We need to invoke mutest-driver as a rustc wrapper. This must be the first argument.
+        cmd.arg("/dummy/rustc");
+
+        cmd.arg(&aux_path);
+        cmd.args(["--crate-name", aux_crate_name]);
+        cmd.arg("--edition=2021");
+
+        cmd.args(["--out-dir", AUX_OUT_DIR]);
+
+        if opts.verbosity >= 1 {
+            eprintln!("running {cmd:?}");
+        }
+
+        let output = cmd.output().expect("cannot spawn mutest-driver in rustc mode");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        if opts.verbosity >= 1 {
+            if let Some(exit_code) = output.status.code() {
+                eprintln!("exited with code {exit_code}");
+            }
+            eprintln!("stdout:\n{}", stdout);
+            eprintln!("stderr:\n{}", stderr);
+        }
+
+        if output.status.code() != Some(0) {
+            results.failed_tests_count += 1;
+            eprintln!("test {name} ... \x1b[1;31mFAILED\x1b[0m ({reason})",
+                reason = match output.status.code() {
+                    Some(exit_code) => format!("process exited with code {exit_code}"),
+                    None => "process exited without exit code".to_owned(),
+                },
+            );
+            eprintln!("stdout:\n{}", stdout);
+            eprintln!("stderr:\n{}", stderr);
+            return;
+        }
+    }
 
     let mut cmd = Command::new("target/release/mutest-driver");
     // We need to invoke mutest-driver as a rustc wrapper. This must be the first argument.
@@ -230,6 +279,10 @@ fn run_test(path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResu
     let rustc_flags = directives.iter().filter_map(|d| d.strip_prefix("rustc-flags:").map(str::trim))
         .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
     cmd.args(rustc_flags);
+
+    if aux {
+        cmd.args(["-L", AUX_OUT_DIR]);
+    }
 
     let mut mutest_args = vec![];
     directives.iter().filter_map(|d| d.strip_prefix("mutest-flags:").map(str::trim))
@@ -399,11 +452,14 @@ fn main() {
 
     fn run_tests_in_dir(dir_path: &Path, opts: &Opts, results: &mut TestRunResults) {
         fn run_tests_in_dir_impl(root_dir: &Path, dir_path: &Path, opts: &Opts, results: &mut TestRunResults) {
+            let aux_dir_path = dir_path.join("auxiliary");
+
             for entry in fs::read_dir(dir_path).expect(&format!("cannot read `{}` directory", dir_path.display())) {
                 let entry = entry.expect(&format!("cannot read entry in `{}` directory", dir_path.display()));
                 let path = entry.path();
 
                 if path.is_dir() {
+                    if path.file_name().is_some_and(|v| v == "auxiliary") { continue; };
                     run_tests_in_dir_impl(root_dir, &path, opts, results);
                     continue;
                 }
@@ -411,7 +467,7 @@ fn main() {
                 if !path.is_file() { continue; }
                 if !path.extension().is_some_and(|v| v == "rs") { continue; }
 
-                run_test(&path, root_dir, opts, results);
+                run_test(&path, &aux_dir_path, root_dir, opts, results);
             }
         }
 
