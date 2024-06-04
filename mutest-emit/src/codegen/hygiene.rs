@@ -1,7 +1,12 @@
 use std::mem;
+use std::panic;
 
+use rustc_data_structures::sync::Lrc;
+use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_hash::FxHashSet;
+use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::ty::TyCtxt;
+use rustc_span::edition::Edition;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 
@@ -11,7 +16,7 @@ use crate::analysis::res;
 use crate::analysis::ty;
 use crate::codegen::ast::{self, AstDeref, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, MacroKind, Span, Symbol, kw};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, MacroKind, Span, Symbol, sym, kw};
 use crate::codegen::symbols::hygiene::ExpnData;
 
 fn is_macro_expn(expn: &ExpnData) -> bool {
@@ -57,9 +62,16 @@ fn copy_def_span_ctxt(ident: &mut Ident, def_ident_span: &Span) {
     ident.span = ident.span.with_ctxt(def_ident_span.ctxt());
 }
 
+fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attribute) -> bool {
+    syntax_extensions.iter().any(|syntax_extension| {
+        syntax_extension.helper_attrs.iter().any(|&helper_attr| attr.has_name(helper_attr))
+    })
+}
+
 struct MacroExpansionSanitizer<'tcx, 'op> {
     tcx: TyCtxt<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
+    syntax_extensions: Vec<SyntaxExtension>,
 
     /// Keep track of the current scope (e.g. items and bodies) for relative name resolution.
     current_scope: Option<hir::DefId>,
@@ -299,9 +311,13 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         item
     }
 
-    fn visit_attribute(&mut self, _attr: &mut ast::Attribute) {
-        // NOTE: We do not descend into attributes, there is nothing we
-        //       would want to sanitize in them, or nested in them.
+    fn visit_attribute(&mut self, attr: &mut ast::Attribute) {
+        // Some attributes correspond to already expanded derive proc macros, and thus need to be removed.
+        if is_macro_helper_attr(&self.syntax_extensions, attr) {
+            // Disable attribute by overriding it with an empty doc-comment.
+            // This is easier than modifying every visit function to properly remove the attribute nodes.
+            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, kw::Empty)
+        }
     }
 
     fn visit_constraint(&mut self, assoc_constraint: &mut ast::AssocConstraint) {
@@ -457,10 +473,77 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 }
 
+fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
+    fn dummy_syntax_extension(name: Symbol, helper_attrs: Vec<Symbol>, allow_internal_unstable: Option<Lrc<[Symbol]>>) -> SyntaxExtension {
+        SyntaxExtension {
+            kind: SyntaxExtensionKind::NonMacroAttr,
+            span: DUMMY_SP,
+            allow_internal_unstable,
+            stability: None,
+            deprecation: None,
+            helper_attrs,
+            edition: Edition::Edition2021,
+            builtin_name: Some(name),
+            allow_internal_unsafe: false,
+            local_inner_macros: false,
+            collapse_debuginfo: true,
+        }
+    }
+
+    syntax_extensions.extend([
+        dummy_syntax_extension(sym::Default, vec![kw::Default], None), // #[derive(Default)]
+    ]);
+}
+
 pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &mut ast::Crate) {
+    let mut syntax_extensions = vec![];
+    register_builtin_macros(&mut syntax_extensions);
+
+    let cstore = CStore::from_tcx(tcx);
+
+    // HACK: The only way to enumerate the definitions of an external crate though the public API is
+    //       by enumerating the def indices up to `CStore::num_def_ids_untracked`.
+    //       See https://github.com/rust-lang/rust/pull/85889.
+    let crate_def_indices = |cnum: hir::CrateNum| {
+        const BASE_DEF_IDX: usize = hir::CRATE_DEF_INDEX.as_usize();
+        let max_def_idx = cstore.num_def_ids_untracked(cnum);
+
+        (BASE_DEF_IDX..max_def_idx).map(hir::DefIndex::from_usize)
+    };
+
+    // Find all loaded proc macro syntax extensions.
+    tcx.crates(()).iter()
+        // Ensure that we are only looking at crates with `CrateKind::ProcMacro`.
+        .filter(|&&cnum| tcx.dep_kind(cnum).macros_only())
+        .flat_map(|&cnum| crate_def_indices(cnum).map(move |index| hir::DefId { krate: cnum, index }))
+        .filter(|&def_id| {
+            // HACK: Not all def indices are encoded for proc macro crates, only the macro definitions themselves.
+            //       To avoid crashes due to missing def index lookups, we must only generate "valid" indices,
+            //       however, there is no stable mechanism for this.
+            //       Instead, we use a def kind query to trigger a crate metadata lookup, and
+            //       catch the panic, if it occurs.
+            //       We also disable printing of panic messages with an empty hook.
+            //       See https://github.com/rust-lang/rust/pull/76897.
+            let builtin_panic_hook = panic::take_hook();
+            panic::set_hook(Box::new(|_panic_info| {}));
+            let Ok(def_kind) = panic::catch_unwind(panic::AssertUnwindSafe(|| tcx.def_kind(def_id))) else { return false; };
+            panic::set_hook(builtin_panic_hook);
+
+            matches!(def_kind, hir::DefKind::Macro(_))
+        })
+        .filter_map(|def_id| {
+            match cstore.load_macro_untracked(def_id, tcx) {
+                LoadedMacro::ProcMacro(syntax_extension) => Some(syntax_extension),
+                // TODO: Generate syntax extensions from regular macros.
+                LoadedMacro::MacroDef(..) => None,
+            }
+        })
+        .collect_into(&mut syntax_extensions);
+
     let mut sanitizer = MacroExpansionSanitizer {
         tcx,
         def_res,
+        syntax_extensions,
         current_scope: Some(LOCAL_CRATE.as_def_id()),
         current_body_res: None,
         current_typeck_ctx: None,

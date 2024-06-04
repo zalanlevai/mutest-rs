@@ -397,7 +397,9 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutest_emit::codegen::entry_point::generate_dummy_main(tcx, &mut generated_crate_ast);
 
                 mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
-                mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
+                if !opts.sanitize_macro_expns {
+                    mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
+                }
                 mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
 
                 if opts.sanitize_macro_expns {
