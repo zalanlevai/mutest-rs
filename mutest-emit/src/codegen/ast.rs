@@ -37,6 +37,22 @@ impl FnItem {
             body: body.clone().map(P::into_inner),
         })
     }
+
+    pub fn from_assoc_item(item: &ast::AssocItem) -> Option<Self> {
+        let &ast::Item { id, span, ref vis, ident, ref kind, .. } = item;
+        let ast::AssocItemKind::Fn(fn_item) = kind else { return None; };
+        let ast::Fn { generics, sig, body, .. } = &**fn_item;
+        Some(Self {
+            id,
+            span,
+            ctx: visit::FnCtxt::Free,
+            vis: vis.clone(),
+            ident,
+            generics: generics.clone(),
+            sig: sig.clone(),
+            body: body.clone().map(P::into_inner),
+        })
+    }
 }
 
 #[derive(Copy, Clone, Debug)]

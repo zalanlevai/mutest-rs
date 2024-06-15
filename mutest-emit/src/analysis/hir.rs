@@ -26,19 +26,19 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
     pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
         match node {
             hir::Node::Item(&hir::Item { owner_id, span, vis_span, ident, ref kind }) => {
-                let hir::ItemKind::Fn(sig, generics, body) = kind else { unreachable!(); };
+                let hir::ItemKind::Fn(sig, generics, body) = kind else { return None; };
                 let body = tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header);
                 Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
             }
             hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness: _ }) => {
-                let hir::TraitItemKind::Fn(sig, hir::TraitFn::Provided(body)) = kind else { unreachable!(); };
+                let hir::TraitItemKind::Fn(sig, hir::TraitFn::Provided(body)) = kind else { return None; };
                 let body = tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
                 Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body })
             }
             hir::Node::ImplItem(&hir::ImplItem { owner_id, span, vis_span, ident, ref generics, ref kind, defaultness: _ }) => {
-                let hir::ImplItemKind::Fn(sig, body) = kind else { unreachable!(); };
+                let hir::ImplItemKind::Fn(sig, body) = kind else { return None; };
                 let body = tcx.hir().body(*body);
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
                 Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })

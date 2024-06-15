@@ -274,41 +274,70 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 }
 
-impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
-    fn flat_map_item(&mut self, item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        // Skip generated items corresponding to compiler (and mutest-rs) internals.
-        if item.id == ast::DUMMY_NODE_ID || item.span == DUMMY_SP { return smallvec![item]; }
+macro def_flat_map_item_fns(
+    $(fn $ident:ident: $ty:ty [$into_ast_fn_item:path]);+;
+) {
+    $(
+        fn $ident(&mut self, mut item: P<$ty>) -> SmallVec<[P<$ty>; 1]> {
+            // Skip generated items corresponding to compiler (and mutest-rs) internals.
+            if item.id == ast::DUMMY_NODE_ID || item.span == DUMMY_SP { return smallvec![item]; }
 
-        let Some(&def_id) = self.def_res.node_id_to_def_id.get(&item.id) else { unreachable!() };
+            let Some(&def_id) = self.def_res.node_id_to_def_id.get(&item.id) else { unreachable!() };
 
-        // Store new context scope.
-        let previous_scope = mem::replace(&mut self.current_scope, Some(def_id.to_def_id()));
+            // Store new context scope.
+            let previous_scope = mem::replace(&mut self.current_scope, Some(def_id.to_def_id()));
 
-        // Store new typeck scope, if needed.
-        let previous_typeck_ctx = self.current_typeck_ctx;
-        let typeck_root_def_id = self.tcx.typeck_root_def_id(def_id.to_def_id());
-        let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
-        if let Some(typeck_root_body_id) = self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
-            if !previous_typeck_ctx.is_some_and(|previous_typeck_ctx| typeck_root_def_id == previous_typeck_ctx.hir_owner.to_def_id()) {
-                self.current_typeck_ctx = Some(self.tcx.typeck_body(typeck_root_body_id));
+            // Store new typeck scope, if needed.
+            let previous_typeck_ctx = self.current_typeck_ctx;
+            let typeck_root_def_id = self.tcx.typeck_root_def_id(def_id.to_def_id());
+            let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
+            if let Some(typeck_root_body_id) = self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
+                if !previous_typeck_ctx.is_some_and(|previous_typeck_ctx| typeck_root_def_id == previous_typeck_ctx.hir_owner.to_def_id()) {
+                    self.current_typeck_ctx = Some(self.tcx.typeck_body(typeck_root_body_id));
+                }
             }
+
+            // Store new body resolution scope, if available.
+            let previous_body_res = self.current_body_res.take();
+            if let Some(fn_ast) = $into_ast_fn_item(&item) && fn_ast.body.is_some() {
+                let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
+            }
+
+            // Match definition ident if this is an assoc item.
+            if let Some(assoc_item) = self.tcx.opt_associated_item(def_id.to_def_id()) {
+                match assoc_item.container {
+                    ty::AssocItemContainer::TraitContainer => {
+                        // Trait items make new standalone definitions rather than referring to another definition,
+                        // and so their ident does not have to be adjusted to another definition's.
+                    }
+                    ty::AssocItemContainer::ImplContainer => {
+                        let Some(trait_item_def_id) = assoc_item.trait_item_def_id else { unreachable!() };
+
+                        // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
+                        let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
+                        copy_def_span_ctxt(&mut item.ident, &trait_item_ident_span);
+                    }
+                }
+            }
+
+            let item = ast::mut_visit::noop_flat_map_item(item, self);
+
+            // Restore previous context.
+            self.current_body_res = previous_body_res;
+            self.current_typeck_ctx = previous_typeck_ctx;
+            self.current_scope = previous_scope;
+
+            item
         }
+    )+
+}
 
-        // Store new body resolution scope, if available.
-        let previous_body_res = self.current_body_res.take();
-        if let Some(fn_ast) = ast::FnItem::from_item(&item) {
-            let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-            self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
-        }
-
-        let item = ast::mut_visit::noop_flat_map_item(item, self);
-
-        // Restore previous context.
-        self.current_body_res = previous_body_res;
-        self.current_typeck_ctx = previous_typeck_ctx;
-        self.current_scope = previous_scope;
-
-        item
+impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
+    def_flat_map_item_fns! {
+        fn flat_map_item: ast::Item [ast::FnItem::from_item];
+        fn flat_map_trait_item: ast::AssocItem [ast::FnItem::from_assoc_item];
+        fn flat_map_impl_item: ast::AssocItem [ast::FnItem::from_assoc_item];
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {
