@@ -275,14 +275,18 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 }
 
 macro def_flat_map_item_fns(
-    $(fn $ident:ident: $ty:ty [$into_ast_fn_item:path]);+;
+    $(fn $ident:ident: $ty:ty [$into_ast_fn_item:path] |$item:ident| {
+        $(check { $($check_stmt:stmt)+ })?
+    });+;
 ) {
     $(
-        fn $ident(&mut self, mut item: P<$ty>) -> SmallVec<[P<$ty>; 1]> {
+        fn $ident(&mut self, mut $item: P<$ty>) -> SmallVec<[P<$ty>; 1]> {
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
-            if item.id == ast::DUMMY_NODE_ID || item.span == DUMMY_SP { return smallvec![item]; }
+            if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
-            let Some(&def_id) = self.def_res.node_id_to_def_id.get(&item.id) else { unreachable!() };
+            $($($check_stmt)+)?
+
+            let Some(&def_id) = self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
 
             // Store new context scope.
             let previous_scope = mem::replace(&mut self.current_scope, Some(def_id.to_def_id()));
@@ -299,7 +303,7 @@ macro def_flat_map_item_fns(
 
             // Store new body resolution scope, if available.
             let previous_body_res = self.current_body_res.take();
-            if let Some(fn_ast) = $into_ast_fn_item(&item) && fn_ast.body.is_some() {
+            if let Some(fn_ast) = $into_ast_fn_item(&$item) && fn_ast.body.is_some() {
                 let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
                 self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
             }
@@ -316,12 +320,12 @@ macro def_flat_map_item_fns(
 
                         // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
                         let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
-                        copy_def_span_ctxt(&mut item.ident, &trait_item_ident_span);
+                        copy_def_span_ctxt(&mut $item.ident, &trait_item_ident_span);
                     }
                 }
             }
 
-            let item = ast::mut_visit::noop_flat_map_item(item, self);
+            let item = ast::mut_visit::noop_flat_map_item($item, self);
 
             // Restore previous context.
             self.current_body_res = previous_body_res;
@@ -335,9 +339,24 @@ macro def_flat_map_item_fns(
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
     def_flat_map_item_fns! {
-        fn flat_map_item: ast::Item [ast::FnItem::from_item];
-        fn flat_map_trait_item: ast::AssocItem [ast::FnItem::from_assoc_item];
-        fn flat_map_impl_item: ast::AssocItem [ast::FnItem::from_assoc_item];
+        fn flat_map_item: ast::Item [ast::FnItem::from_item] |item| {
+            check {
+                let name = item.ident.name;
+
+                if let ast::ItemKind::ExternCrate(symbol) = &mut item.kind {
+                    // Retain original crate name if not already aliased.
+                    if symbol.is_none() { *symbol = Some(name); }
+
+                    // Sanitize local name of extern.
+                    sanitize_ident_if_from_expansion(&mut item.ident);
+
+                    return smallvec![item];
+                }
+            }
+        };
+
+        fn flat_map_trait_item: ast::AssocItem [ast::FnItem::from_assoc_item] |item| {};
+        fn flat_map_impl_item: ast::AssocItem [ast::FnItem::from_assoc_item] |item| {};
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {
