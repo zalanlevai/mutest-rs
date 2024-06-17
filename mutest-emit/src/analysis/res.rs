@@ -8,7 +8,7 @@ use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast;
-use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, kw};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym, kw};
 
 #[derive(Clone, Debug)]
 pub struct ItemChild {
@@ -247,16 +247,28 @@ pub struct DefPathSegment {
 #[derive(Clone, Debug)]
 pub struct DefPath {
     pub segments: Vec<DefPathSegment>,
+    pub global: bool,
 }
 
 impl DefPath {
+    pub fn from_def_id<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Option<Self> {
+        let segments = def_id_path(tcx, def_id).into_iter()
+            .map(|def_id| {
+                let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+                let name = tcx.opt_item_name(def_id)?;
+                Some(DefPathSegment { def_id, ident: Ident::new(name, span) })
+            })
+            .try_collect::<Vec<_>>()?;
+        Some(Self { segments, global: true })
+    }
+
     pub fn def_id_path(&self) -> impl Iterator<Item = hir::DefId> + '_ {
         self.segments.iter().map(|segment| segment.def_id)
     }
 
     pub fn ast_path(&self) -> ast::Path {
         let Some(first_segment) = self.segments.first() else { panic!("empty def path") };
-        let mut global = first_segment.def_id.is_crate_root();
+        let mut global = self.global;
 
         let mut segments = self.segments.iter().map(|segment| {
             let mut ident = segment.ident;
@@ -279,11 +291,59 @@ impl DefPath {
 }
 
 pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> ThinVec<DefPath> {
-    let (root_def_id, root_ident) = match def_id.as_local() {
-        Some(_) => (CRATE_DEF_ID.to_def_id(), Ident::new(kw::Crate, DUMMY_SP)),
-        None => (def_id.krate.as_def_id(), Ident::new(tcx.crate_name(def_id.krate), DUMMY_SP)),
+    let extern_crates = tcx.hir_crate_items(()).definitions()
+        .filter(|&def_id| matches!(tcx.def_kind(def_id), hir::DefKind::ExternCrate))
+        .filter_map(|def_id| {
+            let Some(cnum) = tcx.extern_mod_stmt_cnum(def_id) else { return None; };
+            Some((def_id, cnum))
+        });
+
+    let mut extern_prelude = tcx.sess.opts.externs.iter()
+        .filter(|(_, entry)| entry.add_prelude)
+        .map(|(name, _)| Symbol::intern(name))
+        .collect::<FxHashSet<_>>();
+    if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_core)) {
+        extern_prelude.insert(sym::core);
+        if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_std)) {
+            extern_prelude.insert(sym::std);
+        }
+    }
+
+    let (root_def_id, root_def_path) = match def_id.as_local() {
+        Some(_) => {
+            let root_def_id = CRATE_DEF_ID.to_def_id();
+            let root_ident = Ident::new(kw::Crate, DUMMY_SP);
+            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident }], global: true };
+            (root_def_id, root_def_path)
+        }
+        None if let crate_name = tcx.crate_name(def_id.krate) && extern_prelude.contains(&crate_name) => {
+            let root_def_id = def_id.krate.as_def_id();
+            let root_ident = Ident::new(crate_name, DUMMY_SP);
+            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident }], global: true };
+            (root_def_id, root_def_path)
+        }
+        None => {
+            let mut reachable_extern_crates = extern_crates
+                .filter(|&(_extern_crate_def_id, cnum)| cnum == def_id.krate)
+                .filter(|&(extern_crate_def_id, _cnum)| {
+                    false
+                        || tcx.opt_local_parent(extern_crate_def_id) == Some(CRATE_DEF_ID)
+                        || scope.is_some_and(|scope| tcx.is_descendant_of(extern_crate_def_id.to_def_id(), scope))
+                });
+            let Some((reachable_extern_crate_def_id, _cnum)) = reachable_extern_crates.next() else { return thin_vec![]; };
+
+            let root_def_id = def_id.krate.as_def_id();
+            let Some(mut root_def_path) = DefPath::from_def_id(tcx, reachable_extern_crate_def_id.to_def_id()) else { return thin_vec![] };
+
+            if let Some(scope) = scope && tcx.is_descendant_of(reachable_extern_crate_def_id.to_def_id(), scope) {
+                let scope_def_id_path = def_id_path(tcx, scope);
+                root_def_path.segments.splice(0..scope_def_id_path.len(), []);
+                root_def_path.global = false;
+            }
+
+            (root_def_id, root_def_path)
+        }
     };
-    let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident }] };
 
     if root_def_id == def_id {
         return thin_vec![root_def_path];

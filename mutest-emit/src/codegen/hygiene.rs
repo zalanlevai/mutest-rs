@@ -202,7 +202,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         match &visible_paths[..] {
                             [visible_path, ..] => {
                                 let def_id_path = visible_path.def_id_path().collect::<Vec<_>>();
-                                self.overwrite_path_with_def_path(path, &def_id_path, false);
+                                self.overwrite_path_with_def_path(path, &def_id_path, !visible_path.global);
                             }
                             [] => {
                                 // Ensure that the def is in the current scope, otherwise it really is not visible from here.
