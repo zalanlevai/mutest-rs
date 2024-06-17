@@ -308,7 +308,7 @@ macro def_flat_map_item_fns(
                 self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
             }
 
-            // Match definition ident if this is an assoc item.
+            // Match definition ident if this is an assoc item corresponding to a trait.
             if let Some(assoc_item) = self.tcx.opt_associated_item(def_id.to_def_id()) {
                 match assoc_item.container {
                     ty::AssocItemContainer::TraitContainer => {
@@ -316,11 +316,12 @@ macro def_flat_map_item_fns(
                         // and so their ident does not have to be adjusted to another definition's.
                     }
                     ty::AssocItemContainer::ImplContainer => {
-                        let Some(trait_item_def_id) = assoc_item.trait_item_def_id else { unreachable!() };
-
-                        // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
-                        let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
-                        copy_def_span_ctxt(&mut $item.ident, &trait_item_ident_span);
+                        // Adjustment only needed if this assoc item is in a trait impl, not a bare impl.
+                        if let Some(trait_item_def_id) = assoc_item.trait_item_def_id {
+                            // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
+                            let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
+                            copy_def_span_ctxt(&mut $item.ident, &trait_item_ident_span);
+                        }
                     }
                 }
             }
