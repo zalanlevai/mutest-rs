@@ -318,22 +318,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
 
             // `<$Ty as $Trait>::$assoc` paths
-            (Some(qself), path_res) => {
-                let is_self_qself = false
-                    || qself.ty.kind.is_implicit_self()
-                    || qself.ty.kind.is_simple_path().is_some_and(|symbol| symbol == kw::SelfUpper);
-
-                if let Some(path_res) = path_res && is_self_qself {
-                    self.sanitize_path(path, path_res);
-                    *qself = P(ast::QSelf {
-                        ty: ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
-                        path_span: DUMMY_SP,
-                        position: path.segments.len() - 1,
-                    });
-
-                    return;
-                }
-
+            (Some(qself), _) => {
                 let Some(typeck) = &self.current_typeck_ctx else { return; };
                 let Some(body_res) = &self.current_body_res else { return; };
 

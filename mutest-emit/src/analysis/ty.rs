@@ -587,6 +587,9 @@ pub mod print {
                         }
                     }
                 }
+                ty::TyKind::Param(param_ty) => {
+                    Ok(ast::mk::ty_ident(sp, None, Ident::new(param_ty.name, sp)))
+                }
 
                 ty::TyKind::FnPtr(sig) => {
                     let sig = sig.skip_binder();
@@ -614,7 +617,6 @@ pub mod print {
                 }
 
                 ty::TyKind::Pat(_, _) => Err("encountered pat".to_owned()),
-                ty::TyKind::Param(_) => Err("encountered param".to_owned()),
                 ty::TyKind::Bound(_, _) => Err("encountered bound type variable".to_owned()),
                 ty::TyKind::Infer(_) => Err("encountered type variable".to_owned()),
 
