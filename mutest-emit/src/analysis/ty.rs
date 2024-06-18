@@ -39,9 +39,11 @@ pub mod print {
     use rustc_session::cstore::{ExternCrate, ExternCrateSource};
     use thin_vec::ThinVec;
 
+    use crate::analysis::ast_lowering;
     use crate::analysis::hir::{self, LOCAL_CRATE};
     use crate::analysis::res;
     use crate::codegen::ast::{self, P};
+    use crate::codegen::hygiene;
     use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,10 +74,11 @@ pub mod print {
 
         fn print_res_def_path(&mut self, def_path: res::DefPath) -> Result<Self::Path, Self::Error>;
 
-        fn try_print_visible_def_path(&mut self, def_id: hir::DefId, scoped_item_paths: ScopedItemPaths) -> Result<Option<Self::Path>, Self::Error> {
+        fn try_print_visible_def_path(&mut self, def_id: hir::DefId, scope: Option<hir::DefId>, scoped_item_paths: ScopedItemPaths) -> Result<Option<Self::Path>, Self::Error> {
             fn try_print_visible_def_path_impl<'tcx, T: Printer<'tcx> + ?Sized>(
                 printer: &mut T,
                 def_id: hir::DefId,
+                scope: Option<hir::DefId>,
                 scoped_item_paths: ScopedItemPaths,
                 callers: &mut Vec<hir::DefId>,
             ) -> Result<Option<T::Path>, T::Error> {
@@ -106,7 +109,7 @@ pub mod print {
                     }
                 }
 
-                let visible_def_paths = res::visible_def_paths(printer.tcx(), def_id, None);
+                let visible_def_paths = res::visible_def_paths(printer.tcx(), def_id, scope);
                 if let Some(visible_def_path) = visible_def_paths.into_iter().next() {
                     return Some(printer.print_res_def_path(visible_def_path)).transpose();
                 }
@@ -150,7 +153,7 @@ pub mod print {
 
                 if callers.contains(&visible_parent) { return Ok(None); }
                 callers.push(visible_parent);
-                let Some(path) = try_print_visible_def_path_impl(printer, visible_parent, scoped_item_paths, callers)? else { return Ok(None); };
+                let Some(path) = try_print_visible_def_path_impl(printer, visible_parent, scope, scoped_item_paths, callers)? else { return Ok(None); };
                 callers.pop();
 
                 let disambiguated_data = hir::DisambiguatedDefPathData { data, disambiguator: 0 };
@@ -159,7 +162,7 @@ pub mod print {
             }
 
             let mut callers = vec![];
-            try_print_visible_def_path_impl(self, def_id, scoped_item_paths, &mut callers)
+            try_print_visible_def_path_impl(self, def_id, scope, scoped_item_paths, &mut callers)
         }
 
         fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error>;
@@ -185,14 +188,16 @@ pub mod print {
     }
 
     #[derive(Clone, Copy)]
-    struct AstTyPrinter<'tcx> {
+    struct AstTyPrinter<'tcx, 'op> {
         tcx: TyCtxt<'tcx>,
+        def_res: &'op ast_lowering::DefResolutions,
+        scope: Option<hir::DefId>,
         sp: Span,
         def_path_handling: DefPathHandling,
         opaque_ty_handling: OpaqueTyHandling,
     }
 
-    impl<'tcx> Printer<'tcx> for AstTyPrinter<'tcx> {
+    impl<'tcx, 'op> Printer<'tcx> for AstTyPrinter<'tcx, 'op> {
         type Error = String;
 
         type Type = P<ast::Ty>;
@@ -299,19 +304,25 @@ pub mod print {
         }
 
         fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error> {
-            if let DefPathHandling::PreferVisible(scoped_item_paths) | DefPathHandling::ForceVisible(scoped_item_paths) = self.def_path_handling {
-                if let Some(path) = self.try_print_visible_def_path(def_id, scoped_item_paths)? {
-                    if args.is_empty() { return Ok(path); }
-                    return self.path_generic_args(path, args, iter::empty());
+            let mut path = 'path: {
+                if let DefPathHandling::PreferVisible(scoped_item_paths) | DefPathHandling::ForceVisible(scoped_item_paths) = self.def_path_handling {
+                    if let Some(path) = self.try_print_visible_def_path(def_id, self.scope, scoped_item_paths)? {
+                        if args.is_empty() { break 'path Ok(path); }
+                        break 'path self.path_generic_args(path, args, iter::empty());
+                    }
+
+                    if let DefPathHandling::ForceVisible(_) = self.def_path_handling {
+                        break 'path Err("cannot find visible path for definition".to_owned());
+                    }
                 }
 
-                if let DefPathHandling::ForceVisible(_) = self.def_path_handling {
-                    return Err("cannot find visible path for definition".to_owned());
-                }
-            }
+                // FIXME
+                Err("encountered definition with no visible path".to_owned())
+            }?;
 
-            // FIXME
-            Err("encountered definition with no visible path".to_owned())
+            hygiene::sanitize_path(self.tcx, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
+
+            Ok(path)
         }
 
         fn print_region(&mut self, region: ty::Region<'_>) -> Result<Self::Region, Self::Error> {
@@ -632,9 +643,19 @@ pub mod print {
         }
     }
 
-    pub fn ast_repr<'tcx>(tcx: TyCtxt<'tcx>, sp: Span, ty: Ty<'tcx>, def_path_handling: DefPathHandling, opaque_ty_handling: OpaqueTyHandling) -> Option<P<ast::Ty>> {
+    pub fn ast_repr<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        def_res: &ast_lowering::DefResolutions,
+        scope: Option<hir::DefId>,
+        sp: Span,
+        ty: Ty<'tcx>,
+        def_path_handling: DefPathHandling,
+        opaque_ty_handling: OpaqueTyHandling,
+    ) -> Option<P<ast::Ty>> {
         let mut printer = AstTyPrinter {
             tcx,
+            def_res,
+            scope,
             sp,
             def_path_handling,
             opaque_ty_handling,

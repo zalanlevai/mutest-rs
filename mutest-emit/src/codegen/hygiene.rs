@@ -337,7 +337,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                 let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
                 let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                let Some(qself_ty_ast) = ty::ast_repr(self.tcx, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling) else { unreachable!() };
+                let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling) else { unreachable!() };
 
                 // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
                 self.sanitize_path(path, qres.expect_non_local());
@@ -349,6 +349,30 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
     }
+}
+
+pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, scope: Option<hir::DefId>, path: &mut ast::Path, res: hir::Res<ast::NodeId>, descend_into_args: bool) {
+    let mut sanitizer = MacroExpansionSanitizer {
+        tcx,
+        def_res,
+        syntax_extensions: vec![],
+        current_scope: scope,
+        current_body_res: None,
+        current_typeck_ctx: None,
+        protected_idents: Default::default(),
+    };
+
+    if descend_into_args {
+        // NOTE: We explicitly only visit the generic arguments, as we will
+        //       sanitize the ident segments afterwards.
+        for segment in &mut path.segments {
+            if let Some(args) = &mut segment.args {
+                sanitizer.visit_generic_args(args);
+            }
+        }
+    }
+
+    sanitizer.adjust_path_from_expansion(path, res);
 }
 
 macro def_flat_map_item_fns(
