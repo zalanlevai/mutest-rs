@@ -25,6 +25,14 @@ macro assoc_hygiene() {
         const LEN: usize;
 
         fn f() -> usize { Self::LEN }
+        fn g() -> usize { <Self as Bar>::LEN }
+    }
+
+    impl Bar for A {
+        const LEN: usize = 1;
+
+        fn f() -> usize { Self::LEN }
+        fn g() -> usize { <Self as Bar>::LEN }
     }
 }
 

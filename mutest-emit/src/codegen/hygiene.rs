@@ -272,6 +272,98 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             => {}
         }
     }
+
+    fn sanitize_path(&mut self, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
+        // NOTE: We explicitly only visit the generic arguments, as we will
+        //       sanitize the ident segments afterwards.
+        for segment in &mut path.segments {
+            if let Some(args) = &mut segment.args {
+                self.visit_generic_args(args);
+            }
+        }
+
+        // Short-circuit if not in a macro expansion, as there is no
+        // other child node which could be from a macro expansion.
+        if !is_macro_expn_span(path.span) { return; }
+
+        self.adjust_path_from_expansion(path, res);
+    }
+
+    fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) {
+        match (qself, self.def_res.node_res(path.segments.last().unwrap().id)) {
+            // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
+            (None, Some(res)) => self.sanitize_path(path, res),
+
+            // `Self::$assoc` paths
+            (qself @ None, None) => {
+                let Some(typeck) = &self.current_typeck_ctx else { return; };
+                let Some(body_res) = &self.current_body_res else { return; };
+
+                let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
+
+                // NOTE: This returns the trait item definition, not the impl item definition.
+                let Some((def_kind, def_id)) = typeck.type_dependent_def(node_hir_id) else { unreachable!() };
+
+                match def_kind {
+                    hir::DefKind::AssocTy | hir::DefKind::AssocConst | hir::DefKind::AssocFn => {
+                        self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
+                        *qself = Some(P(ast::QSelf {
+                            ty: ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
+                            path_span: DUMMY_SP,
+                            position: path.segments.len() - 1,
+                        }));
+                    }
+                    _ => self.sanitize_path(path, hir::Res::Def(def_kind, def_id)),
+                }
+            }
+
+            // `<$Ty as $Trait>::$assoc` paths
+            (Some(qself), path_res) => {
+                let is_self_qself = false
+                    || qself.ty.kind.is_implicit_self()
+                    || qself.ty.kind.is_simple_path().is_some_and(|symbol| symbol == kw::SelfUpper);
+
+                if let Some(path_res) = path_res && is_self_qself {
+                    self.sanitize_path(path, path_res);
+                    *qself = P(ast::QSelf {
+                        ty: ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
+                        path_span: DUMMY_SP,
+                        position: path.segments.len() - 1,
+                    });
+
+                    return;
+                }
+
+                let Some(typeck) = &self.current_typeck_ctx else { return; };
+                let Some(body_res) = &self.current_body_res else { return; };
+
+                let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
+                let qpath = match self.tcx.hir_node(node_hir_id) {
+                    hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
+                    hir::Node::Pat(pat_hir) if let hir::PatKind::Path(qpath) = pat_hir.kind => qpath,
+                    hir::Node::Ty(ty_hir) if let hir::TyKind::Path(qpath) = ty_hir.kind => qpath,
+                    _ => unreachable!(),
+                };
+
+                let qres = typeck.qpath_res(&qpath, node_hir_id);
+
+                let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
+                let qself_ty = typeck.node_type(qself_hir_ty.hir_id);
+
+                let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
+                let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
+                let Some(qself_ty_ast) = ty::ast_repr(self.tcx, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling) else { unreachable!() };
+
+                // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
+                self.sanitize_path(path, qres.expect_non_local());
+                *qself = P(ast::QSelf {
+                    ty: qself_ty_ast,
+                    path_span: DUMMY_SP,
+                    position: path.segments.len() - 1,
+                });
+            }
+        }
+    }
 }
 
 macro def_flat_map_item_fns(
@@ -386,6 +478,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         let expr_id = expr.id;
 
         match &mut expr.kind {
+            ast::ExprKind::Path(qself, path) => {
+                return self.sanitize_qualified_path(qself, path, expr_id);
+            }
             ast::ExprKind::Struct(struct_expr) => 'arm: {
                 let Some(res) = self.def_res.node_res(struct_expr.path.segments.last().unwrap().id) else { break 'arm; };
 
@@ -484,21 +579,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_path(&mut self, path: &mut ast::Path) {
-        // NOTE: We explicitly only visit the generic arguments, as we will
-        //       sanitize the ident segments afterwards.
-        for segment in &mut path.segments {
-            if let Some(args) = &mut segment.args {
-                self.visit_generic_args(args);
-            }
-        }
-
-        // Short-circuit if not in a macro expansion, as there is no
-        // other child node which could be from a macro expansion.
-        if !is_macro_expn_span(path.span) { return; }
-
         let Some(last_segment) = path.segments.last() else { return; };
         let Some(res) = self.def_res.node_res(last_segment.id) else { return; };
-        self.adjust_path_from_expansion(path, res);
+        self.sanitize_path(path, res);
     }
 
     fn visit_ident(&mut self, ident: &mut Ident) {
