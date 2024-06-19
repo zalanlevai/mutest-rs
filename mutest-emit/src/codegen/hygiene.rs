@@ -318,7 +318,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
 
             // `<$Ty as $Trait>::$assoc` paths
-            (Some(qself), _) => {
+            (qself @ Some(_), _) => {
                 let Some(typeck) = &self.current_typeck_ctx else { return; };
                 let Some(body_res) = &self.current_body_res else { return; };
 
@@ -335,17 +335,28 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
                 let qself_ty = typeck.node_type(qself_hir_ty.hir_id);
 
-                let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
-                let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling) else { unreachable!() };
-
                 // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
-                self.sanitize_path(path, qres.expect_non_local());
-                *qself = P(ast::QSelf {
-                    ty: qself_ty_ast,
-                    path_span: DUMMY_SP,
-                    position: path.segments.len() - 1,
-                });
+                *qself = match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
+                    hir::DefKind::Trait | hir::DefKind::TraitAlias => {
+                        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
+                        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
+                        let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling) else { unreachable!() };
+
+                        self.sanitize_path(path, qres.expect_non_local());
+                        Some(P(ast::QSelf {
+                            ty: qself_ty_ast,
+                            path_span: DUMMY_SP,
+                            position: path.segments.len() - 1,
+                        }))
+                    },
+
+                    // If the portion of the path within the qself does not refer to a trait,
+                    // then the resolved path no longer needs a qualified self.
+                    _ => {
+                        self.sanitize_path(path, qres.expect_non_local());
+                        None
+                    }
+                }
             }
         }
     }
