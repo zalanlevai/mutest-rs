@@ -931,6 +931,59 @@ impl Descr for ast::ExprKind {
     }
 }
 
+impl Descr for ast::PatKind {
+    fn descr(&self) -> &'static str {
+        match self {
+            ast::PatKind::Wild => "_",
+            ast::PatKind::Never => "!",
+            ast::PatKind::Lit(..) => "literal",
+            ast::PatKind::Ident(..) => "ident",
+            ast::PatKind::Path(..) => "path",
+            ast::PatKind::Tuple(..) => "tuple",
+            ast::PatKind::Struct(..) => "struct",
+            ast::PatKind::TupleStruct(..) => "tuple struct",
+            ast::PatKind::Rest => "..",
+            ast::PatKind::Box(..) => "box",
+            ast::PatKind::Ref(..) => "reference",
+            ast::PatKind::Deref(..) => "deref",
+            ast::PatKind::Or(..) => "or",
+            ast::PatKind::Range(..) => "range",
+            ast::PatKind::Slice(..) => "slice",
+            ast::PatKind::MacCall(..) => "macro call",
+            ast::PatKind::Paren(..) => "parentheses",
+            ast::PatKind::Err(..) => "error",
+        }
+    }
+}
+
+impl Descr for ast::TyKind {
+    fn descr(&self) -> &'static str {
+        match self {
+            ast::TyKind::Never => "!",
+            ast::TyKind::Path(..) => "path",
+            ast::TyKind::Ptr(..) => "raw pointer",
+            ast::TyKind::Ref(..) => "reference",
+            ast::TyKind::Slice(..) => "slice",
+            ast::TyKind::Array(..) => "array",
+            ast::TyKind::Tup(..) => "tuple",
+            ast::TyKind::BareFn(..) => "fn pointer",
+            ast::TyKind::TraitObject(..) => "trait object",
+            ast::TyKind::ImplTrait(..) => "impl trait",
+            ast::TyKind::Typeof(..) => "typeof",
+            ast::TyKind::ImplicitSelf => "self",
+            ast::TyKind::Infer => "infer",
+            ast::TyKind::AnonStruct(..) => "anonymous struct",
+            ast::TyKind::AnonUnion(..) => "anonymous union",
+            ast::TyKind::CVarArgs => "C var args (va_list)",
+            ast::TyKind::Pat(..) => "pattern",
+            ast::TyKind::Paren(..) => "parentheses",
+            ast::TyKind::MacCall(..) => "macro call",
+            ast::TyKind::Err(..) => "error",
+            ast::TyKind::Dummy => "dummy",
+        }
+    }
+}
+
 pub mod print {
     pub use rustc_ast_pretty::pprust::*;
 

@@ -145,3 +145,48 @@ impl<'hir> Descr for hir::ExprKind<'hir> {
         }
     }
 }
+
+impl<'hir> Descr for hir::PatKind<'hir> {
+    fn descr(&self) -> &'static str {
+        match self {
+            hir::PatKind::Wild => "_",
+            hir::PatKind::Never => "!",
+            hir::PatKind::Lit(..) => "literal",
+            hir::PatKind::Path(..) => "path",
+            hir::PatKind::Binding(..) => "binding",
+            hir::PatKind::Tuple(..) => "tuple",
+            hir::PatKind::Struct(..) => "struct",
+            hir::PatKind::TupleStruct(..) => "tuple struct",
+            hir::PatKind::Box(..) => "box",
+            hir::PatKind::Ref(..) => "reference",
+            hir::PatKind::Deref(..) => "deref",
+            hir::PatKind::Or(..) => "or",
+            hir::PatKind::Range(..) => "range",
+            hir::PatKind::Slice(..) => "slice",
+            hir::PatKind::Err(..) => "error",
+        }
+    }
+}
+
+impl<'hir> Descr for hir::TyKind<'hir> {
+    fn descr(&self) -> &'static str {
+        match self {
+            hir::TyKind::Never => "!",
+            hir::TyKind::Path(..) => "path",
+            hir::TyKind::Ptr(..) => "raw pointer",
+            hir::TyKind::Ref(..) => "reference",
+            hir::TyKind::Slice(..) => "slice",
+            hir::TyKind::Array(..) => "array",
+            hir::TyKind::Tup(..) => "tuple",
+            hir::TyKind::BareFn(..) => "fn pointer",
+            hir::TyKind::OpaqueDef(..) => "opaque definition",
+            hir::TyKind::TraitObject(..) => "trait object",
+            hir::TyKind::Typeof(..) => "typeof",
+            hir::TyKind::Infer => "infer",
+            hir::TyKind::InferDelegation(..) => "infer delegation",
+            hir::TyKind::AnonAdt(..) => "anon adt",
+            hir::TyKind::Pat(..) => "pattern",
+            hir::TyKind::Err(..) => "error",
+        }
+    }
+}
