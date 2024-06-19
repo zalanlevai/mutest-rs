@@ -19,9 +19,21 @@ macro m() {
     impl A for S {}
     impl B for S { type A = S; }
 
+    enum E {
+        A,
+        B,
+    }
+    impl A for E {}
+    impl B for E { type A = E; }
+
     fn f() {
         <<S as B>::A as A>::f();
         <S as B>::A::f();
+
+        match E::A {
+            <E as B>::A::A => {}
+            <E as B>::A::B => {}
+        }
     }
 
     impl S {

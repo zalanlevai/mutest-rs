@@ -470,6 +470,22 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         }
     }
 
+    fn visit_ty(&mut self, ty: &mut P<ast::Ty>) {
+        // HACK: Even though NodeId is a Copy type, the copy itself
+        //       counts as an immutable borrow, so we have to do it
+        //       before `&mut ty.kind`.
+        let ty_id = ty.id;
+
+        match &mut ty.kind {
+            ast::TyKind::Path(qself, path) => {
+                return self.sanitize_qualified_path(qself, path, ty_id);
+            }
+            _ => {}
+        }
+
+        ast::mut_visit::noop_visit_ty(ty, self);
+    }
+
     fn visit_constraint(&mut self, assoc_constraint: &mut ast::AssocConstraint) {
         // NOTE: We do not alter the idents of associated constraints here.
         //       These get resolved in `adjust_path_from_expansion`.
@@ -560,7 +576,15 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_pat(&mut self, pat: &mut P<ast::Pat>) {
+        // HACK: Even though NodeId is a Copy type, the copy itself
+        //       counts as an immutable borrow, so we have to do it
+        //       before `&mut pat.kind`.
+        let pat_id = pat.id;
+
         match &mut pat.kind {
+            ast::PatKind::Path(qself, path) => {
+                return self.sanitize_qualified_path(qself, path, pat_id);
+            }
             ast::PatKind::Struct(_, path, fields, _) => 'arm: {
                 let Some(res) = self.def_res.node_res(path.segments.last().unwrap().id) else { break 'arm; };
 
