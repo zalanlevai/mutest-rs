@@ -197,6 +197,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
                 _ if directive.starts_with("aux-build:") => {}
                 _ if directive.starts_with("rustc-flags:") => {}
+                _ if directive.starts_with("mutation-operators:") => {}
                 _ if directive.starts_with("mutest-flags:") => {}
                 _ if directive.starts_with("mutest-subcommand-flags:") => {}
 
@@ -285,12 +286,19 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut mutest_args = vec![];
+    let mut mutation_operators = directives.iter().filter_map(|d| d.strip_prefix("mutation-operators:").map(str::trim))
+        .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))
+        .peekable();
+    if mutation_operators.peek().is_some() {
+        mutest_args.push("--mutation-operators".to_owned());
+        mutest_args.push(mutation_operators.intersperse(",").collect::<String>());
+    }
     directives.iter().filter_map(|d| d.strip_prefix("mutest-flags:").map(str::trim))
-        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()))
+        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
         .collect_into(&mut mutest_args);
-    mutest_args.push(mutest_subcommand);
+    mutest_args.push(mutest_subcommand.to_owned());
     directives.iter().filter_map(|d| d.strip_prefix("mutest-subcommand-flags:").map(str::trim))
-        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()))
+        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
         .collect_into(&mut mutest_args);
     cmd.env("MUTEST_ARGS".to_owned(), mutest_args.join(" "));
 
