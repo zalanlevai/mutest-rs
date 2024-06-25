@@ -19,6 +19,7 @@ use crate::codegen::substitution::conflicting_substs;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 use crate::codegen::tool_attr;
+use crate::session::Options;
 
 #[derive(Clone, Copy)]
 pub enum MutLoc<'a> {
@@ -49,6 +50,7 @@ impl<'a> MutLoc<'a> {
 }
 
 pub struct MutCtxt<'tcx, 'op> {
+    pub opts: &'op Options,
     pub tcx: TyCtxt<'tcx>,
     pub def_res: &'op ast_lowering::DefResolutions,
     pub def_site: Span,
@@ -251,11 +253,11 @@ impl UnsafeTargeting {
 
 struct MutationCollector<'tcx, 'op, 'trg, 'm> {
     operators: Operators<'op, 'm>,
+    opts: &'op Options,
     tcx: TyCtxt<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
     def_site: Span,
     unsafe_targeting: UnsafeTargeting,
-    verbosity: u8,
     target: Option<&'trg Target<'trg>>,
     current_fn: Option<(ast::FnItem, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
     current_closure: Option<hir::BodyId>,
@@ -316,6 +318,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let body_res = ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir);
 
         register_mutations!(self, MutCtxt {
+            opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
             def_site: self.def_site,
@@ -332,7 +335,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
     fn visit_param(&mut self, param: &'ast ast::Param) {
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(param_hir) = body_res.hir_param(param) else {
-            if self.verbosity >= 1 {
+            if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "parameter", fn_hir.owner_id.def_id, param.span);
             }
             return;
@@ -346,6 +349,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         if let Some(_) = self.current_closure { return; }
 
         register_mutations!(self, MutCtxt {
+            opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
             def_site: self.def_site,
@@ -360,7 +364,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
     fn visit_block(&mut self, block: &'ast ast::Block) {
         let Some((_fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(block_hir) = body_res.hir_block(block) else {
-            if self.verbosity >= 1 {
+            if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "block", fn_hir.owner_id.def_id, block.span);
             }
             return;
@@ -389,7 +393,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
 
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(stmt_hir) = body_res.hir_stmt(stmt) else {
-            if self.verbosity >= 1 {
+            if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "statement", fn_hir.owner_id.def_id, stmt.span);
             }
             return;
@@ -403,6 +407,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         if let Some(_) = self.current_closure { return; }
 
         register_mutations!(self, MutCtxt {
+            opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
             def_site: self.def_site,
@@ -423,7 +428,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
 
         let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
         let Some(expr_hir) = body_res.hir_expr(expr) else {
-            if self.verbosity >= 1 {
+            if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "expression", fn_hir.owner_id.def_id, expr.span);
             }
             return;
@@ -442,6 +447,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         }
 
         register_mutations!(self, MutCtxt {
+            opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
             def_site: self.def_site,
@@ -753,7 +759,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(
     targets: impl Iterator<Item = &'trg Target<'trg>>,
     ops: Operators<'_, 'm>,
     unsafe_targeting: UnsafeTargeting,
-    verbosity: u8,
+    opts: &Options,
 ) -> Vec<Mut<'trg, 'm>> {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
@@ -764,11 +770,11 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(
 
     let mut collector = MutationCollector {
         operators: ops,
+        opts,
         tcx,
         def_res,
         def_site,
         unsafe_targeting,
-        verbosity,
         target: None,
         current_fn: None,
         current_closure: None,

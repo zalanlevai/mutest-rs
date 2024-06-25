@@ -185,6 +185,12 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
     let opts = &config.opts;
     let source_name = compiler_config.input.source_name();
 
+    let sess_opts = mutest_emit::session::Options {
+        verbosity: opts.verbosity,
+        report_timings: opts.report_timings,
+        sanitize_macro_expns: opts.sanitize_macro_expns,
+    };
+
     let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
         let result = compiler.enter(|queries| {
             let sess = &compiler.sess;
@@ -248,7 +254,7 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 let t_mutation_analysis_start = Instant::now();
-                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, opts.verbosity);
+                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
                 if opts.verbosity >= 1 {
                     let mutated_fns = mutations.iter().map(|m| m.target.def_id).unique();
                     let mutated_fns_count = mutated_fns.count();

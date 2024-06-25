@@ -45,5 +45,6 @@ pub extern crate thin_vec;
 
 pub mod analysis;
 pub mod codegen;
+pub mod session;
 
 pub use codegen::mutation::{Mutation, Operator};

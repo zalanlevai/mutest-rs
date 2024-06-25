@@ -46,7 +46,7 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
     type Mutation = ContinueBreakSwapMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
+        let MutCtxt { opts: _, tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
 

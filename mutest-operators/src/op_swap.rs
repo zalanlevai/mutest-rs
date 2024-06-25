@@ -70,7 +70,7 @@ macro define_op_swap_operator(
         type Mutation = $mutation;
 
         fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-            let MutCtxt { tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
+            let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
             let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
 
