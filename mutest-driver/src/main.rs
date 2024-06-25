@@ -1,5 +1,8 @@
+#![feature(decl_macro)]
+
 #![feature(rustc_private)]
 extern crate rustc_driver;
+extern crate rustc_hash;
 extern crate rustc_interface;
 extern crate rustc_session;
 extern crate rustc_span;
@@ -10,7 +13,8 @@ use std::process::{self, Command};
 
 use mutest_driver::config::{self, Config};
 use mutest_emit::analysis::hir::Unsafety;
-use mutest_emit::codegen::mutation::UnsafeTargeting;
+use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
+use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
 
 struct DefaultCallbacks;
@@ -149,6 +153,41 @@ pub fn main() {
             _ => UnsafeTargeting::None,
         };
 
+        let mutation_operators = {
+            use mutest_driver_cli::mutation_operators::*;
+
+            let mut op_names = mutest_arg_matches.get_many::<String>("mutation-operators").unwrap().map(String::as_str).collect::<FxHashSet<_>>();
+            if op_names.contains("all") { op_names = FxHashSet::from_iter(ALL.into_iter().map(|s| *s)); }
+
+            op_names.into_iter()
+                .map(|op_name| {
+                    macro const_op_ref($m:expr) { { const OP: Operators<'_, '_> = &[&$m]; OP[0] } }
+
+                    match op_name {
+                        ARG_DEFAULT_SHADOW => const_op_ref!(mutest_operators::ArgDefaultShadow),
+                        BIT_OP_OR_AND_SWAP => const_op_ref!(mutest_operators::BitOpOrAndSwap),
+                        BIT_OP_OR_XOR_SWAP => const_op_ref!(mutest_operators::BitOpOrXorSwap),
+                        BIT_OP_SHIFT_DIR_SWAP => const_op_ref!(mutest_operators::BitOpShiftDirSwap),
+                        BIT_OP_XOR_AND_SWAP => const_op_ref!(mutest_operators::BitOpXorAndSwap),
+                        BOOL_EXPR_NEGATE => const_op_ref!(mutest_operators::BoolExprNegate),
+                        CALL_DELETE => const_op_ref!(mutest_operators::CallDelete { limit_scope_to_local_callees: false }),
+                        CALL_VALUE_DEFAULT_SHADOW => const_op_ref!(mutest_operators::CallValueDefaultShadow { limit_scope_to_local_callees: false }),
+                        CONTINUE_BREAK_SWAP => const_op_ref!(mutest_operators::ContinueBreakSwap),
+                        EQ_OP_INVERT => const_op_ref!(mutest_operators::EqOpInvert),
+                        LOGICAL_OP_AND_OR_SWAP => const_op_ref!(mutest_operators::LogicalOpAndOrSwap),
+                        MATH_OP_ADD_MUL_SWAP => const_op_ref!(mutest_operators::OpAddMulSwap),
+                        MATH_OP_ADD_SUB_SWAP => const_op_ref!(mutest_operators::OpAddSubSwap),
+                        MATH_OP_DIV_REM_SWAP => const_op_ref!(mutest_operators::OpDivRemSwap),
+                        MATH_OP_MUL_DIV_SWAP => const_op_ref!(mutest_operators::OpMulDivSwap),
+                        RANGE_LIMIT_SWAP => const_op_ref!(mutest_operators::RangeLimitSwap),
+                        RELATIONAL_OP_EQ_SWAP => const_op_ref!(mutest_operators::RelationalOpEqSwap),
+                        RELATIONAL_OP_INVERT => const_op_ref!(mutest_operators::RelationalOpInvert),
+                        _ => unreachable!("invalid mutation operator name: `{op_name}`"),
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
         let call_graph_depth = *mutest_arg_matches.get_one::<usize>("call-graph-depth").unwrap();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
@@ -205,26 +244,7 @@ pub fn main() {
                 verbosity,
                 report_timings,
                 unsafe_targeting,
-                operators: &[
-                    &mutest_operators::ArgDefaultShadow,
-                    &mutest_operators::BitOpOrAndSwap,
-                    &mutest_operators::BitOpOrXorSwap,
-                    &mutest_operators::BitOpShiftDirSwap,
-                    &mutest_operators::BitOpXorAndSwap,
-                    &mutest_operators::BoolExprNegate,
-                    &mutest_operators::CallDelete { limit_scope_to_local_callees: false },
-                    &mutest_operators::CallValueDefaultShadow { limit_scope_to_local_callees: false },
-                    &mutest_operators::ContinueBreakSwap,
-                    &mutest_operators::EqOpInvert,
-                    &mutest_operators::LogicalOpAndOrSwap,
-                    &mutest_operators::OpAddMulSwap,
-                    &mutest_operators::OpAddSubSwap,
-                    &mutest_operators::OpDivRemSwap,
-                    &mutest_operators::OpMulDivSwap,
-                    &mutest_operators::RangeLimitSwap,
-                    &mutest_operators::RelationalOpEqSwap,
-                    &mutest_operators::RelationalOpInvert,
-                ],
+                operators: &mutation_operators,
                 call_graph_depth,
                 mutation_depth,
                 mutation_batching_algorithm,

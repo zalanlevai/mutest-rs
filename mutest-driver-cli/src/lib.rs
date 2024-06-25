@@ -1,3 +1,38 @@
+#![feature(decl_macro)]
+
+use std::iter;
+
+macro opts(
+    $all:ident where
+    $($ident:ident = $name:expr);*;
+) {
+    $(pub const $ident: &str = $name;)*
+    pub const $all: &[&str] = &[$($ident,)*];
+}
+
+pub mod mutation_operators {
+    crate::opts! { ALL where
+        ARG_DEFAULT_SHADOW = "arg_default_shadow";
+        BIT_OP_OR_AND_SWAP = "bit_op_or_and_swap";
+        BIT_OP_OR_XOR_SWAP = "bit_op_or_xor_swap";
+        BIT_OP_SHIFT_DIR_SWAP = "bit_op_shift_dir_swap";
+        BIT_OP_XOR_AND_SWAP = "bit_op_xor_and_swap";
+        BOOL_EXPR_NEGATE = "bool_expr_negate";
+        CALL_DELETE = "call_delete";
+        CALL_VALUE_DEFAULT_SHADOW = "call_value_default_shadow";
+        CONTINUE_BREAK_SWAP = "continue_break_swap";
+        EQ_OP_INVERT = "eq_op_invert";
+        LOGICAL_OP_AND_OR_SWAP = "logical_op_and_or_swap";
+        MATH_OP_ADD_MUL_SWAP = "math_op_add_mul_swap";
+        MATH_OP_ADD_SUB_SWAP = "math_op_add_sub_swap";
+        MATH_OP_DIV_REM_SWAP = "math_op_div_rem_swap";
+        MATH_OP_MUL_DIV_SWAP = "math_op_mul_div_swap";
+        RANGE_LIMIT_SWAP = "range_limit_swap";
+        RELATIONAL_OP_EQ_SWAP = "relational_op_eq_swap";
+        RELATIONAL_OP_INVERT = "relational_op_invert";
+    }
+}
+
 pub fn command() -> clap::Command {
     let cmd = clap::command!("cargo mutest")
         .propagate_version(true)
@@ -43,6 +78,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--risky "Produce safe mutations in contexts which contain `unsafe` blocks.").display_order(103))
         .arg(clap::arg!(--unsafe "Mutate code in `unsafe` blocks.").display_order(104))
         .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "risky", "unsafe"]).multiple(false))
+        .arg(clap::arg!(--"mutation-operators" [MUTATION_OPERATORS] "Mutation operators to apply to the code, separated by commas.").value_delimiter(',').value_parser(iter::once(&"all").chain(mutation_operators::ALL).collect::<Vec<_>>()).default_value("all").display_order(105))
         .arg(clap::arg!(--"call-graph-depth" [CALL_GRAPH_DEPTH] "Depth of call graph analysis.").default_value("1000").value_parser(clap::value_parser!(usize)).display_order(110))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(110))
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(["greedy", #[cfg(feature = "random")] "random", #[cfg(feature = "random")] "simulated-annealing", "none"]).default_value("none").display_order(199))
