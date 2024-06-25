@@ -340,7 +340,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     hir::DefKind::Trait | hir::DefKind::TraitAlias => {
                         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
                         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                        let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling) else { unreachable!() };
+                        let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
 
                         self.sanitize_path(path, qres.expect_non_local());
                         Some(P(ast::QSelf {

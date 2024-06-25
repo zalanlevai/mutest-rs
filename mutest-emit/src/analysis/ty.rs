@@ -195,6 +195,7 @@ pub mod print {
         sp: Span,
         def_path_handling: DefPathHandling,
         opaque_ty_handling: OpaqueTyHandling,
+        sanitize_macro_expns: bool,
     }
 
     impl<'tcx, 'op> Printer<'tcx> for AstTyPrinter<'tcx, 'op> {
@@ -320,7 +321,9 @@ pub mod print {
                 Err("encountered definition with no visible path".to_owned())
             }?;
 
-            hygiene::sanitize_path(self.tcx, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
+            if self.sanitize_macro_expns {
+                hygiene::sanitize_path(self.tcx, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
+            }
 
             Ok(path)
         }
@@ -651,6 +654,7 @@ pub mod print {
         ty: Ty<'tcx>,
         def_path_handling: DefPathHandling,
         opaque_ty_handling: OpaqueTyHandling,
+        sanitize_macro_expns: bool,
     ) -> Option<P<ast::Ty>> {
         let mut printer = AstTyPrinter {
             tcx,
@@ -659,6 +663,7 @@ pub mod print {
             sp,
             def_path_handling,
             opaque_ty_handling,
+            sanitize_macro_expns,
         };
         printer.print_ty(ty).ok()
     }
