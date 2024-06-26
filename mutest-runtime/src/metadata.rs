@@ -18,6 +18,7 @@ pub enum MutationSafety {
 pub struct MutationMeta {
     pub id: u32,
     pub safety: MutationSafety,
+    pub op_name: &'static str,
     pub display_name: &'static str,
     pub display_location: &'static str,
     pub reachable_from: phf::Map<TestPath, usize>,

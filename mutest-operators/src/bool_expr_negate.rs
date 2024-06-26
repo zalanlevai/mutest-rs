@@ -8,6 +8,8 @@ pub struct BoolExprNegateMutation {
 }
 
 impl Mutation for BoolExprNegateMutation {
+    fn op_name(&self) -> &str { "bool_expr_negate" }
+
     fn display_name(&self) -> String {
         format!("{operation} boolean expression",
             operation = match self.was_negated {

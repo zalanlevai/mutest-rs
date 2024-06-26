@@ -352,12 +352,13 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
 
         println!("applying mutant with the following mutations:");
         for mutation in mutant.mutations {
-            println!("- {unsafe_marker}{display_name} at {display_location}",
+            println!("- {unsafe_marker}[{op_name}] {display_name} at {display_location}",
                 unsafe_marker = match mutation.safety {
                     MutationSafety::Safe => "",
-                    MutationSafety::Tainted => "[tainted] ",
-                    MutationSafety::Unsafe => "[unsafe] ",
+                    MutationSafety::Tainted => "(tainted) ",
+                    MutationSafety::Unsafe => "(unsafe) ",
                 },
+                op_name = mutation.op_name,
                 display_name = mutation.display_name,
                 display_location = mutation.display_location,
             );

@@ -12,6 +12,8 @@ pub struct ArgDefaultShadowMutation {
 }
 
 impl Mutation for ArgDefaultShadowMutation {
+    fn op_name(&self) -> &str { "arg_default_shadow" }
+
     fn display_name(&self) -> String {
         format!("ignore `{param}` argument by shadowing it with `Default::default()`",
             param = self.param_ident

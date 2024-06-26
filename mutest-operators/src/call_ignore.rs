@@ -50,6 +50,8 @@ pub struct CallValueDefaultShadowMutation {
 }
 
 impl Mutation for CallValueDefaultShadowMutation {
+    fn op_name(&self) -> &str { "call_value_default_shadow" }
+
     fn display_name(&self) -> String {
         format!("ignore return value of call to `{callee}` by shadowing it with `Default::default()`",
             callee = self.callee_path
@@ -119,6 +121,8 @@ pub struct CallDeleteMutation {
 }
 
 impl Mutation for CallDeleteMutation {
+    fn op_name(&self) -> &str { "call_delete" }
+
     fn display_name(&self) -> String {
         format!("delete call to `{callee}` and replace it with `Default::default()`",
             callee = self.callee_path

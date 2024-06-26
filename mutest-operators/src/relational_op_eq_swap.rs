@@ -9,6 +9,8 @@ pub struct RelationalOpEqSwapMutation {
 }
 
 impl Mutation for RelationalOpEqSwapMutation {
+    fn op_name(&self) -> &str { "relational_op_eq_swap" }
+
     fn display_name(&self) -> String {
         format!("{operation} relational operator `{original_bin_op}`",
             operation = match self.replacement_bin_op {

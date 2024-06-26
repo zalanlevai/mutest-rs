@@ -115,6 +115,8 @@ impl SubstDef {
 }
 
 pub trait Mutation {
+    fn op_name(&self) -> &str;
+
     fn display_name(&self) -> String;
 
     fn span_label(&self) -> String {
@@ -175,6 +177,10 @@ pub struct Mut<'trg, 'm> {
 }
 
 impl<'trg, 'm> Mut<'trg, 'm> {
+    pub fn op_name(&self) -> &str {
+        self.mutation.op_name()
+    }
+
     pub fn display_name(&self) -> String {
         self.mutation.display_name()
     }
@@ -184,7 +190,9 @@ impl<'trg, 'm> Mut<'trg, 'm> {
     }
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
-        let mut diagnostic = sess.dcx().struct_span_warn(self.span, "mutation was not detected");
+        let mut diagnostic = sess.dcx().struct_span_warn(self.span, format!("[{op_name}] mutation was not detected",
+            op_name = self.mutation.op_name(),
+        ));
         diagnostic.span_label(self.span, self.mutation.span_label());
 
         for subst in &self.substs {

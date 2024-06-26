@@ -42,6 +42,7 @@ pub mod sym {
         mutest_generated,
         mutest_main_static,
         mutest_runtime,
+        op_name,
         substitutions,
         SubstMap,
         SubstMeta,

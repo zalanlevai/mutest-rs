@@ -9,6 +9,8 @@ pub struct RelationalOpInvertMutation {
 }
 
 impl Mutation for RelationalOpInvertMutation {
+    fn op_name(&self) -> &str { "relational_op_invert" }
+
     fn display_name(&self) -> String {
         format!("invert relational operator `{original_bin_op}` for `{replacement_bin_op}`",
             original_bin_op = self.original_bin_op.as_str(),

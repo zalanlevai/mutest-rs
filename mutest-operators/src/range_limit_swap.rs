@@ -9,6 +9,8 @@ pub struct RangeLimitSwapMutation {
 }
 
 impl Mutation for RangeLimitSwapMutation {
+    fn op_name(&self) -> &str { "range_limit_swap" }
+
     fn display_name(&self) -> String {
         format!("{operation} range expression",
             operation = match self.replacement_limits {

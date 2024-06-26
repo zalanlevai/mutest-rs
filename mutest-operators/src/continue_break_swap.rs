@@ -9,6 +9,8 @@ pub struct ContinueBreakSwapMutation {
 }
 
 impl Mutation for ContinueBreakSwapMutation {
+    fn op_name(&self) -> &str { "continue_break_swap" }
+
     fn display_name(&self) -> String {
         let display_expr = |expr: &ast::ExprKind| match expr {
             ast::ExprKind::Break(Some(label), _) => format!("break with label `{}`", label.ident),

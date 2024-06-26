@@ -133,11 +133,11 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
                 (true, Unsafety::Tainted(_)) => {
                     unsafe_mutations_count += 1;
                     tainted_mutations_count += 1;
-                    unsafe_marker = "[tainted] ";
+                    unsafe_marker = "(tainted) ";
                 }
                 (true, _) => {
                     unsafe_mutations_count += 1;
-                    unsafe_marker = "[unsafe] ";
+                    unsafe_marker = "(unsafe) ";
                 }
                 (false, _) => {}
             };
@@ -146,7 +146,8 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
             if verbosity >= 1 {
                 print!("{}: ", mutation.id.index());
             }
-            println!("{unsafe_marker}{display_name} in {def_path} at {span:#?}",
+            println!("{unsafe_marker}[{op_name}] {display_name} in {def_path} at {span:#?}",
+                op_name = mutation.op_name(),
                 display_name = mutation.display_name(),
                 def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
                 span = tcx.hir().span(tcx.local_def_id_to_hir_id(mutation.target.def_id)),
@@ -156,7 +157,7 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
                 println!("    <-({distance})- {tainted_marker}{test}",
                     distance = entry_point.distance,
                     tainted_marker = match mutation.target.is_tainted(test, unsafe_targeting) {
-                        true => "[tainted] ",
+                        true => "(tainted) ",
                         false => "",
                     },
                     test = test.path_str(),

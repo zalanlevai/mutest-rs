@@ -28,6 +28,9 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session, unsafe_targeting:
             }
         }),
 
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::op_name, sp), {
+            ast::mk::expr_str(sp, &mutation.op_name())
+        }),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_name, sp), {
             ast::mk::expr_str(sp, &mutation.display_name())
         }),

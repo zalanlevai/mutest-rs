@@ -9,6 +9,8 @@ pub struct EqOpInvertMutation {
 }
 
 impl Mutation for EqOpInvertMutation {
+    fn op_name(&self) -> &str { "eq_op_invert" }
+
     fn display_name(&self) -> String {
         format!("invert equality operator `{original_bin_op}` to `{replacement_bin_op}`",
             original_bin_op = self.original_bin_op.as_str(),
