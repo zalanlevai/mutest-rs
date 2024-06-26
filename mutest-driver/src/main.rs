@@ -151,11 +151,13 @@ pub fn main() {
                 match print_name {
                     TARGETS => print_opts.mutation_targets = Some(()),
                     CONFLICT_GRAPH | COMPATIBILITY_GRAPH => {
+                        use mutest_driver_cli::graph_format::*;
+
                         let compatibility_graph = matches!(print_name, COMPATIBILITY_GRAPH);
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
                         let format = match mutest_arg_matches.get_one::<String>("graph-format").map(String::as_str) {
-                            Some("simple") => config::GraphFormat::Simple,
-                            Some("graphviz") => config::GraphFormat::Graphviz,
+                            Some(SIMPLE) => config::GraphFormat::Simple,
+                            Some(GRAPHVIZ) => config::GraphFormat::Graphviz,
                             _ => unreachable!(),
                         };
                         print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format });
@@ -215,34 +217,42 @@ pub fn main() {
         let call_graph_depth = *mutest_arg_matches.get_one::<usize>("call-graph-depth").unwrap();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
-        let mutation_batching_algorithm = match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
-            None | Some("none") => config::MutationBatchingAlgorithm::None,
+        let mutation_batching_algorithm = {
+            use mutest_driver_cli::mutant_batch_algorithm::*;
 
-            Some("greedy") => {
-                let ordering_heuristic = match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
-                    None | Some("none") => None,
-                    Some("conflicts") => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
-                    Some("reverse-conflicts") => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
+            match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
+                None | Some(NONE) => config::MutationBatchingAlgorithm::None,
+
+                Some(GREEDY) => {
+                    let ordering_heuristic = {
+                        use mutest_driver_cli::mutant_batch_greedy_ordering_heuristic::*;
+
+                        match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
+                            None | Some(NONE) => None,
+                            Some(CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
+                            Some(REVERSE_CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
+
+                            #[cfg(feature = "random")]
+                            Some(RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
+
+                            _ => unreachable!(),
+                        }
+                    };
 
                     #[cfg(feature = "random")]
-                    Some("random") => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
+                    let epsilon = mutest_arg_matches.get_one::<f64>("mutant-batch-greedy-epsilon").copied();
 
-                    _ => unreachable!(),
-                };
+                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, #[cfg(feature = "random")] epsilon }
+                }
 
                 #[cfg(feature = "random")]
-                let epsilon = mutest_arg_matches.get_one::<f64>("mutant-batch-greedy-epsilon").copied();
+                Some(RANDOM) => config::MutationBatchingAlgorithm::Random,
 
-                config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, #[cfg(feature = "random")] epsilon }
+                #[cfg(feature = "random")]
+                Some(SIMULATED_ANNEALING) => config::MutationBatchingAlgorithm::SimulatedAnnealing,
+
+                _ => unreachable!(),
             }
-
-            #[cfg(feature = "random")]
-            Some("random") => config::MutationBatchingAlgorithm::Random,
-
-            #[cfg(feature = "random")]
-            Some("simulated-annealing") => config::MutationBatchingAlgorithm::SimulatedAnnealing,
-
-            _ => unreachable!(),
         };
 
         #[cfg(feature = "random")]

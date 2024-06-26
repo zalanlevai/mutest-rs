@@ -1,19 +1,28 @@
 #![feature(decl_macro)]
 
-use std::iter;
-
 macro opts(
     $all:ident, $possible_values:ident where
-    $($ident:ident = $name:expr; $([$help:expr])?)*
+    $($(#[$attr:meta])* $ident:ident = $name:expr; $([$help:expr])?)*
 ) {
-    $(pub const $ident: &str = $name;)*
-    pub const $all: &[&str] = &[$($ident,)*];
+    $($(#[$attr])* pub const $ident: &str = $name;)*
+    pub const $all: &[&str] = &[$($(#[$attr])* $ident,)*];
 
-    pub(crate) fn $possible_values() -> impl Iterator<Item = clap::builder::PossibleValue> {
-        [
+    pub(crate) fn $possible_values() -> Vec<clap::builder::PossibleValue> {
+        vec![
             clap::builder::PossibleValue::new("all"),
-            $(clap::builder::PossibleValue::new($name)$(.help($help))?,)*
-        ].into_iter()
+            $($(#[$attr])* clap::builder::PossibleValue::new($name)$(.help($help))?,)*
+        ]
+    }
+}
+
+macro exclusive_opts(
+    $possible_values:ident where
+    $($(#[$attr:meta])* $ident:ident = $name:expr; $([$help:expr])?)*
+) {
+    $($(#[$attr])* pub const $ident: &str = $name;)*
+
+    pub(crate) fn $possible_values() -> Vec<clap::builder::PossibleValue> {
+        vec![$($(#[$attr])* clap::builder::PossibleValue::new($name)$(.help($help))?,)*]
     }
 }
 
@@ -40,6 +49,24 @@ pub mod mutation_operators {
     }
 }
 
+pub mod mutant_batch_algorithm {
+    crate::exclusive_opts! { possible_values where
+        GREEDY = "greedy";
+        #[cfg(feature = "random")] RANDOM = "random";
+        #[cfg(feature = "random")] SIMULATED_ANNEALING = "simulated-annealing";
+        NONE = "none";
+    }
+}
+
+pub mod mutant_batch_greedy_ordering_heuristic {
+    crate::exclusive_opts! { possible_values where
+        CONFLICTS = "conflicts";
+        REVERSE_CONFLICTS = "reverse-conflicts";
+        #[cfg(feature = "random")] RANDOM = "random";
+        NONE = "none";
+    }
+}
+
 pub mod print {
     crate::opts! { ALL, possible_values where
         TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
@@ -47,6 +74,13 @@ pub mod print {
         COMPATIBILITY_GRAPH = "compatibility-graph"; ["Print mutation compatibility graph (i.e. the complement graph of the conflict graph)."]
         MUTANTS = "mutants"; ["Print list of generated mutations, grouped into mutant batches."]
         CODE = "code"; ["Print the generated code of the test harness."]
+    }
+}
+
+pub mod graph_format {
+    crate::exclusive_opts! { possible_values where
+        SIMPLE = "simple";
+        GRAPHVIZ = "graphviz";
     }
 }
 
@@ -80,18 +114,18 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--risky "Produce safe mutations in contexts which contain `unsafe` blocks.").display_order(113))
         .arg(clap::arg!(--unsafe "Mutate code in `unsafe` blocks.").display_order(114))
         .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "risky", "unsafe"]).multiple(false))
-        .arg(clap::arg!(--"mutation-operators" [MUTATION_OPERATORS] "Mutation operators to apply to the code, separated by commas.").value_delimiter(',').value_parser(mutation_operators::possible_values().collect::<Vec<_>>()).default_value("all").display_order(115))
+        .arg(clap::arg!(--"mutation-operators" [MUTATION_OPERATORS] "Mutation operators to apply to the code, separated by commas.").value_delimiter(',').value_parser(mutation_operators::possible_values()).default_value("all").display_order(115))
         .arg(clap::arg!(--"call-graph-depth" [CALL_GRAPH_DEPTH] "Depth of call graph analysis.").default_value("1000").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(150))
-        .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(["greedy", #[cfg(feature = "random")] "random", #[cfg(feature = "random")] "simulated-annealing", "none"]).default_value("none").display_order(199))
+        .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE).display_order(199))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(199))
-        .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(["conflicts", "reverse-conflicts", #[cfg(feature = "random")] "random", "none"]).default_value("reverse-conflicts").display_order(199))
+        .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(mutant_batch_greedy_ordering_heuristic::possible_values()).default_value(mutant_batch_greedy_ordering_heuristic::REVERSE_CONFLICTS).display_order(199))
         // Printing-related Arguments
         .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
         .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
-        .arg(clap::arg!(--print [PRINT] "Print additional information during analysis. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(print::possible_values().collect::<Vec<_>>()).display_order(101))
+        .arg(clap::arg!(--print [PRINT] "Print additional information during analysis. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(print::possible_values()).display_order(101))
         .arg(clap::arg!(--"graph-exclude-unsafe" "Exclude unsafe mutations from the graph, only listing safe mutations.").display_order(102))
-        .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(["simple", "graphviz"]).default_value("simple").display_order(102))
+        .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(graph_format::possible_values()).default_value(graph_format::SIMPLE).display_order(102))
         // Experimental Flags
         .arg(clap::arg!(--"Zsanitize-macro-expns" "Sanitize the identifiers and paths in the expanded output of bang-style macro invocations.").display_order(500))
         // Information
