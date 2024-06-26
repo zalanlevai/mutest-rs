@@ -132,6 +132,27 @@ struct TestRunResults {
     pub total_tests_count: usize,
 }
 
+enum TestResult {
+    Ignored,
+    Failed,
+    Ok,
+    New,
+    Blessed,
+}
+
+fn log_test(test_name: &str, result: TestResult, reason: Option<&str>) {
+    eprintln!("test {test_name} ... {result}{reason}",
+        result = match result {
+            TestResult::Ignored => "\x1b[1;33mignored\x1b[0m",
+            TestResult::Failed => "\x1b[1;31mFAILED\x1b[0m",
+            TestResult::Ok => "\x1b[1;32mok\x1b[0m",
+            TestResult::New => "\x1b[1;33mNEW\x1b[0m",
+            TestResult::Blessed => "\x1b[1;35mBLESSED\x1b[0m",
+        },
+        reason = reason.map(|s| format!(" ({s})")).unwrap_or("".to_owned()),
+    );
+}
+
 fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResults) {
     if !path.is_file() { return; }
     if !path.extension().is_some_and(|v| v == "rs") { return; }
@@ -172,7 +193,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
     if directives.iter().any(|d| d == "ignore") {
         results.ignored_tests_count += 1;
-        eprintln!("test {name} ... \x1b[1;33mignored\x1b[0m");
+        log_test(&name, TestResult::Ignored, None);
         return;
     }
 
@@ -186,7 +207,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                 subcommand @ ("print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
                     if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
                         results.ignored_tests_count += 1;
-                        eprintln!("test {name} ... \x1b[1;33mignored\x1b[0m (invalid directives)");
+                        log_test(&name, TestResult::Ignored, Some("invalid directives"));
                         return;
                     }
                     match subcommand {
@@ -220,7 +241,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
                 _ => {
                     results.ignored_tests_count += 1;
-                    eprintln!("test {name} ... \x1b[1;33mignored\x1b[0m (unknown directive: `{directive}`)");
+                    log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{directive}`")));
                     return;
                 }
             }
@@ -264,12 +285,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         if output.status.code() != Some(0) {
             results.failed_tests_count += 1;
-            eprintln!("test {name} ... \x1b[1;31mFAILED\x1b[0m ({reason})",
-                reason = match output.status.code() {
-                    Some(exit_code) => format!("process exited with code {exit_code}"),
-                    None => "process exited without exit code".to_owned(),
-                },
-            );
+            log_test(&name, TestResult::Failed, Some(&match output.status.code() {
+                Some(exit_code) => format!("process exited with code {exit_code}"),
+                None => "process exited without exit code".to_owned(),
+            }));
             eprintln!("stdout:\n{}", stdout);
             eprintln!("stderr:\n{}", stderr);
             return;
@@ -346,12 +365,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     // TODO: Some tests may expect to fail
     if output.status.code() != Some(expected_exit_code) {
         results.failed_tests_count += 1;
-        eprintln!("test {name} ... \x1b[1;31mFAILED\x1b[0m ({reason})",
-            reason = match output.status.code() {
-                Some(exit_code) => format!("process exited with code {exit_code}"),
-                None => "process exited without exit code".to_owned(),
-            },
-        );
+        log_test(&name, TestResult::Failed, Some(&match output.status.code() {
+            Some(exit_code) => format!("process exited with code {exit_code}"),
+            None => "process exited without exit code".to_owned(),
+        }));
         eprintln!("stdout:\n{}", stdout);
         eprintln!("stderr:\n{}", stderr);
         return;
@@ -364,7 +381,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         if bless_verdicts.iter().all(|v| matches!(v, BlessVerdict::UpToDate)) {
             results.passed_tests_count += 1;
-            eprintln!("test {name} ... \x1b[1;32mok\x1b[0m");
+            log_test(&name, TestResult::Ok, None);
             return;
         }
 
@@ -372,7 +389,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         if bless_verdicts.iter().all(|v| matches!(v, BlessVerdict::New)) {
             results.new_tests_count += 1;
         }
-        eprintln!("test {name} ... \x1b[1;35mBLESSED\x1b[0m");
+        log_test(&name, TestResult::Blessed, None);
 
         for (expectation, bless_verdict) in iter::zip(&expectations, &bless_verdicts) {
             match bless_verdict {
@@ -390,7 +407,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         if expectation_verdicts.iter().all(|v| matches!(v, ExpectationVerdict::Met)) {
             results.passed_tests_count += 1;
-            eprintln!("test {name} ... \x1b[1;32mok\x1b[0m");
+            log_test(&name, TestResult::Ok, None);
             return;
         }
 
@@ -404,19 +421,19 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         match (&unmet_expectation_verdicts[..], has_unblessed_expectations) {
             ([], true) => {
-                eprintln!("test {name} ... \x1b[1;33mNEW\x1b[0m");
+                log_test(&name, TestResult::New, None);
             }
             ([], false) => unreachable!(),
             ([ExpectationVerdict::Unmet { reason, error }], _) => {
                 results.failed_tests_count += 1;
-                eprintln!("test {name} ... \x1b[1;31mFAILED\x1b[0m ({reason})");
+                log_test(&name, TestResult::Failed, Some(reason));
                 if let Some(error) = error {
                     eprintln!("{error}");
                 }
             }
             (unmet_expectation_verdicts, _) => {
                 results.failed_tests_count += 1;
-                eprintln!("test {name} ... \x1b[1;31mFAILED\x1b[0m ({} expectations failed)", unmet_expectation_verdicts.len());
+                log_test(&name, TestResult::Failed, Some(&format!("{} expectations failed", unmet_expectation_verdicts.len())));
                 for unmet_expectation_verdict in unmet_expectation_verdicts {
                     let ExpectationVerdict::Unmet { reason, error } = unmet_expectation_verdict else { unreachable!(); };
                     eprintln!("{reason}:");
