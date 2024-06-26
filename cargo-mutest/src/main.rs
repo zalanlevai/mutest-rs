@@ -169,6 +169,7 @@ fn main() {
 
     if let Some(passed_args) = passed_args {
         cmd.arg("--");
+        cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
         cmd.args(&passed_args);
     }

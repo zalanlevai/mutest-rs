@@ -264,6 +264,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
         use_thread_pool: args.contains(&"--use-thread-pool"),
+        verbosity: args.iter().filter(|&arg| *arg == "-v").count() as u8,
         report_timings: args.contains(&"--timings"),
     };
 
@@ -350,9 +351,16 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         //         stays the same, regardless of whether the handle performs locking or not.
         unsafe { active_mutant_handle.replace(Some(mutant)); }
 
+        if opts.verbosity >= 1 {
+            print!("{}: ", mutant.id);
+        }
         println!("applying mutant with the following mutations:");
         for mutation in mutant.mutations {
-            println!("- {unsafe_marker}[{op_name}] {display_name} at {display_location}",
+            print!("- ");
+            if opts.verbosity >= 1 {
+                print!("{}: ", mutation.id);
+            }
+            println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
                 unsafe_marker = match mutation.safety {
                     MutationSafety::Safe => "",
                     MutationSafety::Tainted => "(tainted) ",

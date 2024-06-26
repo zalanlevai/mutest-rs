@@ -17,5 +17,6 @@ pub struct Options {
     pub test_ordering: TestOrdering,
     pub test_timeout: TestTimeout,
     pub use_thread_pool: bool,
+    pub verbosity: u8,
     pub report_timings: bool,
 }
