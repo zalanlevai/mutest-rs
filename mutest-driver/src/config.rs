@@ -9,11 +9,32 @@ pub enum GraphFormat {
     Graphviz,
 }
 
+pub struct ConflictGraphOptions {
+    pub compatibility_graph: bool,
+    pub exclude_unsafe: bool,
+    pub format: GraphFormat,
+}
+
+pub struct PrintOptions {
+    pub print_headers: bool,
+    pub mutation_targets: Option<()>,
+    pub conflict_graph: Option<ConflictGraphOptions>,
+    pub mutants: Option<()>,
+    pub code: Option<()>,
+}
+
+impl PrintOptions {
+    pub fn is_empty(&self) -> bool {
+        true
+            && self.mutation_targets.is_none()
+            && self.conflict_graph.is_none()
+            && self.mutants.is_none()
+            && self.code.is_none()
+    }
+}
+
 pub enum Mode {
-    PrintMutationTargets,
-    PrintConflictGraph { compatibility_graph: bool, exclude_unsafe: bool, format: GraphFormat },
-    PrintMutants,
-    PrintCode,
+    Print,
     Build,
 }
 
@@ -53,6 +74,7 @@ pub struct Options<'op, 'm> {
     pub mode: Mode,
     pub verbosity: u8,
     pub report_timings: bool,
+    pub print_opts: PrintOptions,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub call_graph_depth: usize,

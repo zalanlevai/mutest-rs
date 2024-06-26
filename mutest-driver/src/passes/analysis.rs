@@ -176,13 +176,13 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
     );
 }
 
-pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
+pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     let mut compiler_config = base_compiler_config(config);
 
     // Compile the crate in test-mode to access tests defined behind `#[cfg(test)]`.
     compiler_config.opts.test = true;
 
-    let opts = &config.opts;
+    let opts = &mut config.opts;
     let source_name = compiler_config.input.source_name();
 
     let sess_opts = mutest_emit::session::Options {
@@ -242,15 +242,19 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let targets = reachable_fns.iter().filter(|f| f.distance < opts.mutation_depth);
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
-                if let config::Mode::PrintMutationTargets = opts.mode {
-                    print_targets(tcx, targets, opts.unsafe_targeting);
-                    if opts.report_timings {
-                        println!("\nfinished in {total:.2?} (targets {targets:.2?})",
-                            total = t_start.elapsed(),
-                            targets = target_analysis_duration,
-                        );
+                if let Some(_) = opts.print_opts.mutation_targets.take() {
+                    if opts.print_opts.print_headers { println!("\n@@@ targets @@@\n"); }
+                    print_targets(tcx, targets.clone(), opts.unsafe_targeting);
+                    if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?})",
+                                total = t_start.elapsed(),
+                                targets = target_analysis_duration,
+                            );
+                        }
+                        return Flow::Break;
                     }
-                    return Flow::Break;
+                    if opts.verbosity >= 1 { println!(); }
                 }
 
                 let t_mutation_analysis_start = Instant::now();
@@ -301,8 +305,9 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     );
                 }
 
-                if let config::Mode::PrintConflictGraph { compatibility_graph, exclude_unsafe, format } = opts.mode {
+                if let Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format }) = opts.print_opts.conflict_graph.take() {
                     let mutation_conflict_resolution_duration = t_mutation_batching_start.elapsed();
+                    if opts.print_opts.print_headers { println!("\n@@@ conflict graph @@@\n"); }
                     let mutations_excluding_unsafe = mutations.iter().filter(|m| !mutation_conflict_graph.is_unsafe(m.id));
                     match (compatibility_graph, exclude_unsafe) {
                         (false, false) => print_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_conflicts(), format),
@@ -310,15 +315,17 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         (true, false) => print_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_compatibilities(), format),
                         (true, true) => print_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_compatibilities(), format),
                     }
-                    if opts.report_timings {
-                        println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?})",
-                            total = t_start.elapsed(),
-                            targets = target_analysis_duration,
-                            mutations = mutation_analysis_duration,
-                            conflicts = mutation_conflict_resolution_duration,
-                        );
+                    if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?})",
+                                total = t_start.elapsed(),
+                                targets = target_analysis_duration,
+                                mutations = mutation_analysis_duration,
+                                conflicts = mutation_conflict_resolution_duration,
+                            );
+                        }
+                        return Flow::Break;
                     }
-                    return Flow::Break;
                 }
 
                 let mutants = match opts.mutation_batching_algorithm {
@@ -379,17 +386,20 @@ pub fn run(config: &Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     FatalError.raise();
                 }
 
-                if let config::Mode::PrintMutants = opts.mode {
+                if let Some(_) = opts.print_opts.mutants.take() {
+                    if opts.print_opts.print_headers { println!("\n@@@ mutants @@@\n"); }
                     print_mutants(tcx, &mutants, opts.unsafe_targeting, opts.verbosity);
-                    if opts.report_timings {
-                        println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
-                            total = t_start.elapsed(),
-                            targets = target_analysis_duration,
-                            mutations = mutation_analysis_duration,
-                            batching = mutation_batching_duration,
-                        );
+                    if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
+                                total = t_start.elapsed(),
+                                targets = target_analysis_duration,
+                                mutations = mutation_analysis_duration,
+                                batching = mutation_batching_duration,
+                            );
+                        }
+                        return Flow::Break;
                     }
-                    return Flow::Break;
                 }
 
                 let t_codegen_start = Instant::now();

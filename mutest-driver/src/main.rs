@@ -125,25 +125,49 @@ pub fn main() {
             .expect("specify MUTEST_SEARCH_PATH environment variable");
 
         let mode = match mutest_arg_matches.subcommand() {
-            Some(("print-targets", _)) => config::Mode::PrintMutationTargets,
-            Some(("print-conflict-graph", matches)) => {
-                let compatibility_graph = matches.get_flag("compatibility");
-                let exclude_unsafe = matches.get_flag("exclude-unsafe");
-                let format = match matches.get_one::<String>("format").map(String::as_str) {
-                    Some("simple") => config::GraphFormat::Simple,
-                    Some("graphviz") => config::GraphFormat::Graphviz,
-                    _ => unreachable!(),
-                };
-                config::Mode::PrintConflictGraph { compatibility_graph, exclude_unsafe, format }
-            }
-            Some(("print-mutants", _)) => config::Mode::PrintMutants,
-            Some(("print-code", _)) => config::Mode::PrintCode,
+            Some(("print", _)) => config::Mode::Print,
             Some(("build", _)) => config::Mode::Build,
             _ => unreachable!(),
         };
 
         let verbosity = mutest_arg_matches.get_count("verbose");
         let report_timings = mutest_arg_matches.get_flag("timings");
+
+        let print_opts = {
+            use mutest_driver_cli::print::*;
+
+            let mut print_names = mutest_arg_matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<FxHashSet<_>>()).unwrap_or_default();
+            if print_names.contains("all") { print_names = FxHashSet::from_iter(ALL.into_iter().map(|s| *s)); }
+
+            let mut print_opts = config::PrintOptions {
+                print_headers: print_names.len() > 1,
+                mutation_targets: None,
+                conflict_graph: None,
+                mutants: None,
+                code: None,
+            };
+
+            for print_name in print_names {
+                match print_name {
+                    TARGETS => print_opts.mutation_targets = Some(()),
+                    CONFLICT_GRAPH | COMPATIBILITY_GRAPH => {
+                        let compatibility_graph = matches!(print_name, COMPATIBILITY_GRAPH);
+                        let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
+                        let format = match mutest_arg_matches.get_one::<String>("graph-format").map(String::as_str) {
+                            Some("simple") => config::GraphFormat::Simple,
+                            Some("graphviz") => config::GraphFormat::Graphviz,
+                            _ => unreachable!(),
+                        };
+                        print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format });
+                    }
+                    MUTANTS => print_opts.mutants = Some(()),
+                    CODE => print_opts.code = Some(()),
+                    _ => unreachable!("invalid print information name: `{print_name}`"),
+                }
+            }
+
+            print_opts
+        };
 
         let unsafe_targeting = match () {
             _ if mutest_arg_matches.get_flag("safe") => UnsafeTargeting::None,
@@ -243,6 +267,7 @@ pub fn main() {
                 mode,
                 verbosity,
                 report_timings,
+                print_opts,
                 unsafe_targeting,
                 operators: &mutation_operators,
                 call_graph_depth,

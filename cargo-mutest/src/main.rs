@@ -58,10 +58,7 @@ fn main() {
         .get_matches_from(&args);
 
     let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args): (_, &[&str], _, _) = match matches.subcommand() {
-        Some(("print-targets", _)) => ("check", &["--profile", "test"], "print-targets", None),
-        Some(("print-conflict-graph", _)) => ("check", &["--profile", "test"], "print-conflict-graph", None),
-        Some(("print-mutants", _)) => ("check", &["--profile", "test"], "print-mutants", None),
-        Some(("print-code", _)) => ("check", &["--profile", "test"], "print-code", None),
+        Some(("print", _)) => ("check", &["--profile", "test"], "print", None),
         Some(("build", _)) => ("test", &["--no-run"], "build", None),
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();

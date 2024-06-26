@@ -1,3 +1,4 @@
+#![feature(let_chains)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 
@@ -26,14 +27,25 @@ use rustc_interface::interface::Result as CompilerResult;
 
 use crate::config::Config;
 
-pub fn run(config: Config) -> CompilerResult<()> {
+pub fn run(mut config: Config) -> CompilerResult<()> {
     let t_start = Instant::now();
 
-    let Some(analysis_pass) = passes::analysis::run(&config)? else { return Ok(()) };
+    let Some(analysis_pass) = passes::analysis::run(&mut config)? else { return Ok(()) };
 
-    if let config::Mode::PrintCode = config.opts.mode {
+    if let Some(_) = config.opts.print_opts.code.take() {
+        if config.opts.print_opts.print_headers { println!("\n@@@ code @@@\n"); }
         println!("{}", analysis_pass.generated_crate_code);
-        return Ok(());
+        if config.opts.print_opts.print_headers { println!(); }
+        if let config::Mode::Print = config.opts.mode && config.opts.print_opts.is_empty() {
+            println!("finished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?})",
+                total = analysis_pass.duration,
+                targets = analysis_pass.target_analysis_duration,
+                mutations = analysis_pass.mutation_analysis_duration,
+                batching = analysis_pass.mutation_batching_duration,
+                codegen = analysis_pass.codegen_duration,
+            );
+            return Ok(());
+        }
     }
 
     let compilation_pass = passes::compilation::run(&config, &analysis_pass)?;

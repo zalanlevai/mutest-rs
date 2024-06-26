@@ -1,5 +1,6 @@
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
+#![feature(let_chains)]
 
 use std::collections::BTreeSet;
 use std::env;
@@ -176,18 +177,34 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut expectations = BTreeSet::new();
+    let mut mutest_prints = BTreeSet::new();
     let mutest_subcommand = {
-        let mut mutest_subcommand = None;
+        let mut mutest_subcommand: Option<&str> = None;
 
         for directive in &directives {
             match directive.as_str() {
                 subcommand @ ("print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
-                    if let Some(_previous_subcommand) = mutest_subcommand {
+                    if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
                         results.ignored_tests_count += 1;
                         eprintln!("test {name} ... \x1b[1;33mignored\x1b[0m (invalid directives)");
                         return;
                     }
-                    mutest_subcommand = Some(subcommand);
+                    match subcommand {
+                        "run" => mutest_subcommand = Some("build"),
+                        "print-targets" => {
+                            mutest_prints.insert("targets");
+                            mutest_subcommand.get_or_insert("print");
+                        }
+                        "print-mutants" => {
+                            mutest_prints.insert("mutants");
+                            mutest_subcommand.get_or_insert("print");
+                        }
+                        "print-code" => {
+                            mutest_prints.insert("code");
+                            mutest_subcommand.get_or_insert("print");
+                        }
+                        subcommand => mutest_subcommand = Some(subcommand),
+                    };
                 }
 
                 "stdout" => { expectations.insert(Expectation::StdOut { empty: false }); }
@@ -292,6 +309,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     if mutation_operators.peek().is_some() {
         mutest_args.push("--mutation-operators".to_owned());
         mutest_args.push(mutation_operators.intersperse(",").collect::<String>());
+    }
+    if !mutest_prints.is_empty() {
+        mutest_args.push("--print".to_owned());
+        mutest_args.push(mutest_prints.into_iter().intersperse(",").collect::<String>());
     }
     directives.iter().filter_map(|d| d.strip_prefix("mutest-flags:").map(str::trim))
         .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
