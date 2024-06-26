@@ -3,13 +3,15 @@ use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const RELATIONAL_OP_INVERT: &str = "relational_op_invert";
+
 pub struct RelationalOpInvertMutation {
     pub original_bin_op: ast::BinOpKind,
     pub replacement_bin_op: ast::BinOpKind,
 }
 
 impl Mutation for RelationalOpInvertMutation {
-    fn op_name(&self) -> &str { "relational_op_invert" }
+    fn op_name(&self) -> &str { RELATIONAL_OP_INVERT }
 
     fn display_name(&self) -> String {
         format!("invert relational operator `{original_bin_op}` for `{replacement_bin_op}`",

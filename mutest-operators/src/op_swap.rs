@@ -36,10 +36,12 @@ fn impls_matching_op<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, cal
 
 macro define_op_swap_operator(
     $(#[$meta:meta])*
-    $vis:vis $operator:ident, $mutation:ident as $op_name:literal $([$bin_op_group:expr])? {
+    $vis:vis $operator:ident, $mutation:ident as $op_name_ident:ident = $op_name:literal $([$bin_op_group:expr])? {
         $($bin_op_from:pat $(if impl $bin_op_to_trait:ident, $bin_assign_op_to_trait:ident)? => $bin_op_to:expr),+ $(,)?
     }
 ) {
+    $vis const $op_name_ident: &str = $op_name;
+
     $vis struct $mutation {
         pub op_kind: OpKind,
         pub original_bin_op: ast::BinOpKind,
@@ -131,7 +133,7 @@ macro define_op_swap_operator(
 
 define_op_swap_operator! {
     /// Swap addition for subtraction and vice versa.
-    pub OpAddSubSwap, OpAddSubSwapMutation as "math_op_add_sub_swap" {
+    pub OpAddSubSwap, OpAddSubSwapMutation as MATH_OP_ADD_SUB_SWAP = "math_op_add_sub_swap" {
         ast::BinOpKind::Add if impl Sub, SubAssign => ast::BinOpKind::Sub,
         ast::BinOpKind::Sub if impl Add, AddAssign => ast::BinOpKind::Add,
     }
@@ -139,7 +141,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap addition for multiplication and vice versa.
-    pub OpAddMulSwap, OpAddMulSwapMutation as "math_op_add_mul_swap" {
+    pub OpAddMulSwap, OpAddMulSwapMutation as MATH_OP_ADD_MUL_SWAP = "math_op_add_mul_swap" {
         ast::BinOpKind::Add if impl Mul, MulAssign => ast::BinOpKind::Mul,
         ast::BinOpKind::Mul if impl Add, AddAssign => ast::BinOpKind::Add,
     }
@@ -147,7 +149,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap multiplication for division and vice versa.
-    pub OpMulDivSwap, OpMulDivSwapMutation as "math_op_mul_div_swap" {
+    pub OpMulDivSwap, OpMulDivSwapMutation as MATH_OP_MUL_DIV_SWAP = "math_op_mul_div_swap" {
         ast::BinOpKind::Mul if impl Div, DivAssign => ast::BinOpKind::Div,
         ast::BinOpKind::Div if impl Mul, MulAssign => ast::BinOpKind::Mul,
     }
@@ -155,7 +157,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap division for modulus and vice versa.
-    pub OpDivRemSwap, OpDivRemSwapMutation as "math_op_div_rem_swap" {
+    pub OpDivRemSwap, OpDivRemSwapMutation as MATH_OP_DIV_REM_SWAP = "math_op_div_rem_swap" {
         ast::BinOpKind::Div if impl Rem, RemAssign => ast::BinOpKind::Rem,
         ast::BinOpKind::Rem if impl Div, DivAssign => ast::BinOpKind::Div,
     }
@@ -163,7 +165,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap bitwise OR for bitwise XOR and vice versa.
-    pub BitOpOrXorSwap, BitOpOrXorSwapMutation as "bit_op_or_xor_swap" ["bitwise"] {
+    pub BitOpOrXorSwap, BitOpOrXorSwapMutation as BIT_OP_OR_XOR_SWAP = "bit_op_or_xor_swap" ["bitwise"] {
         ast::BinOpKind::BitOr if impl BitXor, BitXorAssign => ast::BinOpKind::BitXor,
         ast::BinOpKind::BitXor if impl BitOr, BitOrAssign => ast::BinOpKind::BitOr,
     }
@@ -171,7 +173,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap bitwise OR for bitwise AND and vice versa.
-    pub BitOpOrAndSwap, BitOpOrAndSwapMutation as "bit_op_or_and_swap" ["bitwise"] {
+    pub BitOpOrAndSwap, BitOpOrAndSwapMutation as BIT_OP_OR_AND_SWAP = "bit_op_or_and_swap" ["bitwise"] {
         ast::BinOpKind::BitOr if impl BitAnd, BitAndAssign => ast::BinOpKind::BitAnd,
         ast::BinOpKind::BitAnd if impl BitOr, BitOrAssign => ast::BinOpKind::BitOr,
     }
@@ -179,7 +181,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap bitwise XOR for bitwise AND and vice versa.
-    pub BitOpXorAndSwap, BitOpXorAndSwapMutation as "bit_op_xor_and_swap" ["bitwise"] {
+    pub BitOpXorAndSwap, BitOpXorAndSwapMutation as BIT_OP_XOR_AND_SWAP = "bit_op_xor_and_swap" ["bitwise"] {
         ast::BinOpKind::BitXor if impl BitAnd, BitAndAssign => ast::BinOpKind::BitAnd,
         ast::BinOpKind::BitAnd if impl BitXor, BitXorAssign => ast::BinOpKind::BitXor,
     }
@@ -187,7 +189,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap the direction of bitwise shift operators.
-    pub BitOpShiftDirSwap, BitOpShiftDirSwapMutation as "bit_op_shift_dir_swap" ["bitwise"] {
+    pub BitOpShiftDirSwap, BitOpShiftDirSwapMutation as BIT_OP_SHIFT_DIR_SWAP = "bit_op_shift_dir_swap" ["bitwise"] {
         ast::BinOpKind::Shl if impl Shr, ShrAssign => ast::BinOpKind::Shr,
         ast::BinOpKind::Shr if impl Shl, ShlAssign => ast::BinOpKind::Shl,
     }
@@ -195,7 +197,7 @@ define_op_swap_operator! {
 
 define_op_swap_operator! {
     /// Swap logical && for logical || and vice versa.
-    pub LogicalOpAndOrSwap, LogicalOpAndOrSwapMutation as "logical_op_and_or_swap" ["logical"] {
+    pub LogicalOpAndOrSwap, LogicalOpAndOrSwapMutation as LOGICAL_OP_AND_OR_SWAP = "logical_op_and_or_swap" ["logical"] {
         ast::BinOpKind::And => ast::BinOpKind::Or,
         ast::BinOpKind::Or => ast::BinOpKind::And,
     }

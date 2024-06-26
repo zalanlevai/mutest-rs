@@ -342,6 +342,16 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
     let mut crashed_mutations_count = 0;
     let mut crashed_safe_mutations_count = 0;
 
+    #[derive(Clone, Copy, Default)]
+    struct MutationOpStats {
+        total_mutations_count: usize,
+        undetected_mutations_count: usize,
+        timed_out_mutations_count: usize,
+        crashed_mutations_count: usize,
+    }
+
+    let mut mutation_op_stats: HashMap<&str, MutationOpStats> = Default::default();
+
     let t_mutation_testing_start = Instant::now();
     for &mutant in mutants {
         // SAFETY: Ideally, since the previous test runs all completed, no other thread is running, no one else is
@@ -382,7 +392,10 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         match run_tests(tests, mutant, thread_pool.clone()) {
             Ok(results) => {
                 for &mutation in mutant.mutations {
+                    let op_stats = mutation_op_stats.entry(mutation.op_name).or_default();
+
                     total_mutations_count += 1;
+                    op_stats.total_mutations_count += 1;
                     if let MutationSafety::Safe = mutation.safety {
                         total_safe_mutations_count += 1;
                     }
@@ -394,6 +407,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
                             all_test_runs_failed_successfully = false;
 
                             undetected_mutations_count += 1;
+                            op_stats.undetected_mutations_count += 1;
                             if let MutationSafety::Safe = mutation.safety {
                                 undetected_safe_mutations_count += 1;
                             }
@@ -404,6 +418,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
                         MutationTestResult::Detected => {}
                         MutationTestResult::TimedOut => {
                             timed_out_mutations_count += 1;
+                            op_stats.timed_out_mutations_count += 1;
                             if let MutationSafety::Safe = mutation.safety {
                                 timed_out_safe_mutations_count += 1;
                             }
@@ -411,6 +426,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
                         }
                         MutationTestResult::Crashed => {
                             crashed_mutations_count += 1;
+                            op_stats.crashed_mutations_count += 1;
                             if let MutationSafety::Safe = mutation.safety {
                                 crashed_safe_mutations_count += 1;
                             }
@@ -422,6 +438,31 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         }
     }
     let mutation_testing_duration = t_mutation_testing_start.elapsed();
+
+    if opts.verbosity >= 1 {
+        let mut op_names = mutation_op_stats.keys().collect::<Vec<_>>();
+        op_names.sort_unstable();
+
+        let op_name_w = op_names.iter().map(|s| s.len()).max().unwrap_or(0);
+        let detected_w = mutation_op_stats.values().map(|s| (s.total_mutations_count - s.undetected_mutations_count).checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let timed_out_w = mutation_op_stats.values().map(|s| s.timed_out_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let crashed_w = mutation_op_stats.values().map(|s| s.crashed_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let undetected_w = mutation_op_stats.values().map(|s| s.undetected_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+
+        for op_name in op_names {
+            let op_stats = mutation_op_stats.get(op_name).map(|s| *s).unwrap_or_default();
+
+            println!("{op_name:>op_name_w$}: {score:>7}. {detected:>detected_w$} detected ({timed_out:>timed_out_w$} timed out; {crashed:>crashed_w$} crashed); {undetected:>undetected_w$} undetected",
+                score = format!("{:.2}%",(op_stats.total_mutations_count - op_stats.undetected_mutations_count) as f64 / op_stats.total_mutations_count as f64 * 100_f64),
+                detected = op_stats.total_mutations_count - op_stats.undetected_mutations_count,
+                timed_out = op_stats.timed_out_mutations_count,
+                crashed = op_stats.crashed_mutations_count,
+                undetected = op_stats.undetected_mutations_count,
+            );
+        }
+
+        println!();
+    }
 
     println!("mutations: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
         score = match total_mutations_count {

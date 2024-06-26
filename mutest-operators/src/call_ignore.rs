@@ -45,12 +45,14 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     Some((callee, expr_ty))
 }
 
+pub const CALL_VALUE_DEFAULT_SHADOW: &str = "call_value_default_shadow";
+
 pub struct CallValueDefaultShadowMutation {
     pub callee_path: String,
 }
 
 impl Mutation for CallValueDefaultShadowMutation {
-    fn op_name(&self) -> &str { "call_value_default_shadow" }
+    fn op_name(&self) -> &str { CALL_VALUE_DEFAULT_SHADOW }
 
     fn display_name(&self) -> String {
         format!("ignore return value of call to `{callee}` by shadowing it with `Default::default()`",
@@ -116,12 +118,14 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
     }
 }
 
+pub const CALL_DELETE: &str = "call_delete";
+
 pub struct CallDeleteMutation {
     pub callee_path: String,
 }
 
 impl Mutation for CallDeleteMutation {
-    fn op_name(&self) -> &str { "call_delete" }
+    fn op_name(&self) -> &str { CALL_DELETE }
 
     fn display_name(&self) -> String {
         format!("delete call to `{callee}` and replace it with `Default::default()`",

@@ -7,12 +7,14 @@ use mutest_emit::codegen::symbols::{Ident, path};
 use mutest_emit::thin_vec::thin_vec;
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const ARG_DEFAULT_SHADOW: &str = "arg_default_shadow";
+
 pub struct ArgDefaultShadowMutation {
     pub param_ident: Ident,
 }
 
 impl Mutation for ArgDefaultShadowMutation {
-    fn op_name(&self) -> &str { "arg_default_shadow" }
+    fn op_name(&self) -> &str { ARG_DEFAULT_SHADOW }
 
     fn display_name(&self) -> String {
         format!("ignore `{param}` argument by shadowing it with `Default::default()`",

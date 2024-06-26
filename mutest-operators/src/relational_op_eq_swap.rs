@@ -3,13 +3,15 @@ use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const RELATIONAL_OP_EQ_SWAP: &str = "relational_op_eq_swap";
+
 pub struct RelationalOpEqSwapMutation {
     pub original_bin_op: ast::BinOpKind,
     pub replacement_bin_op: ast::BinOpKind,
 }
 
 impl Mutation for RelationalOpEqSwapMutation {
-    fn op_name(&self) -> &str { "relational_op_eq_swap" }
+    fn op_name(&self) -> &str { RELATIONAL_OP_EQ_SWAP }
 
     fn display_name(&self) -> String {
         format!("{operation} relational operator `{original_bin_op}`",

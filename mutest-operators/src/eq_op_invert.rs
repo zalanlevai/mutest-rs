@@ -3,13 +3,15 @@ use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const EQ_OP_INVERT: &str = "eq_op_invert";
+
 pub struct EqOpInvertMutation {
     pub original_bin_op: ast::BinOpKind,
     pub replacement_bin_op: ast::BinOpKind,
 }
 
 impl Mutation for EqOpInvertMutation {
-    fn op_name(&self) -> &str { "eq_op_invert" }
+    fn op_name(&self) -> &str { EQ_OP_INVERT }
 
     fn display_name(&self) -> String {
         format!("invert equality operator `{original_bin_op}` to `{replacement_bin_op}`",

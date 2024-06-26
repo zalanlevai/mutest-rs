@@ -3,13 +3,15 @@ use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const CONTINUE_BREAK_SWAP: &str = "continue_break_swap";
+
 pub struct ContinueBreakSwapMutation {
     pub original_expr: ast::ExprKind,
     pub replacement_expr: ast::ExprKind,
 }
 
 impl Mutation for ContinueBreakSwapMutation {
-    fn op_name(&self) -> &str { "continue_break_swap" }
+    fn op_name(&self) -> &str { CONTINUE_BREAK_SWAP }
 
     fn display_name(&self) -> String {
         let display_expr = |expr: &ast::ExprKind| match expr {

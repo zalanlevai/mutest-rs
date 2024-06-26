@@ -4,12 +4,14 @@ use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const RANGE_LIMIT_SWAP: &str = "range_limit_swap";
+
 pub struct RangeLimitSwapMutation {
     pub replacement_limits: ast::RangeLimits,
 }
 
 impl Mutation for RangeLimitSwapMutation {
-    fn op_name(&self) -> &str { "range_limit_swap" }
+    fn op_name(&self) -> &str { RANGE_LIMIT_SWAP }
 
     fn display_name(&self) -> String {
         format!("{operation} range expression",

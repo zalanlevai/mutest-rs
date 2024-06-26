@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
+use rustc_hash::FxHashMap;
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::ty::TyCtxt;
@@ -163,6 +164,52 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
                     test = test.path_str(),
                 );
             }
+        }
+
+        println!();
+    }
+
+    if verbosity >= 1 {
+        #[derive(Clone, Copy, Default)]
+        struct MutationOpStats {
+            total_mutations_count: usize,
+            unsafe_mutations_count: usize,
+            tainted_mutations_count: usize,
+            unbatched_mutations_count: usize,
+        }
+
+        let mut mutation_op_stats: FxHashMap<&str, MutationOpStats> = Default::default();
+        for mutant in mutants {
+            for mutation in &mutant.mutations {
+                let op_stats = mutation_op_stats.entry(mutation.op_name()).or_default();
+                op_stats.total_mutations_count += 1;
+                if mutation.is_unsafe(unsafe_targeting) { op_stats.unsafe_mutations_count += 1; }
+                if let Unsafety::Tainted(_) = mutation.target.unsafety { op_stats.tainted_mutations_count +=1; }
+                if mutant.mutations.len() == 1 { op_stats.unbatched_mutations_count += 1; }
+            }
+        }
+
+        let op_name_w = mutest_operators::ALL.iter().map(|s| s.len()).max().unwrap_or(0);
+        let mutations_w = mutation_op_stats.values().map(|s| s.total_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let safe_w = mutation_op_stats.values().map(|s| (s.total_mutations_count - s.unsafe_mutations_count).checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let unsafe_w = mutation_op_stats.values().map(|s| s.unsafe_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let tainted_w = mutation_op_stats.values().map(|s| s.tainted_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let batched_w = mutation_op_stats.values().map(|s| (s.total_mutations_count - s.unbatched_mutations_count).checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let unbatched_w = mutation_op_stats.values().map(|s| s.unbatched_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+
+        // TODO: Only list statistics for active mutation operators.
+        for op_name in mutest_operators::ALL {
+            let op_stats = mutation_op_stats.get(op_name).map(|s| *s).unwrap_or_default();
+
+            println!("{op_name:>op_name_w$}: {mutations_pct:>6}. {mutations:>mutations_w$} mutations; {safe:>safe_w$} safe; {unsafe:>unsafe_w$} unsafe ({tainted:>tainted_w$} tainted); {batched:>batched_w$} batched; {unbatched:>unbatched_w$} unbatched",
+                mutations_pct = format!("{:.2}%", op_stats.total_mutations_count as f64 / total_mutations_count as f64 * 100_f64),
+                mutations = op_stats.total_mutations_count,
+                safe = op_stats.total_mutations_count - op_stats.unsafe_mutations_count,
+                r#unsafe = op_stats.unsafe_mutations_count,
+                tainted = op_stats.tainted_mutations_count,
+                batched = op_stats.total_mutations_count - op_stats.unbatched_mutations_count,
+                unbatched = op_stats.unbatched_mutations_count,
+            );
         }
 
         println!();

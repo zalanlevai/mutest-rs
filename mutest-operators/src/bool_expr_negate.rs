@@ -3,12 +3,14 @@ use mutest_emit::codegen::ast::{self, P};
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
 
+pub const BOOL_EXPR_NEGATE: &str = "bool_expr_negate";
+
 pub struct BoolExprNegateMutation {
     pub was_negated: bool,
 }
 
 impl Mutation for BoolExprNegateMutation {
-    fn op_name(&self) -> &str { "bool_expr_negate" }
+    fn op_name(&self) -> &str { BOOL_EXPR_NEGATE }
 
     fn display_name(&self) -> String {
         format!("{operation} boolean expression",
