@@ -1,7 +1,7 @@
 //@ build
+//@ mutation-operators: call_value_default_shadow
 //@ stderr: empty
 // TODO: //@ run (without mutest test harness)
-// TODO: //@ mutation-operators: call_value_default_shadow
 
 #![feature(decl_macro)]
 #![feature(never_type)]
