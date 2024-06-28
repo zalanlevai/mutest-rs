@@ -116,9 +116,13 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
     let mut total_mutations_count = 0;
     let mut unsafe_mutations_count = 0;
     let mut tainted_mutations_count = 0;
+    let mut unbatched_mutations_count = 0;
 
     for mutant in mutants {
         total_mutations_count += mutant.mutations.len();
+        if mutant.mutations.len() == 1 {
+            unbatched_mutations_count += 1;
+        }
 
         if verbosity >= 1 {
             print!("{}: ", mutant.id.index());
@@ -215,12 +219,14 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
         println!();
     }
 
-    println!("{mutants} mutants; {mutations} mutations; {safe} safe; {unsafe} unsafe ({tainted} tainted)",
+    println!("{mutants} mutants; {mutations} mutations; {safe} safe; {unsafe} unsafe ({tainted} tainted); {batched} batched; {unbatched} unbatched",
         mutants = mutants.len(),
         mutations = total_mutations_count,
         safe = total_mutations_count - unsafe_mutations_count,
         r#unsafe = unsafe_mutations_count,
         tainted = tainted_mutations_count,
+        batched = total_mutations_count - unbatched_mutations_count,
+        unbatched = unbatched_mutations_count,
     );
 }
 
