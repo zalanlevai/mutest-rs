@@ -558,13 +558,13 @@ impl<'ast> ast::visit::Visitor<'ast> for BodyUnsafetyChecker {
 }
 
 fn check_item_unsafety<'ast>(item: ast::DefItem<'ast>) -> Unsafety {
-    let ast::ItemKind::Fn(target_fn) = item.kind() else { return Unsafety::None };
+    let ast::DefItemKind::Fn(target_fn) = item.kind() else { return Unsafety::None };
 
     let ast::Unsafe::No = target_fn.sig.header.unsafety else { return Unsafety::Unsafe(UnsafeSource::Unsafe) };
 
-    let Some(target_body) = target_fn.body else { return Unsafety::None };
+    let Some(target_body) = &target_fn.body else { return Unsafety::None };
     let mut checker = BodyUnsafetyChecker { unsafety: None };
-    checker.visit_block(&target_body);
+    checker.visit_block(target_body);
     checker.unsafety.unwrap_or(Unsafety::None)
 }
 

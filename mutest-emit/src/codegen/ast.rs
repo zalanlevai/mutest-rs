@@ -5,7 +5,7 @@ pub use rustc_ast::token::TokenKind;
 pub use rustc_ast::tokenstream::*;
 
 use rustc_span::Span;
-use rustc_span::symbol::Ident;
+use rustc_span::symbol::{Ident, Symbol};
 
 use crate::analysis::Descr;
 
@@ -55,6 +55,79 @@ impl FnItem {
     }
 }
 
+pub enum StaticItemKind<'ast> {
+    Local(&'ast ast::StaticItem),
+    Foreign(&'ast ast::StaticForeignItem),
+}
+
+pub enum DefItemKind<'ast> {
+    ExternCrate(Option<Symbol>),
+    Use(&'ast ast::UseTree),
+    Static(StaticItemKind<'ast>),
+    Const(&'ast ast::ConstItem),
+    Fn(&'ast ast::Fn),
+    Mod(ast::Unsafe, &'ast ast::ModKind),
+    ForeignMod(&'ast ast::ForeignMod),
+    GlobalAsm(&'ast ast::InlineAsm),
+    TyAlias(&'ast ast::TyAlias),
+    Enum(&'ast ast::EnumDef, &'ast ast::Generics),
+    Struct(&'ast ast::VariantData, &'ast ast::Generics),
+    Union(&'ast ast::VariantData, &'ast ast::Generics),
+    Trait(&'ast ast::Trait),
+    TraitAlias(&'ast ast::Generics, &'ast ast::GenericBounds),
+    Impl(&'ast ast::Impl),
+    MacCall(&'ast ast::MacCall),
+    MacroDef(&'ast ast::MacroDef),
+    Delegation(&'ast ast::Delegation),
+    DelegationMac(&'ast ast::DelegationMac),
+}
+
+impl<'ast> DefItemKind<'ast> {
+    pub fn from_item_kind(item_kind: &'ast ast::ItemKind) -> Self {
+        match item_kind {
+            ast::ItemKind::ExternCrate(symbol) => Self::ExternCrate(*symbol),
+            ast::ItemKind::Use(use_tree) => Self::Use(use_tree),
+            ast::ItemKind::Static(static_item) => Self::Static(StaticItemKind::Local(static_item)),
+            ast::ItemKind::Const(const_item) => Self::Const(const_item),
+            ast::ItemKind::Fn(fn_) => Self::Fn(fn_),
+            ast::ItemKind::Mod(unsafety, mod_kind) => Self::Mod(*unsafety, mod_kind),
+            ast::ItemKind::ForeignMod(foreign_mod) => Self::ForeignMod(foreign_mod),
+            ast::ItemKind::GlobalAsm(inline_asm) => Self::GlobalAsm(inline_asm),
+            ast::ItemKind::TyAlias(ty_alias) => Self::TyAlias(ty_alias),
+            ast::ItemKind::Enum(enum_def, generics) => Self::Enum(enum_def, generics),
+            ast::ItemKind::Struct(variant_data, generics) => Self::Struct(variant_data, generics),
+            ast::ItemKind::Union(variant_data, generics) => Self::Union(variant_data, generics),
+            ast::ItemKind::Trait(trait_) => Self::Trait(trait_),
+            ast::ItemKind::TraitAlias(generics, generic_bounds) => Self::TraitAlias(generics, generic_bounds),
+            ast::ItemKind::Impl(impl_) => Self::Impl(impl_),
+            ast::ItemKind::MacCall(mac_call) => Self::MacCall(mac_call),
+            ast::ItemKind::MacroDef(macro_def) => Self::MacroDef(macro_def),
+            ast::ItemKind::Delegation(delegation) => Self::Delegation(delegation),
+            ast::ItemKind::DelegationMac(delegation_mac) => Self::DelegationMac(delegation_mac),
+        }
+    }
+
+    pub fn from_foreign_item_kind(item_kind: &'ast ast::ForeignItemKind) -> Self {
+        match item_kind {
+            ast::ForeignItemKind::Static(static_item) => Self::Static(StaticItemKind::Foreign(static_item)),
+            ast::ForeignItemKind::Fn(fn_) => Self::Fn(fn_),
+            ast::ForeignItemKind::TyAlias(ty_alias) => Self::TyAlias(ty_alias),
+            ast::ForeignItemKind::MacCall(mac_call) => Self::MacCall(mac_call),
+        }
+    }
+
+    pub fn from_assoc_item_kind(item_kind: &'ast ast::AssocItemKind) -> Self {
+        match item_kind {
+            ast::AssocItemKind::Const(const_item) => Self::Const(const_item),
+            ast::AssocItemKind::Fn(fn_) => Self::Fn(fn_),
+            ast::AssocItemKind::Type(ty_alias) => Self::TyAlias(ty_alias),
+            ast::AssocItemKind::MacCall(mac_call) => Self::MacCall(mac_call),
+            ast::AssocItemKind::Delegation(delegation) => Self::Delegation(delegation),
+            ast::AssocItemKind::DelegationMac(delegation_mac) => Self::DelegationMac(delegation_mac),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum DefItem<'ast> {
     Item(&'ast ast::Item),
@@ -79,7 +152,15 @@ impl<'ast> DefItem<'ast> {
         }
     }
 
-    pub fn kind(&self) -> ast::ItemKind {
+    pub fn kind(&self) -> DefItemKind<'ast> {
+        match self {
+            Self::Item(item) => DefItemKind::from_item_kind(&item.kind),
+            Self::ForeignItem(item) => DefItemKind::from_foreign_item_kind(&item.kind),
+            Self::AssocItem(item, _) => DefItemKind::from_assoc_item_kind(&item.kind),
+        }
+    }
+
+    pub fn owned_item_kind(&self) -> ast::ItemKind {
         match self {
             Self::Item(item) => item.kind.clone(),
             Self::ForeignItem(item) => item.kind.clone().into(),

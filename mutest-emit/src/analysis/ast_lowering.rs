@@ -1036,23 +1036,23 @@ where
     match item_hir {
         hir::DefItem::Item(item_hir) => match &item_hir.kind {
             hir::ItemKind::ExternCrate(symbol_hir) => {
-                matching_item!(ast::ItemKind::ExternCrate(symbol_ast) if symbol_ast == symbol_hir)
+                matching_item!(ast::DefItemKind::ExternCrate(symbol_ast) if symbol_ast == symbol_hir)
             }
             hir::ItemKind::Use(_, _) => None,
             hir::ItemKind::Static(_, _, _) => {
-                matching_item!(ast::ItemKind::Static(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Static(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Const(_, _, _) => {
-                matching_item!(ast::ItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Fn(_, _, _) => {
-                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Macro(def_hir, _) => {
-                matching_item!(ast::ItemKind::MacroDef(def_ast) if std::ptr::eq(*def_hir, def_ast))
+                matching_item!(ast::DefItemKind::MacroDef(def_ast) if std::ptr::eq(*def_hir, *def_ast))
             }
             hir::ItemKind::Mod(_) => {
-                matching_item!(ast::ItemKind::Mod(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Mod(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::ForeignMod { abi: _, items: _ } => {
                 let Some(disambiguator) = disambiguator else { return None; };
@@ -1060,7 +1060,7 @@ where
                 let hir::DefPathData::ForeignMod = disambiguator.kind else { return None; };
                 let index = disambiguator.disambiguator;
 
-                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::ForeignMod(_))).nth(index)
+                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::DefItemKind::ForeignMod(_))).nth(index)
             }
             hir::ItemKind::GlobalAsm(_) => {
                 let Some(disambiguator) = disambiguator else { return None; };
@@ -1068,26 +1068,26 @@ where
                 let hir::DefPathData::GlobalAsm = disambiguator.kind else { return None; };
                 let index = disambiguator.disambiguator;
 
-                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::GlobalAsm(_))).nth(index)
+                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::DefItemKind::GlobalAsm(_))).nth(index)
             }
             hir::ItemKind::TyAlias(_, _) => {
-                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::OpaqueTy(_) => None,
             hir::ItemKind::Enum(_, _) => {
-                matching_item!(ast::ItemKind::Enum(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Enum(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Struct(_, _) => {
-                matching_item!(ast::ItemKind::Struct(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Struct(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Union(_, _) => {
-                matching_item!(ast::ItemKind::Union(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Union(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Trait(_, _, _, _, _) => {
-                matching_item!(ast::ItemKind::Trait(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Trait(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::TraitAlias(_, _) => {
-                matching_item!(ast::ItemKind::TraitAlias(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::TraitAlias(_, _) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ItemKind::Impl(_) => {
                 let Some(disambiguator) = disambiguator else { return None; };
@@ -1095,40 +1095,40 @@ where
                 let hir::DefPathData::Impl = disambiguator.kind else { return None; };
                 let index = disambiguator.disambiguator;
 
-                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::ItemKind::Impl(_))).nth(index)
+                items_ast.into_iter().filter(|&item_ast| matches!(&item_ast.kind(), ast::DefItemKind::Impl(_))).nth(index)
             }
         }
         hir::DefItem::ForeignItem(item_hir) => match &item_hir.kind {
             hir::ForeignItemKind::Fn(_, _, _) => {
-                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ForeignItemKind::Static(_, _) => {
-                matching_item!(ast::ItemKind::Static(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Static(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ForeignItemKind::Type => {
-                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
         }
         hir::DefItem::TraitItem(item_hir) => match &item_hir.kind {
             hir::TraitItemKind::Const(_, _) => {
-                matching_item!(ast::ItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::TraitItemKind::Fn(_, _) => {
-                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::TraitItemKind::Type(_, _) => {
-                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
         }
         hir::DefItem::ImplItem(item_hir) => match &item_hir.kind {
             hir::ImplItemKind::Const(_, _) => {
-                matching_item!(ast::ItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Const(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ImplItemKind::Fn(_, _) => {
-                matching_item!(ast::ItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::Fn(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
             hir::ImplItemKind::Type(_) => {
-                matching_item!(ast::ItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
+                matching_item!(ast::DefItemKind::TyAlias(_) => |item_ast| item_ast.ident() == item_hir.ident)
             }
         }
     }
