@@ -37,13 +37,15 @@ pub fn run(mut config: Config) -> CompilerResult<()> {
         println!("{}", analysis_pass.generated_crate_code);
         if config.opts.print_opts.print_headers { println!(); }
         if let config::Mode::Print = config.opts.mode && config.opts.print_opts.is_empty() {
-            println!("finished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?})",
-                total = analysis_pass.duration,
-                targets = analysis_pass.target_analysis_duration,
-                mutations = analysis_pass.mutation_analysis_duration,
-                batching = analysis_pass.mutation_batching_duration,
-                codegen = analysis_pass.codegen_duration,
-            );
+            if config.opts.report_timings {
+                println!("finished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?})",
+                    total = analysis_pass.duration,
+                    targets = analysis_pass.target_analysis_duration,
+                    mutations = analysis_pass.mutation_analysis_duration,
+                    batching = analysis_pass.mutation_batching_duration,
+                    codegen = analysis_pass.codegen_duration,
+                );
+            }
             return Ok(());
         }
     }
