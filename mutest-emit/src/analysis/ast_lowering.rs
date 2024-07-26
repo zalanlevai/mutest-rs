@@ -280,11 +280,13 @@ pub mod visit {
             (ast::ExprKind::Lit(_), hir::ExprKind::Lit(_)) => {
                 // TODO
             }
-            (ast::ExprKind::Cast(expr_ast, _), hir::ExprKind::Cast(expr_hir, _)) => {
+            (ast::ExprKind::Cast(expr_ast, ty_ast), hir::ExprKind::Cast(expr_hir, ty_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
+                visit_matching_ty(visitor, ty_ast, ty_hir);
             }
-            (ast::ExprKind::Type(expr_ast, _), hir::ExprKind::Type(expr_hir, _)) => {
+            (ast::ExprKind::Type(expr_ast, ty_ast), hir::ExprKind::Type(expr_hir, ty_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
+                visit_matching_ty(visitor, ty_ast, ty_hir);
             }
             (ast::ExprKind::Let(pat_ast, expr_ast, _, _), hir::ExprKind::Let(let_hir)) => {
                 visit_matching_pat(visitor, pat_ast, let_hir.pat);
@@ -443,6 +445,9 @@ pub mod visit {
             }
             (ast::ExprKind::AddrOf(_, _, expr_ast), hir::ExprKind::AddrOf(_, _, expr_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
+            }
+            (ast::ExprKind::OffsetOf(ty_ast, _), hir::ExprKind::OffsetOf(ty_hir, _)) => {
+                visit_matching_ty(visitor, ty_ast, ty_hir);
             }
             (ast::ExprKind::Break(_, expr_ast), hir::ExprKind::Break(_, expr_hir)) => {
                 if let Some(expr_ast) = expr_ast && let Some(expr_hir) = expr_hir {
