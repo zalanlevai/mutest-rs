@@ -22,17 +22,31 @@ macro assoc_hygiene() {
     }
 
     trait Bar {
-        const LEN: usize;
+        type Item;
 
-        fn f() -> usize { Self::LEN }
-        fn g() -> usize { <Self as Bar>::LEN }
+        fn f() -> Self::Item;
+        fn g() -> <Self as Bar>::Item;
     }
 
     impl Bar for A {
+        type Item = ();
+
+        fn f() -> Self::Item { () as Self::Item }
+        fn g() -> <Self as Bar>::Item { () as <Self as Bar>::Item }
+    }
+
+    trait Baz {
+        const LEN: usize;
+
+        fn f() -> usize { Self::LEN }
+        fn g() -> usize { <Self as Baz>::LEN }
+    }
+
+    impl Baz for A {
         const LEN: usize = 1;
 
         fn f() -> usize { Self::LEN }
-        fn g() -> usize { <Self as Bar>::LEN }
+        fn g() -> usize { <Self as Baz>::LEN }
     }
 }
 

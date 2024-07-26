@@ -4,6 +4,7 @@ use std::panic;
 use rustc_data_structures::sync::Lrc;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_hash::FxHashSet;
+use rustc_hir_analysis::collect::ItemCtxt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::edition::Edition;
@@ -304,13 +305,24 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // `Self::$assoc` paths
             (qself @ None, None) => {
-                let Some(typeck) = &self.current_typeck_ctx else { return; };
                 let Some(body_res) = &self.current_body_res else { return; };
 
                 let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
 
                 // NOTE: This returns the trait item definition, not the impl item definition.
-                let Some((def_kind, def_id)) = typeck.type_dependent_def(node_hir_id) else { unreachable!() };
+                let Some((def_kind, def_id)) = self.current_typeck_ctx.as_ref().and_then(|typeck| typeck.type_dependent_def(node_hir_id)).or_else(|| {
+                    if let hir::Node::Ty(ty_hir) = self.tcx.hir_node(node_hir_id) {
+                        let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
+                        let ty = icx.lower_ty(ty_hir);
+                        let ty::TyKind::Alias(ty::AliasTyKind::Projection, alias_ty) = ty.kind() else { unreachable!() };
+
+                        let trait_item_def_id = alias_ty.def_id;
+                        let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
+                        return Some((trait_item_def_kind, trait_item_def_id));
+                    }
+
+                    None
+                }) else { unreachable!() };
 
                 match def_kind {
                     hir::DefKind::AssocTy | hir::DefKind::AssocConst | hir::DefKind::AssocFn => {
@@ -327,7 +339,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // `<$Ty as $Trait>::$assoc` paths
             (qself @ Some(_), _) => {
-                let Some(typeck) = &self.current_typeck_ctx else { return; };
                 let Some(body_res) = &self.current_body_res else { return; };
 
                 let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
@@ -338,10 +349,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     _ => unreachable!(),
                 };
 
-                let qres = typeck.qpath_res(&qpath, node_hir_id);
+                let qres = self.current_typeck_ctx.as_ref().map(|typeck| typeck.qpath_res(&qpath, node_hir_id)).unwrap_or_else(|| {
+                    let hir::QPath::Resolved(_, path) = qpath else { unreachable!() };
+                    path.res
+                });
 
                 let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
-                let qself_ty = typeck.node_type(qself_hir_ty.hir_id);
+                let qself_ty = self.current_typeck_ctx.as_ref().and_then(|typeck| typeck.node_type_opt(qself_hir_ty.hir_id)).unwrap_or_else(|| {
+                    let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
+                    icx.lower_ty(qself_hir_ty)
+                });
 
                 // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
                 *qself = match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
