@@ -63,7 +63,8 @@ impl<'a> Operator<'a> for RangeLimitSwap {
         //       ast::mk::expr_range(def, start.clone(), end.clone(), swapped_limits);
         //       ```
         let swapped_limits_range_expr = {
-            let typeck = tcx.typeck_body(f_hir.body.id());
+            let Some(body_hir) = f_hir.body else { return None; };
+            let typeck = tcx.typeck_body(body_hir.id());
 
             let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
             let range_ty = typeck.node_type(expr_hir.hir_id);

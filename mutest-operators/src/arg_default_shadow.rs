@@ -52,7 +52,8 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         let Some(body) = &f.body else { return None; };
         let Some(first_item) = body.stmts.first() else { return None; };
 
-        let typeck = tcx.typeck_body(f_hir.body.id());
+        let Some(body_hir) = f_hir.body else { return None; };
+        let typeck = tcx.typeck_body(body_hir.id());
 
         let Some(param_hir) = body_res.hir_param(param) else { unreachable!() };
         let param_ty = typeck.pat_ty(param_hir.pat);

@@ -79,6 +79,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let MutCtxt { opts, tcx, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
+        let Some(body_hir) = f_hir.body else { return None; };
 
         let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return None; };
 
@@ -86,7 +87,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let Some((callee, expr_ty)) = non_default_call(
             tcx,
             f_hir.owner_id.to_def_id(),
-            f_hir.body.id(),
+            body_hir.id(),
             expr_hir,
             self.limit_scope_to_local_callees,
         ) else { return None; };
@@ -151,6 +152,7 @@ impl<'a> Operator<'a> for CallDelete {
         let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
+        let Some(body_hir) = f_hir.body else { return None; };
 
         let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return None; };
 
@@ -158,7 +160,7 @@ impl<'a> Operator<'a> for CallDelete {
         let Some((callee, _)) = non_default_call(
             tcx,
             f_hir.owner_id.to_def_id(),
-            f_hir.body.id(),
+            body_hir.id(),
             expr_hir,
             self.limit_scope_to_local_callees,
         ) else { return None; };

@@ -85,7 +85,9 @@ macro define_op_swap_operator(
             };
 
             let param_env = tcx.param_env(f_hir.owner_id.def_id);
-            let typeck = tcx.typeck_body(f_hir.body.id());
+
+            let Some(body_hir) = f_hir.body else { return None; };
+            let typeck = tcx.typeck_body(body_hir.id());
 
             let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
             let expr_ty = typeck.expr_ty(expr_hir);

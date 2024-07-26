@@ -415,7 +415,7 @@ macro def_flat_map_item_fns(
 
             // Store new body resolution scope, if available.
             let previous_body_res = self.current_body_res.take();
-            if let Some(fn_ast) = $into_ast_fn_item(&$item) && fn_ast.body.is_some() {
+            if let Some(fn_ast) = $into_ast_fn_item(&$item) {
                 let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
                 self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
             }

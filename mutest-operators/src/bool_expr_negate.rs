@@ -35,7 +35,8 @@ impl<'a> Operator<'a> for BoolExprNegate {
 
         if let ast::ExprKind::Let(_, _, _, _) = expr.kind { return None; };
 
-        let typeck = tcx.typeck_body(f_hir.body.id());
+        let Some(body_hir) = f_hir.body else { return None; };
+        let typeck = tcx.typeck_body(body_hir.id());
 
         let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let expr_ty = typeck.expr_ty(expr_hir);
