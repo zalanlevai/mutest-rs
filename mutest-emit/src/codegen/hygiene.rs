@@ -290,6 +290,14 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) {
+        // Short-circuit if not in a macro expansion.
+        if !is_macro_expn_span(path.span) {
+            // HACK: The non-macro path will not be adjusted by `sanitize_path`,
+            //       so the resolution argument will not be used.
+            self.sanitize_path(path, hir::Res::Err);
+            return;
+        }
+
         match (qself, self.def_res.node_res(path.segments.last().unwrap().id)) {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
             (None, Some(res)) => self.sanitize_path(path, res),
