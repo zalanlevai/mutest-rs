@@ -50,7 +50,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         ) = param.pat.kind else { return None; };
 
         let Some(body) = &f.body else { return None; };
-        let Some(first_item) = body.stmts.first() else { return None; };
+        let Some(first_valid_stmt) = body.stmts.iter().filter(|stmt| stmt.id != ast::DUMMY_NODE_ID).next() else { return None; };
 
         let Some(body_hir) = f_hir.body else { return None; };
         let typeck = tcx.typeck_body(body_hir.id());
@@ -66,7 +66,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
 
         Some((mutation, smallvec![
             SubstDef::new(
-                SubstLoc::InsertBefore(first_item.id),
+                SubstLoc::InsertBefore(first_valid_stmt.id),
                 // let $param: $ty = Default::default();
                 Subst::AstLocal(param_ident, param_mutbl, Some(param.ty.clone()), default, None),
             ),
