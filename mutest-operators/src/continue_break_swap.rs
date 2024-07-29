@@ -1,4 +1,5 @@
 use mutest_emit::{Mutation, Operator};
+use mutest_emit::analysis::hir;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
 use mutest_emit::smallvec::{SmallVec, smallvec};
@@ -50,7 +51,7 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
     type Mutation = ContinueBreakSwapMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
-        let MutCtxt { opts: _, tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
+        let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
 
@@ -63,6 +64,16 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
             }
             _ => { return None; }
         };
+
+        let Some(body_hir) = f_hir.body else { return None; };
+        let typeck = tcx.typeck_body(body_hir.id());
+
+        let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
+
+        let (hir::ExprKind::Continue(destination) | hir::ExprKind::Break(destination, _)) = expr_hir.kind else { unreachable!() };
+        let target_hir_id = destination.target_id.unwrap();
+        let target_ty = typeck.node_type(target_hir_id);
+        if target_ty != tcx.types.unit && target_ty != tcx.types.never { return None; }
 
         let mutation = Self::Mutation {
             original_expr: expr.kind.clone(),
