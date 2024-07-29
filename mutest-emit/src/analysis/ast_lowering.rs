@@ -601,12 +601,17 @@ pub mod visit {
                     visit_matching_expr(visitor, end_expr_ast, end_expr_hir);
                 }
             }
-            (ast::PatKind::Slice(pats_ast), hir::PatKind::Slice(pats_before_hir, _slice_hir, pats_after_hir)) => {
+            (ast::PatKind::Slice(pats_ast), hir::PatKind::Slice(pats_before_hir, slice_hir, pats_after_hir)) => {
                 for (pat_ast, pat_hir) in iter::zip(&pats_ast[..pats_before_hir.len()], *pats_before_hir) {
                     visit_matching_pat(visitor, pat_ast, pat_hir);
                 }
-                for (pat_ast, pat_hir) in iter::zip(&pats_ast[(pats_before_hir.len() + 1)..], *pats_after_hir) {
-                    visit_matching_pat(visitor, pat_ast, pat_hir);
+                if let Some(slice_hir) = slice_hir {
+                    visit_matching_pat(visitor, &pats_ast[pats_before_hir.len()], slice_hir);
+                }
+                if !pats_after_hir.is_empty() {
+                    for (pat_ast, pat_hir) in iter::zip(&pats_ast[(pats_before_hir.len() + 1)..], *pats_after_hir) {
+                        visit_matching_pat(visitor, pat_ast, pat_hir);
+                    }
                 }
             }
 
