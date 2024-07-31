@@ -34,7 +34,6 @@ pub mod visit {
     use std::iter;
 
     use rustc_ast as ast;
-    use rustc_hir as hir;
     use rustc_hir::intravisit::Map;
     use rustc_hir::intravisit::nested_filter::{self, NestedFilter};
     use rustc_middle::ty::TyCtxt;
@@ -42,6 +41,7 @@ pub mod visit {
     use rustc_target::spec::abi::Abi;
 
     use crate::analysis::Descr;
+    use crate::analysis::hir;
 
     pub trait AstHirVisitor<'ast, 'hir>: Sized {
         type Map: hir::intravisit::Map<'hir> = <Self::NestedFilter as NestedFilter<'hir>>::Map;
@@ -82,6 +82,10 @@ pub mod visit {
 
         fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>, param_hir_ty: &'hir hir::Ty<'hir>) {
             walk_param(self, param_ast, param_hir, param_hir_ty);
+        }
+
+        fn visit_const(&mut self, const_ast: &'ast ast::ConstItem, const_hir: &hir::ConstItem<'hir>) {
+            walk_const(self, const_ast, const_hir);
         }
 
         fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
@@ -154,6 +158,14 @@ pub mod visit {
     pub fn walk_param<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>, param_hir_ty: &'hir hir::Ty<'hir>) {
         visit_matching_pat(visitor, &param_ast.pat, param_hir.pat);
         visit_matching_ty(visitor, &param_ast.ty, param_hir_ty);
+    }
+
+    pub fn walk_const<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, const_ast: &'ast ast::ConstItem, const_hir: &hir::ConstItem<'hir>) {
+        visit_matching_ty(visitor, &const_ast.ty, const_hir.ty);
+        // TODO: Visit generic params
+        if let Some(expr_ast) = &const_ast.expr && let Some(body_hir) = const_hir.body {
+            visit_matching_expr(visitor, expr_ast, &body_hir.value)
+        }
     }
 
     pub fn visit_block_expr<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, block_ast: &'ast ast::Block, expr_hir: &'hir hir::Expr<'hir>) {
@@ -638,7 +650,6 @@ pub mod visit {
     }
 
     pub fn walk_ty<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
-        // TODO: Currently, we only visit top-level type nodes.
         match (&ty_ast.kind, &ty_hir.kind) {
             (ast::TyKind::Paren(ty_ast), _) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir);
@@ -794,6 +805,10 @@ impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'
         visit::walk_param(self, param_ast, param_hir, param_hir_ty);
     }
 
+    fn visit_const(&mut self, const_ast: &'ast ast::ConstItem, const_hir: &hir::ConstItem<'hir>) {
+        visit::walk_const(self, const_ast, const_hir);
+    }
+
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         self.node_id_to_hir_id.insert_same(block_ast.id, block_hir.hir_id);
         self.hir_id_to_node_id.insert_same(block_hir.hir_id, block_ast.id);
@@ -830,7 +845,7 @@ impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'
     }
 }
 
-pub fn resolve_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
+pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
     let mut collector = BodyResolutionsCollector {
         tcx,
         node_id_to_hir_id: Default::default(),
@@ -848,7 +863,23 @@ pub fn resolve_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &hir:
     visit::AstHirVisitor::visit_fn(&mut collector, kind_ast, span_ast, id_ast, kind_hir, sig_hir, body_hir, span_hir, id_hir);
 
     BodyResolutions {
-        tcx: collector.tcx,
+        tcx,
+        node_id_to_hir_id: collector.node_id_to_hir_id,
+        hir_id_to_node_id: collector.hir_id_to_node_id,
+    }
+}
+
+pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, const_ast: &ast::ConstItem, const_hir: &hir::ConstItem<'tcx>) -> BodyResolutions<'tcx> {
+    let mut collector = BodyResolutionsCollector {
+        tcx,
+        node_id_to_hir_id: Default::default(),
+        hir_id_to_node_id: Default::default(),
+    };
+
+    visit::AstHirVisitor::visit_const(&mut collector, const_ast, const_hir);
+
+    BodyResolutions {
+        tcx,
         node_id_to_hir_id: collector.node_id_to_hir_id,
         hir_id_to_node_id: collector.hir_id_to_node_id,
     }

@@ -45,7 +45,7 @@ impl FnItem {
         Some(Self {
             id,
             span,
-            ctx: visit::FnCtxt::Free,
+            ctx: visit::FnCtxt::Free, // FIXME
             vis: vis.clone(),
             ident,
             generics: generics.clone(),

@@ -323,7 +323,7 @@ impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let Some(fn_def_id) = self.def_res.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
         let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(fn_def_id)) else { unreachable!() };
 
-        let body_res = ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir);
+        let body_res = ast_lowering::resolve_fn_body(self.tcx, &fn_ast, &fn_hir);
 
         register_mutations!(self, MutCtxt {
             opts: self.opts,

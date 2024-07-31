@@ -412,12 +412,12 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
 }
 
 macro def_flat_map_item_fns(
-    $(fn $ident:ident: $ty:ty [$into_ast_fn_item:path] |$item:ident| {
+    $(fn $ident:ident: $item_kind:ident [$into_ast_fn_item:path] |$item:ident| {
         $(check { $($check_stmt:stmt)+ })?
     });+;
 ) {
     $(
-        fn $ident(&mut self, mut $item: P<$ty>) -> SmallVec<[P<$ty>; 1]> {
+        fn $ident(&mut self, mut $item: P<ast::Item<ast::$item_kind>>) -> SmallVec<[P<ast::Item<ast::$item_kind>>; 1]> {
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
             if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
@@ -440,9 +440,17 @@ macro def_flat_map_item_fns(
 
             // Store new body resolution scope, if available.
             let previous_body_res = self.current_body_res.take();
-            if let Some(fn_ast) = $into_ast_fn_item(&$item) {
-                let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                self.current_body_res = Some(ast_lowering::resolve_body(self.tcx, &fn_ast, &fn_hir));
+            match &$item.kind {
+                ast::$item_kind::Fn(_) => {
+                    let Some(fn_ast) = $into_ast_fn_item(&$item) else { unreachable!() };
+                    let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                    self.current_body_res = Some(ast_lowering::resolve_fn_body(self.tcx, &fn_ast, &fn_hir));
+                }
+                ast::$item_kind::Const(const_ast) => {
+                    let Some(const_hir) = hir::ConstItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                    self.current_body_res = Some(ast_lowering::resolve_const_body(self.tcx, &const_ast, &const_hir));
+                }
+                _ => {}
             }
 
             // Match definition ident if this is an assoc item corresponding to a trait.
@@ -477,7 +485,7 @@ macro def_flat_map_item_fns(
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
     def_flat_map_item_fns! {
-        fn flat_map_item: ast::Item [ast::FnItem::from_item] |item| {
+        fn flat_map_item: ItemKind [ast::FnItem::from_item] |item| {
             check {
                 let name = item.ident.name;
 
@@ -493,8 +501,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             }
         };
 
-        fn flat_map_trait_item: ast::AssocItem [ast::FnItem::from_assoc_item] |item| {};
-        fn flat_map_impl_item: ast::AssocItem [ast::FnItem::from_assoc_item] |item| {};
+        fn flat_map_trait_item: AssocItemKind [ast::FnItem::from_assoc_item] |item| {};
+        fn flat_map_impl_item: AssocItemKind [ast::FnItem::from_assoc_item] |item| {};
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {

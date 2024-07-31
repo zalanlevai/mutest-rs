@@ -51,6 +51,36 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ConstItem<'hir> {
+    pub ty: &'hir hir::Ty<'hir>,
+    pub generics: Option<&'hir hir::Generics<'hir>>,
+    pub body: Option<&'hir hir::Body<'hir>>,
+}
+
+impl<'tcx: 'hir, 'hir> ConstItem<'hir> {
+    pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
+        match node {
+            hir::Node::Item(&hir::Item { ref kind, .. }) => {
+                let hir::ItemKind::Const(ty, generics, body) = kind else { return None; };
+                let body = Some(tcx.hir().body(*body));
+                Some(ConstItem { ty, generics: Some(generics), body })
+            }
+            hir::Node::TraitItem(&hir::TraitItem { ref kind, .. }) => {
+                let hir::TraitItemKind::Const(ty, body) = kind else { return None; };
+                let body = body.map(|body| tcx.hir().body(body));
+                Some(ConstItem { ty, generics: None, body })
+            }
+            hir::Node::ImplItem(&hir::ImplItem { ref kind, .. }) => {
+                let hir::ImplItemKind::Const(ty, body) = kind else { return None; };
+                let body = Some(tcx.hir().body(*body));
+                Some(ConstItem { ty, generics: None, body })
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum DefItem<'hir> {
     Item(&'hir hir::Item<'hir>),
