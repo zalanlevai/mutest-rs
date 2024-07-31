@@ -47,6 +47,11 @@ macro m($x:ident) {
 
     fn ref_ref_s(s: &&S) -> usize { s.x }
     assert_eq!(ref_ref_s(&&s), 100);
+
+    impl S {
+        fn self_s(&self) -> usize { self.x }
+    }
+    assert_eq!(s.self_s(), 100);
 }
 
 #[cfg(test)]

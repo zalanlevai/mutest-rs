@@ -287,6 +287,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         // other child node which could be from a macro expansion.
         if !is_macro_expn_span(path.span) { return; }
 
+        // Short-circuit if self.
+        if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
+
         self.adjust_path_from_expansion(path, res);
     }
 
@@ -298,6 +301,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             self.sanitize_path(path, hir::Res::Err);
             return;
         }
+
+        // Short-circuit if self.
+        if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
 
         match (qself, self.def_res.node_res(path.segments.last().unwrap().id)) {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
