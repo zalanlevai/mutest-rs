@@ -17,15 +17,14 @@ use crate::analysis::res;
 use crate::analysis::ty;
 use crate::codegen::ast::{self, AstDeref, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, MacroKind, Span, Symbol, sym, kw};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
 use crate::codegen::symbols::hygiene::ExpnData;
 
 fn is_macro_expn(expn: &ExpnData) -> bool {
     match expn.kind {
-        ExpnKind::Macro(MacroKind::Bang, _) => true,
+        ExpnKind::Macro(_, _) => true,
 
         | ExpnKind::Root
-        | ExpnKind::Macro(_, _)
         | ExpnKind::AstPass(_)
         | ExpnKind::Desugaring(_)
         => false,
