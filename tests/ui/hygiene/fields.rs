@@ -44,6 +44,9 @@ macro m($x:ident) {
     match s {
         S { x: x, $x: dx } => { assert_eq!(0, x as isize + dx); }
     }
+
+    fn ref_ref_s(s: &&S) -> usize { s.x }
+    assert_eq!(ref_ref_s(&&s), 100);
 }
 
 #[cfg(test)]

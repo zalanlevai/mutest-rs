@@ -589,7 +589,14 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
                 let field_idx = typeck.field_index(expr_hir.hir_id);
 
-                let base_ty = typeck.expr_ty(base_expr_hir);
+                let mut base_ty = typeck.expr_ty(base_expr_hir);
+                // Unwrap references to find the inner ADT.
+                loop {
+                    match base_ty.kind() {
+                        ty::TyKind::RawPtr(ty, _) | ty::TyKind::Ref(_, ty, _) => base_ty = *ty,
+                        _ => break,
+                    }
+                }
                 let ty::TyKind::Adt(adt_def, _) = base_ty.kind() else { unreachable!() };
                 let field_def = &adt_def.non_enum_variant().fields[field_idx];
 
