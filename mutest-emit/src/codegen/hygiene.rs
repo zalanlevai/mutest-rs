@@ -178,7 +178,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 sanitize_ident_if_from_expansion(&mut last_segment.ident);
             }
 
-            hir::Res::Def(def_kind, def_id) => {
+            hir::Res::Def(def_kind, mut def_id) => {
                 match def_kind {
                     | hir::DefKind::Mod
                     | hir::DefKind::Struct
@@ -198,6 +198,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::AssocFn
                     | hir::DefKind::AssocConst
                     => {
+                        if let hir::DefKind::Ctor(..) = def_kind {
+                            // Adjust target definition to the parent to avoid naming the unnamed constructors.
+                            def_id = self.tcx.parent(def_id);
+                        }
+
                         let visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope);
 
                         match &visible_paths[..] {
