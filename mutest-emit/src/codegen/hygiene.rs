@@ -219,14 +219,19 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 };
                                 if !self.tcx.is_descendant_of(def_id, current_scope) {
                                     'fail: {
-                                        // For impls, we can make an adjustment and try to find a relative path from the parent scope.
-                                        if matches!(self.tcx.def_kind(current_scope), hir::DefKind::Impl { .. }) {
-                                            let parent_scope = self.tcx.parent(current_scope);
+                                        // For some scopes, we can make an adjustment and try to find a relative path from the parent scope.
+                                        let is_transparent = |def_kind: hir::DefKind| matches!(def_kind,
+                                            | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::Union | hir::DefKind::Variant | hir::DefKind::TyAlias
+                                            | hir::DefKind::ForeignMod | hir::DefKind::ForeignTy
+                                            | hir::DefKind::Trait | hir::DefKind::Impl { .. } | hir::DefKind::TraitAlias
+                                            | hir::DefKind::Fn | hir::DefKind::Const | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
+                                            | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
+                                        );
+                                        while is_transparent(self.tcx.def_kind(current_scope)) && let Some(parent_scope) = self.tcx.opt_parent(current_scope) {
+                                            println!("  descending {current_scope:?} -> {parent_scope:?}");
+                                            current_scope = parent_scope;
                                             // Adjustment succeeded, escape failing case.
-                                            if self.tcx.is_descendant_of(def_id, parent_scope) {
-                                                current_scope = parent_scope;
-                                                break 'fail;
-                                            }
+                                            if self.tcx.is_descendant_of(def_id, parent_scope) { break 'fail; }
                                         }
 
                                         panic!("{def_id:?} is not defined in the scope {current_scope:?} and is not otherwise accessible at {span:?}",
