@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - "main"
+      - "actions-test"
+    pull_request:
+      - "main"
+    workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  MUTEST_SEARCH_PATH: ./target/release
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install Rust toolchain specified in rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: rustc --version
+
+      - name: Build mutest-runtime
+        run: cargo build --release -p mutest-runtime
+
+      - name: Install mutest-driver and cargo-mutest
+        run: |
+          cargo install --force --path mutest-driver
+          cargo install --force --path cargo-mutest
+
+      - name: Run UI tests
+        run: cargo run -p mutest-tests
