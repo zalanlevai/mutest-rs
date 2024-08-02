@@ -444,12 +444,13 @@ pub mod print {
                                 .map_err(|e| format!("encountered invalid f64 const: {e:?}"))
                         }
                         ty::TyKind::Float(ty::FloatTy::F128) => {
-                            scalar.to_f16()
+                            scalar.to_f128()
                                 .map(|v| {
-                                    let v = f128::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u128);
-                                    ast::mk::expr_float_exact(sp, v as f64, sym::f128)
+                                    let rounded_v: rustc_apfloat::ieee::Double = rustc_apfloat::FloatConvert::convert(v, &mut false).value;
+                                    let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(rounded_v) as u64);
+                                    ast::mk::expr_float_exact(sp, v, sym::f128)
                                 })
-                                .map_err(|e| format!("encountered invalid f16 const: {e:?}"))
+                                .map_err(|e| format!("encountered invalid f128 const: {e:?}"))
                         }
                         _ => Err("encountered unknown constant scalar value".to_owned())
                     }?;
