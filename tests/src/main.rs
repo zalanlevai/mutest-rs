@@ -527,6 +527,13 @@ fn main() {
                 let entry = entry.expect(&format!("cannot read entry in `{}` directory", dir_path.display()));
                 let path = entry.path();
 
+                #[cfg(windows)]
+                let path = {
+                    use std::path::PathBuf;
+                    use path_slash::PathBufExt;
+                    PathBuf::from(path.to_slash_lossy().to_string())
+                };
+
                 if path.is_dir() {
                     if path.file_name().is_some_and(|v| v == "auxiliary") { continue; };
                     run_tests_in_dir_impl(root_dir, &path, opts, results);

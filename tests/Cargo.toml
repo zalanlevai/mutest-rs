@@ -7,5 +7,6 @@ edition = "2021"
 
 [dependencies]
 cargo_metadata = "0.18"
+path-slash = "0.2"
 clap = { version = "4", features = ["cargo"] }
 similar = { version = "2", features = ["inline"] }
