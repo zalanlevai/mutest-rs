@@ -244,6 +244,7 @@ dependencies = [
 name = "mutest-tests"
 version = "0.0.0"
 dependencies = [
+ "cargo_metadata",
  "clap",
  "similar",
 ]

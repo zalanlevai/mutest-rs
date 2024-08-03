@@ -250,6 +250,23 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         mutest_subcommand.unwrap_or("build")
     };
 
+    // HACK: We invoke mutest-driver directly, rather than through Cargo, which means
+    //       we have to add `windows.lib` to the linker search path manually.
+    //       See https://github.com/rust-lang/rust/issues/99466.
+    #[cfg(windows)]
+    let windows_lib = {
+        // FIXME: Include all available `windows-targets` platform variants.
+        #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
+        const WINDOWS_IMPORT_LIB: &str = "windows_x86_64_msvc";
+        #[cfg(all(target_arch = "aarch64", target_env = "msvc"))]
+        const WINDOWS_IMPORT_LIB: &str = "windows_aarch64_msvc";
+
+        let metadata_cmd = cargo_metadata::MetadataCommand::new();
+        let metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
+        let windows_package = metadata.packages.iter().find(|package| package.name == WINDOWS_IMPORT_LIB).expect("could not retrieve windows.lib import package from manifest");
+        windows_package.manifest_path.parent().expect("invalid windows.lib import package manifest path").join("lib")
+    };
+
     let mut aux = false;
     for directive in &directives {
         let Some(aux_build) = directive.strip_prefix("aux-build:").map(str::trim) else { continue; };
@@ -267,6 +284,9 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         cmd.arg("--edition=2021");
 
         cmd.args(["--out-dir", AUX_OUT_DIR]);
+
+        #[cfg(windows)]
+        cmd.args(["-L", windows_lib.as_str()]);
 
         if opts.verbosity >= 1 {
             eprintln!("running {cmd:?}");
@@ -312,6 +332,9 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     cmd.arg("--test");
 
     cmd.env("MUTEST_SEARCH_PATH", "target/release");
+
+    #[cfg(windows)]
+    cmd.args(["-L", windows_lib.as_str()]);
 
     let rustc_flags = directives.iter().filter_map(|d| d.strip_prefix("rustc-flags:").map(str::trim))
         .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
