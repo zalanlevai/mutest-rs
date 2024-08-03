@@ -227,7 +227,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
                                         );
                                         while is_transparent(self.tcx.def_kind(current_scope)) && let Some(parent_scope) = self.tcx.opt_parent(current_scope) {
-                                            println!("  descending {current_scope:?} -> {parent_scope:?}");
                                             current_scope = parent_scope;
                                             // Adjustment succeeded, escape failing case.
                                             if self.tcx.is_descendant_of(def_id, parent_scope) { break 'fail; }
