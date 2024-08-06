@@ -3,10 +3,10 @@ use mutest_emit::analysis::hir;
 use mutest_emit::analysis::res;
 use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
 use mutest_emit::codegen::ast::{self, P};
-use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
+use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, path, kw};
 use mutest_emit::thin_vec::thin_vec;
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use mutest_emit::smallvec::smallvec;
 
 fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
     // Calls to functions that take no arguments (including self) are ignored, because they are likely
@@ -75,13 +75,13 @@ pub struct CallValueDefaultShadow {
 impl<'a> Operator<'a> for CallValueDefaultShadow {
     type Mutation = CallValueDefaultShadowMutation;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
         let MutCtxt { opts, tcx, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
-        let Some(body_hir) = f_hir.body else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
+        let Some(body_hir) = f_hir.body else { return Mutations::none(); };
 
-        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return None; };
+        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return Mutations::none(); };
 
         let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let Some((callee, expr_ty)) = non_default_call(
@@ -90,13 +90,13 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
             body_hir.id(),
             expr_hir,
             self.limit_scope_to_local_callees,
-        ) else { return None; };
+        ) else { return Mutations::none(); };
 
         // A type annotation with the originally resolved type has to be added to the ignoring
         // `let _ = $expr` statement to guarantee the same callee resolution.
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, def_res, None, def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns) else { return None; };
+        let Some(expr_ty_ast) = ty::ast_repr(tcx, def_res, None, def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns) else { return Mutations::none(); };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
@@ -110,12 +110,12 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
             callee_path: tcx.def_path_str(callee),
         };
 
-        Some((mutation, smallvec![
+        Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id),
                 Subst::AstExpr(shadow_scope.into_inner()),
             ),
-        ]))
+        ])
     }
 }
 
@@ -148,13 +148,13 @@ pub struct CallDelete {
 impl<'a> Operator<'a> for CallDelete {
     type Mutation = CallDeleteMutation;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
         let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
-        let Some(body_hir) = f_hir.body else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
+        let Some(body_hir) = f_hir.body else { return Mutations::none(); };
 
-        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return None; };
+        let (ast::ExprKind::Call(..) | ast::ExprKind::MethodCall(..)) = expr.kind else { return Mutations::none(); };
 
         let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let Some((callee, _)) = non_default_call(
@@ -163,7 +163,7 @@ impl<'a> Operator<'a> for CallDelete {
             body_hir.id(),
             expr_hir,
             self.limit_scope_to_local_callees,
-        ) else { return None; };
+        ) else { return Mutations::none(); };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
@@ -172,11 +172,11 @@ impl<'a> Operator<'a> for CallDelete {
             callee_path: tcx.def_path_str(callee),
         };
 
-        Some((mutation, smallvec![
+        Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id),
                 Subst::AstExpr(default.into_inner()),
             ),
-        ]))
+        ])
     }
 }

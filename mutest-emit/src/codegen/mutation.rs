@@ -124,26 +124,49 @@ pub trait Mutation {
     }
 }
 
+pub type MutWithSubsts<M> = (M, SmallVec<[SubstDef; 1]>);
+pub type BoxedMutWithSubsts<M> = (Box<M>, SmallVec<[SubstDef; 1]>);
+
+pub struct Mutations<M: Mutation>(SmallVec<[MutWithSubsts<M>; 1]>);
+
+impl<M: Mutation> Mutations<M> {
+    pub fn none() -> Self {
+        Self(SmallVec::new())
+    }
+
+    pub fn new_one(mutation: M, substs: SmallVec<[SubstDef; 1]>) -> Self {
+        Self(smallvec![(mutation, substs)])
+    }
+
+    pub fn new(mutations: SmallVec<[MutWithSubsts<M>; 1]>) -> Self {
+        Self(mutations)
+    }
+}
+
+pub type BoxedMutations<M> = SmallVec<[BoxedMutWithSubsts<M>; 1]>;
+
 pub trait Operator<'a>: Send + Sync {
     type Mutation: Mutation + 'a;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)>;
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation>;
 }
 
 pub trait OperatorBoxed<'a>: Send + Sync {
     type Mutation: Mutation + ?Sized + 'a;
 
-    fn try_apply_boxed(&self, mcx: &MutCtxt) -> Option<(Box<Self::Mutation>, SmallVec<[SubstDef; 1]>)>;
+    fn try_apply_boxed(&self, mcx: &MutCtxt) -> BoxedMutations<Self::Mutation>;
 }
 
 impl<'a, T: Operator<'a>> OperatorBoxed<'a> for T {
     type Mutation = dyn Mutation + 'a;
 
-    fn try_apply_boxed(&self, mcx: &MutCtxt) -> Option<(Box<Self::Mutation>, SmallVec<[SubstDef; 1]>)>  {
-        match self.try_apply(mcx) {
-            Some((mutation, substs)) => Some((Box::new(mutation), substs)),
-            None => None,
-        }
+    fn try_apply_boxed(&self, mcx: &MutCtxt) -> BoxedMutations<Self::Mutation> {
+        self.try_apply(mcx).0.into_iter()
+            .map(|(mutation, substs)| {
+                let mutation: Box<dyn Mutation + 'a> = Box::new(mutation);
+                (mutation, substs)
+            })
+            .collect()
     }
 }
 
@@ -284,7 +307,7 @@ macro register_mutations($self:ident, $($mcx:tt)+) {
         let mcx = $($mcx)+;
 
         for operator in $self.operators {
-            if let Some((mutation, substs)) = operator.try_apply_boxed(&mcx) {
+            for (mutation, substs) in operator.try_apply_boxed(&mcx) {
                 $self.mutations.push(Mut {
                     id: MutId($self.next_mut_index),
                     target: $self.target.expect("attempted to collect mutations without a target"),

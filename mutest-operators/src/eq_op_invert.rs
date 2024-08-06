@@ -1,7 +1,7 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::codegen::ast;
-use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
+use mutest_emit::smallvec::smallvec;
 
 pub const EQ_OP_INVERT: &str = "eq_op_invert";
 
@@ -33,17 +33,17 @@ pub struct EqOpInvert;
 impl<'a> Operator<'a> for EqOpInvert {
     type Mutation = EqOpInvertMutation;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
         let MutCtxt { opts: _, tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _) = location else { return Mutations::none(); };
 
-        let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.kind else { return None; };
+        let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.kind else { return Mutations::none(); };
 
         let inverted_bin_op = match bin_op.node {
             ast::BinOpKind::Eq => ast::BinOpKind::Ne,
             ast::BinOpKind::Ne => ast::BinOpKind::Eq,
-            _ => { return None; },
+            _ => { return Mutations::none(); },
         };
         let inverted_bin_expr = ast::mk::expr_binary(def, inverted_bin_op, lhs.clone(), rhs.clone());
 
@@ -52,11 +52,11 @@ impl<'a> Operator<'a> for EqOpInvert {
             replacement_bin_op: inverted_bin_op,
         };
 
-        Some((mutation, smallvec![
+        Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id),
                 Subst::AstExpr(inverted_bin_expr.into_inner()),
             ),
-        ]))
+        ])
     }
 }

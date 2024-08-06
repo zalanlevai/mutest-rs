@@ -1,8 +1,8 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::analysis::hir;
 use mutest_emit::codegen::ast;
-use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
+use mutest_emit::smallvec::smallvec;
 
 pub const CONTINUE_BREAK_SWAP: &str = "continue_break_swap";
 
@@ -50,10 +50,10 @@ pub struct ContinueBreakSwap;
 impl<'a> Operator<'a> for ContinueBreakSwap {
     type Mutation = ContinueBreakSwapMutation;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
         let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _) = location else { return Mutations::none(); };
 
         let swapped_expr = match &expr.kind {
             ast::ExprKind::Continue(label) => {
@@ -62,10 +62,10 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
             ast::ExprKind::Break(label, None) => {
                 ast::mk::expr(def, ast::ExprKind::Continue(*label))
             }
-            _ => { return None; }
+            _ => { return Mutations::none(); }
         };
 
-        let Some(body_hir) = f_hir.body else { return None; };
+        let Some(body_hir) = f_hir.body else { return Mutations::none(); };
         let typeck = tcx.typeck_body(body_hir.id());
 
         let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
@@ -73,18 +73,18 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
         let (hir::ExprKind::Continue(destination) | hir::ExprKind::Break(destination, _)) = expr_hir.kind else { unreachable!() };
         let target_hir_id = destination.target_id.unwrap();
         let target_ty = typeck.node_type(target_hir_id);
-        if target_ty != tcx.types.unit && target_ty != tcx.types.never { return None; }
+        if target_ty != tcx.types.unit && target_ty != tcx.types.never { return Mutations::none(); }
 
         let mutation = Self::Mutation {
             original_expr: expr.kind.clone(),
             replacement_expr: swapped_expr.kind.clone(),
         };
 
-        Some((mutation, smallvec![
+        Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id),
                 Subst::AstExpr(swapped_expr.into_inner()),
             ),
-        ]))
+        ])
     }
 }

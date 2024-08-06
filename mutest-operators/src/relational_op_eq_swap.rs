@@ -1,7 +1,7 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::codegen::ast;
-use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
+use mutest_emit::smallvec::smallvec;
 
 pub const RELATIONAL_OP_EQ_SWAP: &str = "relational_op_eq_swap";
 
@@ -41,19 +41,19 @@ pub struct RelationalOpEqSwap;
 impl<'a> Operator<'a> for RelationalOpEqSwap {
     type Mutation = RelationalOpEqSwapMutation;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
         let MutCtxt { opts: _, tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, _) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _) = location else { return Mutations::none(); };
 
-        let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.kind else { return None; };
+        let ast::ExprKind::Binary(bin_op, lhs, rhs) = &expr.kind else { return Mutations::none(); };
 
         let inverted_eq_bin_op = match bin_op.node {
             ast::BinOpKind::Lt => ast::BinOpKind::Le,
             ast::BinOpKind::Le => ast::BinOpKind::Lt,
             ast::BinOpKind::Gt => ast::BinOpKind::Ge,
             ast::BinOpKind::Ge => ast::BinOpKind::Gt,
-            _ => { return None; },
+            _ => { return Mutations::none(); },
         };
         let inverted_eq_bin_expr = ast::mk::expr_binary(def, inverted_eq_bin_op, lhs.clone(), rhs.clone());
 
@@ -62,11 +62,11 @@ impl<'a> Operator<'a> for RelationalOpEqSwap {
             replacement_bin_op: inverted_eq_bin_op,
         };
 
-        Some((mutation, smallvec![
+        Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id),
                 Subst::AstExpr(inverted_eq_bin_expr.into_inner()),
             ),
-        ]))
+        ])
     }
 }

@@ -3,9 +3,9 @@ use mutest_emit::analysis::hir;
 use mutest_emit::analysis::res;
 use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
 use mutest_emit::codegen::ast;
-use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
+use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::sym;
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use mutest_emit::smallvec::smallvec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpKind {
@@ -73,20 +73,20 @@ macro define_op_swap_operator(
     impl<'a> Operator<'a> for $operator {
         type Mutation = $mutation;
 
-        fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+        fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
             let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
-            let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
+            let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
 
             let (bin_op, op_kind) = match &expr.kind {
                 ast::ExprKind::Binary(bin_op, _, _) => (bin_op.node, OpKind::Standalone),
                 ast::ExprKind::AssignOp(bin_op, _, _) => (bin_op.node, OpKind::Assign),
-                _ => { return None; }
+                _ => { return Mutations::none(); }
             };
 
             let param_env = tcx.param_env(f_hir.owner_id.def_id);
 
-            let Some(body_hir) = f_hir.body else { return None; };
+            let Some(body_hir) = f_hir.body else { return Mutations::none(); };
             let typeck = tcx.typeck_body(body_hir.id());
 
             let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
@@ -108,7 +108,7 @@ macro define_op_swap_operator(
                     ($bin_op_from, OpKind::Standalone) $(if expr_impls_matching_op(res::traits::$bin_op_to_trait(tcx)))? => $bin_op_to,
                     ($bin_op_from, OpKind::Assign) $(if expr_impls_matching_op(res::traits::$bin_assign_op_to_trait(tcx)))? => $bin_op_to,
                 )+
-                _ => { return None; }
+                _ => { return Mutations::none(); }
             };
 
             let mapped_bin_expr = match &expr.kind {
@@ -123,12 +123,12 @@ macro define_op_swap_operator(
                 replacement_bin_op: mapped_bin_op,
             };
 
-            Some((mutation, smallvec![
+            Mutations::new_one(mutation, smallvec![
                 SubstDef::new(
                     SubstLoc::Replace(expr.id),
                     Subst::AstExpr(mapped_bin_expr.into_inner()),
                 ),
-            ]))
+            ])
         }
     }
 }

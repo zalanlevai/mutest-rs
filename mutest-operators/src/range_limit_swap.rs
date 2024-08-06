@@ -1,8 +1,8 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::analysis::ty;
 use mutest_emit::codegen::ast;
-use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Subst, SubstDef, SubstLoc};
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
+use mutest_emit::smallvec::smallvec;
 
 pub const RANGE_LIMIT_SWAP: &str = "range_limit_swap";
 
@@ -29,12 +29,12 @@ pub struct RangeLimitSwap;
 impl<'a> Operator<'a> for RangeLimitSwap {
     type Mutation = RangeLimitSwapMutation;
 
-    fn try_apply(&self, mcx: &MutCtxt) -> Option<(Self::Mutation, SmallVec<[SubstDef; 1]>)> {
+    fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
         let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
-        let MutLoc::FnBodyExpr(expr, _f) = location else { return None; };
+        let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
 
-        let ast::ExprKind::Range(start, end, limits) = &expr.kind else { return None; };
+        let ast::ExprKind::Range(start, end, limits) = &expr.kind else { return Mutations::none(); };
 
         let swapped_limits = match (start, end, limits) {
             | (None, Some(_), ast::RangeLimits::HalfOpen)
@@ -47,7 +47,7 @@ impl<'a> Operator<'a> for RangeLimitSwap {
 
             | (None, None, ast::RangeLimits::HalfOpen)
             | (Some(_), None, ast::RangeLimits::HalfOpen)
-            => { return None; }
+            => { return Mutations::none(); }
 
             _ => unreachable!(),
         };
@@ -63,14 +63,14 @@ impl<'a> Operator<'a> for RangeLimitSwap {
         //       ast::mk::expr_range(def, start.clone(), end.clone(), swapped_limits);
         //       ```
         let swapped_limits_range_expr = {
-            let Some(body_hir) = f_hir.body else { return None; };
+            let Some(body_hir) = f_hir.body else { return Mutations::none(); };
             let typeck = tcx.typeck_body(body_hir.id());
 
             let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
             let range_ty = typeck.node_type(expr_hir.hir_id);
             let ty::TyKind::Adt(_, range_ty_generics) = range_ty.kind() else { unreachable!() };
             let range_bound_ty = range_ty_generics.type_at(0);
-            if !range_bound_ty.is_integral() { return None; }
+            if !range_bound_ty.is_integral() { return Mutations::none(); }
 
             let Some(end) = end else { unreachable!(); };
 
@@ -90,11 +90,11 @@ impl<'a> Operator<'a> for RangeLimitSwap {
             replacement_limits: swapped_limits,
         };
 
-        Some((mutation, smallvec![
+        Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id),
                 Subst::AstExpr(swapped_limits_range_expr.into_inner()),
             ),
-        ]))
+        ])
     }
 }
