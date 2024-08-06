@@ -52,12 +52,14 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         let Some(body) = &f.body else { return None; };
         let Some(first_valid_stmt) = body.stmts.iter().filter(|stmt| stmt.id != ast::DUMMY_NODE_ID).next() else { return None; };
 
+        let param_env = tcx.param_env(f_hir.owner_id.def_id);
+
         let Some(body_hir) = f_hir.body else { return None; };
         let typeck = tcx.typeck_body(body_hir.id());
 
         let Some(param_hir) = body_res.hir_param(param) else { unreachable!() };
         let param_ty = typeck.pat_ty(param_hir.pat);
-        if !ty::impls_trait(tcx, param_ty, res::traits::Default(tcx), vec![]) { return None; }
+        if !ty::impls_trait_with_env(tcx, param_env, param_ty, res::traits::Default(tcx), vec![]) { return None; }
 
         // Default::default();
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
