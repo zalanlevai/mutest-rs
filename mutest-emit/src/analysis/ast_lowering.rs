@@ -764,6 +764,10 @@ impl<'tcx> BodyResolutions<'tcx> {
         self.hir_node(param.id).map(|hir_node| hir_node.expect_param())
     }
 
+    pub fn hir_pat(&self, pat: &ast::Pat) -> Option<&'tcx hir::Pat<'tcx>> {
+        self.hir_node(pat.id).map(|hir_node| hir_node.expect_pat())
+    }
+
     pub fn hir_expr(&self, expr: &ast::Expr) -> Option<&'tcx hir::Expr<'tcx>> {
         self.hir_node(expr.id).map(|hir_node| hir_node.expect_expr())
     }
