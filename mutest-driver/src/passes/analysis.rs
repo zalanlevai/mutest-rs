@@ -151,11 +151,11 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
             if verbosity >= 1 {
                 print!("{}: ", mutation.id.index());
             }
-            println!("{unsafe_marker}[{op_name}] {display_name} in {def_path} at {span:#?}",
+            println!("{unsafe_marker}[{op_name}] {display_name} in {def_path} at {display_location}",
                 op_name = mutation.op_name(),
                 display_name = mutation.display_name(),
                 def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
-                span = tcx.hir().span(tcx.local_def_id_to_hir_id(mutation.target.def_id)),
+                display_location = mutation.display_location(tcx.sess),
             );
 
             for (&test, entry_point) in &mutation.target.reachable_from {
