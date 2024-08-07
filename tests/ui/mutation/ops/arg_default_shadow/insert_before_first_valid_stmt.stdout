@@ -1,5 +1,5 @@
 1 mutation
-  - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/insert_before_first_valid_stmt.rs:17:1: 17:15 (#0)
+  - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/insert_before_first_valid_stmt.rs:15:1: 15:15 (#0)
     <-(0)- test
 
 1 mutants; 1 mutations; 1 safe; 0 unsafe (0 tainted); 0 batched; 1 unbatched

@@ -1,13 +1,13 @@
 1 mutation
-  - [arg_default_shadow] ignore `n` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/shadow_params_with_default.rs:13:1: 13:84 (#0)
+  - [arg_default_shadow] ignore `n` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/shadow_params_with_default.rs:9:1: 9:84 (#0)
     <-(0)- test
 
 1 mutation
-  - [arg_default_shadow] ignore `test` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/shadow_params_with_default.rs:13:1: 13:84 (#0)
+  - [arg_default_shadow] ignore `test` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/shadow_params_with_default.rs:9:1: 9:84 (#0)
     <-(0)- test
 
 1 mutation
-  - [arg_default_shadow] ignore `d` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/shadow_params_with_default.rs:13:1: 13:84 (#0)
+  - [arg_default_shadow] ignore `d` argument by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/arg_default_shadow/shadow_params_with_default.rs:9:1: 9:84 (#0)
     <-(0)- test
 
 3 mutants; 3 mutations; 3 safe; 0 unsafe (0 tainted); 0 batched; 3 unbatched

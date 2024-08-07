@@ -4,10 +4,6 @@
 //@ stderr: empty
 //@ mutation-operators: arg_default_shadow
 
-#![feature(decl_macro)]
-
-#![allow(unused_variables)]
-
 fn f<D: Default>(_: usize, _: bool, (_, (_, _)): (Result<&str, usize>, (D, ()))) {
     print!("");
 }

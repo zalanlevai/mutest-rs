@@ -6,8 +6,6 @@
 
 #![feature(decl_macro)]
 
-#![allow(unused_variables)]
-
 macro dummy() {}
 
 macro m($a:ident) {

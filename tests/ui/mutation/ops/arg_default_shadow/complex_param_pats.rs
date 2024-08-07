@@ -4,10 +4,6 @@
 //@ stderr: empty
 //@ mutation-operators: arg_default_shadow
 
-#![feature(decl_macro)]
-
-#![allow(unused_variables)]
-
 struct S<'a, T, D: Default + Copy> {
     v: Result<&'a str, usize>,
     t: T,
