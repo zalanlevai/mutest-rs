@@ -18,11 +18,12 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     };
     if call_args_count == 0 { return None; }
 
+    let param_env = tcx.param_env(f);
     let typeck = tcx.typeck_body(body);
 
     let expr_ty = typeck.expr_ty(expr);
     if expr_ty == tcx.types.unit || expr_ty == tcx.types.never { return None; }
-    if !ty::impls_trait(tcx, expr_ty, res::traits::Default(tcx), vec![]) { return None; }
+    if !ty::impls_trait_with_env(tcx, param_env, expr_ty, res::traits::Default(tcx), vec![]) { return None; }
 
     let Some((callee, _)) = res::callee(typeck, expr) else { return None; };
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
@@ -31,7 +32,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     // Avoid replacing the call if the type's `Default::default` implementation refers back to this function (the
     // function this call expression is in). This avoids a case of infinite recursion, resulting in a stack overflow.
     let ty_default = (res::fns::default(tcx), tcx.mk_args_trait(expr_ty, vec![]));
-    if let Some(ty_default_impl) = tcx.resolve_instance(tcx.param_env(f).and(ty_default)).ok().flatten()
+    if let Some(ty_default_impl) = tcx.resolve_instance(param_env.and(ty_default)).ok().flatten()
         && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
         && let Some(ty_default_impl_body_id) = tcx.hir_node_by_def_id(ty_default_impl_def_id).body_id()
     {
