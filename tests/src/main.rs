@@ -1,10 +1,12 @@
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
+#![feature(round_char_boundary)]
 
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader};
 use std::iter;
 use std::path::{self, Path};
@@ -167,16 +169,25 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         if !filters.iter().any(|filter| name.contains(filter)) { return; }
     }
 
-    let test_crate_name = format!("mutest_test_{crate_name}",
-        crate_name = display_path.components()
-            .filter_map(|component| {
-                match component {
-                    path::Component::Normal(component) => Some(component.to_str().expect("invalid path component")),
-                    _ => None,
-                }
-            })
-            .intersperse("_")
-            .collect::<String>(),
+    let unmangled_crate_name = display_path.components()
+        .filter_map(|component| {
+            match component {
+                path::Component::Normal(component) => Some(component.to_str().expect("invalid path component")),
+                _ => None,
+            }
+        })
+        .intersperse("_")
+        .collect::<String>();
+
+    let crate_hash = {
+        let mut hasher = std::hash::DefaultHasher::new();
+        unmangled_crate_name.hash(&mut hasher);
+        let hash = hasher.finish();
+        format!("{hash:016x}")
+    };
+
+    let test_crate_name = format!("mutest_test_{crate_hash}_{crate_name}",
+        crate_name = &unmangled_crate_name[..unmangled_crate_name.floor_char_boundary(48)],
     );
 
     let source = fs::File::open(&path).expect(&format!("cannot open `{}`", path.display()));
