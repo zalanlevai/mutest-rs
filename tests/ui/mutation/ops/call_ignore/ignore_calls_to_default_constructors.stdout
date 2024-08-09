@@ -1,0 +1,25 @@
+1 mutation
+  - [call_delete] delete call to `S::new_with_args` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_to_default_constructors.rs:44:25: 44:51
+    <-(0)- test
+
+1 mutation
+  - [call_value_default_shadow] ignore return value of call to `S::new_with_args` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_to_default_constructors.rs:44:25: 44:51
+    <-(0)- test
+
+1 mutation
+  - [call_delete] delete call to `S::v` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_to_default_constructors.rs:45:29: 45:42
+    <-(0)- test
+
+1 mutation
+  - [call_value_default_shadow] ignore return value of call to `S::v` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_to_default_constructors.rs:45:29: 45:42
+    <-(0)- test
+
+1 mutation
+  - [call_delete] delete call to `mk_s_with_args` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_to_default_constructors.rs:47:25: 47:49
+    <-(0)- test
+
+1 mutation
+  - [call_value_default_shadow] ignore return value of call to `mk_s_with_args` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_to_default_constructors.rs:47:25: 47:49
+    <-(0)- test
+
+6 mutants; 6 mutations; 6 safe; 0 unsafe (0 tainted); 0 batched; 6 unbatched

@@ -1,0 +1,9 @@
+1 mutation
+  - [call_value_default_shadow] ignore return value of call to `f::g` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_value_default_shadow/shadow_call_return_values_with_default.rs:25:13: 25:18
+    <-(0)- test
+
+1 mutation
+  - [call_value_default_shadow] ignore return value of call to `f::h` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_value_default_shadow/shadow_call_return_values_with_default.rs:31:13: 31:21
+    <-(0)- test
+
+2 mutants; 2 mutations; 2 safe; 0 unsafe (0 tainted); 0 batched; 2 unbatched
