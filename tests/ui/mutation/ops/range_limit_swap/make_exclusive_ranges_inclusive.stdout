@@ -1,0 +1,33 @@
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:10:14: 10:18
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:11:19: 11:22
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:13:17: 13:20
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:13:28: 13:32
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:17:12: 17:15
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:17:30: 17:34
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:21:12: 21:15
+    <-(0)- test
+
+1 mutation
+  - [range_limit_swap] include limit in range expression in f at tests/ui/mutation/ops/range_limit_swap/make_exclusive_ranges_inclusive.rs:22:12: 22:16
+    <-(0)- test
+
+8 mutants; 8 mutations; 8 safe; 0 unsafe (0 tainted); 0 batched; 8 unbatched
