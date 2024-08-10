@@ -1,0 +1,29 @@
+1 mutation
+  - [relational_op_invert] invert relational operator `>` for `<=` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:12:12: 12:17
+    <-(0)- test
+
+1 mutation
+  - [relational_op_invert] invert relational operator `>=` for `<` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:17:50: 17:69
+    <-(0)- test
+
+1 mutation
+  - [relational_op_invert] invert relational operator `<=` for `>` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:19:19: 19:34
+    <-(0)- test
+
+1 mutation
+  - [relational_op_invert] invert relational operator `>` for `<=` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:21:26: 21:40
+    <-(0)- test
+
+1 mutation
+  - [relational_op_invert] invert relational operator `>=` for `<` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:23:17: 23:40
+    <-(0)- test
+
+1 mutation
+  - [relational_op_invert] invert relational operator `<=` for `>` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:31:16: 31:31
+    <-(0)- test
+
+1 mutation
+  - [relational_op_invert] invert relational operator `>=` for `<` in f at tests/ui/mutation/ops/relational_op_invert/invert_relational_checks.rs:31:35: 31:50
+    <-(0)- test
+
+7 mutants; 7 mutations; 7 safe; 0 unsafe (0 tainted); 0 batched; 7 unbatched
