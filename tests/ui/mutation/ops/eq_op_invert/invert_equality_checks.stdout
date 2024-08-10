@@ -1,0 +1,25 @@
+1 mutation
+  - [eq_op_invert] invert equality operator `==` to `!=` in f at tests/ui/mutation/ops/eq_op_invert/invert_equality_checks.rs:12:12: 12:18
+    <-(0)- test
+
+1 mutation
+  - [eq_op_invert] invert equality operator `==` to `!=` in f at tests/ui/mutation/ops/eq_op_invert/invert_equality_checks.rs:17:24: 17:46
+    <-(0)- test
+
+1 mutation
+  - [eq_op_invert] invert equality operator `==` to `!=` in f at tests/ui/mutation/ops/eq_op_invert/invert_equality_checks.rs:19:19: 19:34
+    <-(0)- test
+
+1 mutation
+  - [eq_op_invert] invert equality operator `==` to `!=` in f at tests/ui/mutation/ops/eq_op_invert/invert_equality_checks.rs:21:26: 21:42
+    <-(0)- test
+
+1 mutation
+  - [eq_op_invert] invert equality operator `!=` to `==` in f at tests/ui/mutation/ops/eq_op_invert/invert_equality_checks.rs:23:17: 23:47
+    <-(0)- test
+
+1 mutation
+  - [eq_op_invert] invert equality operator `==` to `!=` in f at tests/ui/mutation/ops/eq_op_invert/invert_equality_checks.rs:31:15: 31:30
+    <-(0)- test
+
+6 mutants; 6 mutations; 6 safe; 0 unsafe (0 tainted); 0 batched; 6 unbatched
