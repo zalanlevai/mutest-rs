@@ -1,0 +1,57 @@
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `&&` for `||` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:8:13: 8:52
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `&&` for `||` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:9:13: 9:58
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `&&` for `||` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:9:13: 9:35
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `&&` for `||` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:9:13: 9:26
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:11:13: 11:41
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:12:13: 12:35
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:12:13: 12:26
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:16:13: 16:77
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `&&` for `||` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:16:39: 16:77
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:16:63: 16:76
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `&&` for `||` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:18:9: 18:22
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:20:11: 20:31
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:21:15: 21:40
+    <-(0)- test
+
+1 mutation
+  - [logical_op_and_or_swap] swap logical operator `||` for `&&` in f at tests/ui/mutation/ops/op_swap/logical_op_and_or_swap/swap_logical_and_and_logical_or.rs:25:19: 25:32
+    <-(0)- test
+
+14 mutants; 14 mutations; 14 safe; 0 unsafe (0 tainted); 0 batched; 14 unbatched

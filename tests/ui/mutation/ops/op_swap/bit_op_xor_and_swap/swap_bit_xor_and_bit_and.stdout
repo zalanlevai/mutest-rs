@@ -1,0 +1,65 @@
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:8:13: 8:37
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:9:13: 9:30
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:9:13: 9:26
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:9:13: 9:22
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:9:13: 9:18
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:11:13: 11:26
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:12:13: 12:24
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:12:13: 12:20
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:14:13: 14:44
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:14:14: 14:26
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:14:14: 14:22
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:14:37: 14:44
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `^` for `&` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:16:8: 16:13
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:18:11: 18:17
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:19:14: 19:20
+    <-(0)- test
+
+1 mutation
+  - [bit_op_xor_and_swap] swap bitwise operator `&` for `^` in f at tests/ui/mutation/ops/op_swap/bit_op_xor_and_swap/swap_bit_xor_and_bit_and.rs:23:18: 23:24
+    <-(0)- test
+
+16 mutants; 16 mutations; 16 safe; 0 unsafe (0 tainted); 0 batched; 16 unbatched
