@@ -399,7 +399,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
         }
 
         None => {}
-    };
+    }
 
     let extern_crates = tcx.hir_crate_items(()).definitions()
         .filter(|&def_id| matches!(tcx.def_kind(def_id), hir::DefKind::ExternCrate))
@@ -415,6 +415,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
     if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_core)) {
         extern_prelude.insert(sym::core);
         if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_std)) {
+            extern_prelude.insert(sym::alloc);
             extern_prelude.insert(sym::std);
         }
     }

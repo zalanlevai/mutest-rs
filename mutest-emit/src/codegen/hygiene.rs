@@ -219,6 +219,29 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             def_id = self.tcx.parent(def_id);
                         }
 
+                        let mut impl_parents = res::parent_iter(self.tcx, def_id).enumerate().filter(|(_, def_id)| matches!(self.tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
+                        match impl_parents.next() {
+                            // `..::{impl#?}::..` path.
+                            Some((1.., _)) => unreachable!("encountered def path with impl at unexpected position: {def_id:?}"),
+                            // `..::{impl#?}::$assoc_item` path.
+                            Some((0, impl_parent_def_id)) => {
+                                let impl_subject = self.tcx.impl_subject(impl_parent_def_id);
+                                if let ty::ImplSubject::Inherent(ty) = impl_subject.instantiate_identity() {
+                                    // `<[_]>::$assoc_item` path.
+                                    // HACK: Paths to assoc items in inherent impls of slices and arrays use a special syntax based on qualified paths.
+                                    //       This is handled here by only creating a path relative to the slice and array types respectively
+                                    //       (esentially just naming the assoc item itself), and
+                                    //       later in `sanitize_qualified_path` by appending the appropriate path qualification with the corresponding type.
+                                    if let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind() {
+                                        let Some(relative_def_path) = res::relative_def_path(self.tcx, def_id, impl_parent_def_id) else { unreachable!() };
+                                        let relative_def_id_path = relative_def_path.def_id_path().collect::<Vec<_>>();
+                                        return self.overwrite_path_with_def_path(path, &relative_def_id_path, true);
+                                    }
+                                }
+                            }
+                            None => {}
+                        }
+
                         let visible_def_path = self.expect_visible_def_path(def_id, path.span);
                         let visible_def_id_path = visible_def_path.def_id_path().collect::<Vec<_>>();
                         self.overwrite_path_with_def_path(path, &visible_def_id_path, !visible_def_path.global);
@@ -391,6 +414,28 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             ty: qself_ty_ast,
                             path_span: DUMMY_SP,
                             position: path.segments.len() - 1,
+                        }));
+                    }
+
+                    // `<[_]>::$assoc_item` path.
+                    // HACK: Paths to assoc items in inherent impls of slices and arrays use a special syntax based on qualified paths.
+                    //       This is handled in `adjust_path_from_expansion` by only creating a path relative to the slice and array types respectively
+                    //       (esentially just naming the assoc item itself), and
+                    //       here by appending the appropriate path qualification with the corresponding type.
+                    hir::DefKind::Impl { of_trait: false }
+                        if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
+                        && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
+                    => {
+                        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
+                        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
+                        let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
+
+                        self.sanitize_path(path, qres.expect_non_local());
+                        // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
+                        *qself = Some(P(ast::QSelf {
+                            ty: qself_ty_ast,
+                            path_span: DUMMY_SP,
+                            position: 0,
                         }));
                     }
 

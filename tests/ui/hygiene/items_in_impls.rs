@@ -39,9 +39,17 @@ macro m() {
         }
     }
 
+    impl<T> I for [T] {
+        fn trait_f() {}
+    }
+
     #[test]
     fn test() {
         m::f();
+
+        let mut xs = [3, 1, 2];
+        <[_]>::sort(&mut xs);
+        <[()] as I>::trait_f();
     }
 }
 
