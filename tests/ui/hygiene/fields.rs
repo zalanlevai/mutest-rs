@@ -52,6 +52,22 @@ macro m($x:ident) {
         fn self_s(&self) -> usize { self.x }
     }
     assert_eq!(s.self_s(), 100);
+
+    // NOTE: Functions are in impl so that `Self` can be used to refer to `S`.
+    impl S {
+        fn self_expr() -> Self {
+            Self { x: 0, $x: 0 }
+        }
+
+        fn self_pat(&self) {
+            match self {
+                Self { x: _, $x: _ } => {}
+            }
+        }
+    }
+
+    let s = S::self_expr();
+    s.self_pat();
 }
 
 #[cfg(test)]

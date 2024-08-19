@@ -572,8 +572,16 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             ast::ExprKind::Struct(struct_expr) => 'arm: {
                 let Some(res) = self.def_res.node_res(struct_expr.path.segments.last().unwrap().id) else { break 'arm; };
 
-                // Expect a struct, union, or enum variant, and get the corresponding ADT variant.
-                let variant_def = self.tcx.expect_variant_res(res.expect_non_local());
+                let variant_def = match res {
+                    hir::Res::SelfTyAlias { alias_to: alias_def_id, .. } => {
+                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
+                        let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
+                        adt_def.variant_of_res(res.expect_non_local())
+                    }
+                    // Expect a struct, union, or enum variant, and get the corresponding ADT variant.
+                    _ => self.tcx.expect_variant_res(res.expect_non_local()),
+                };
+
                 for field in &mut struct_expr.fields {
                     let Some(field_def) = variant_def.fields.iter().find(|field_def| self.tcx.hygienic_eq(field.ident, field_def.ident(self.tcx), variant_def.def_id)) else {
                         panic!("field {ident} at {span:?} does not match any field of {variant_def_id:?}",
@@ -658,8 +666,16 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             ast::PatKind::Struct(_, path, fields, _) => 'arm: {
                 let Some(res) = self.def_res.node_res(path.segments.last().unwrap().id) else { break 'arm; };
 
-                // Expect a struct, union, or enum variant, and get the corresponding ADT variant.
-                let variant_def = self.tcx.expect_variant_res(res.expect_non_local());
+                let variant_def = match res {
+                    hir::Res::SelfTyAlias { alias_to: alias_def_id, .. } => {
+                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
+                        let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
+                        adt_def.variant_of_res(res.expect_non_local())
+                    }
+                    // Expect a struct, union, or enum variant, and get the corresponding ADT variant.
+                    _ => self.tcx.expect_variant_res(res.expect_non_local()),
+                };
+
                 for field in fields {
                     let Some(field_def) = variant_def.fields.iter().find(|field_def| self.tcx.hygienic_eq(field.ident, field_def.ident(self.tcx), variant_def.def_id)) else {
                         panic!("field {ident} at {span:?} does not match any field of {variant_def_id:?}",
