@@ -10,3 +10,10 @@ enum E {
     B,
     C,
 }
+
+#[derive(Debug)]
+struct DebugThreeFields {
+    a: u32,
+    b: f64,
+    c: isize,
+}

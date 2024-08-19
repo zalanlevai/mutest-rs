@@ -1,3 +1,4 @@
+use std::assert_matches::assert_matches;
 use std::mem;
 use std::panic;
 
@@ -170,6 +171,22 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         );
     }
 
+    fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span) -> res::DefPath {
+        let mut visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope);
+        if let Some(visible_path) = visible_paths.drain(..).next() { return visible_path; }
+
+        // Ensure that the def is in the current scope, otherwise it really is not visible from here.
+        let Some(current_scope) = self.current_scope else {
+            panic!("{def_id:?} is not accessible in this crate at {span:?}");
+        };
+        match res::locally_visible_def_path(self.tcx, def_id, current_scope) {
+            Ok(visible_path) => { return visible_path; }
+            Err(adjusted_scope) => {
+                panic!("{def_id:?} is not defined in the scope {adjusted_scope:?} and is not otherwise accessible at {span:?}");
+            }
+        }
+    }
+
     fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
         match res {
             hir::Res::Local(_) => {
@@ -202,48 +219,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             def_id = self.tcx.parent(def_id);
                         }
 
-                        let visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope);
-
-                        match &visible_paths[..] {
-                            [visible_path, ..] => {
-                                let def_id_path = visible_path.def_id_path().collect::<Vec<_>>();
-                                self.overwrite_path_with_def_path(path, &def_id_path, !visible_path.global);
-                            }
-                            [] => {
-                                // Ensure that the def is in the current scope, otherwise it really is not visible from here.
-                                let Some(mut current_scope) = self.current_scope else {
-                                    panic!("{def_id:?} is not accessible in this crate at {span:?}",
-                                        span = path.span,
-                                    );
-                                };
-                                if !self.tcx.is_descendant_of(def_id, current_scope) {
-                                    'fail: {
-                                        // For some scopes, we can make an adjustment and try to find a relative path from the parent scope.
-                                        let is_transparent = |def_kind: hir::DefKind| matches!(def_kind,
-                                            | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::Union | hir::DefKind::Variant | hir::DefKind::TyAlias
-                                            | hir::DefKind::ForeignMod | hir::DefKind::ForeignTy
-                                            | hir::DefKind::Trait | hir::DefKind::Impl { .. } | hir::DefKind::TraitAlias
-                                            | hir::DefKind::Fn | hir::DefKind::Const | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
-                                            | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
-                                        );
-                                        while is_transparent(self.tcx.def_kind(current_scope)) && let Some(parent_scope) = self.tcx.opt_parent(current_scope) {
-                                            current_scope = parent_scope;
-                                            // Adjustment succeeded, escape failing case.
-                                            if self.tcx.is_descendant_of(def_id, parent_scope) { break 'fail; }
-                                        }
-
-                                        panic!("{def_id:?} is not defined in the scope {current_scope:?} and is not otherwise accessible at {span:?}",
-                                            span = path.span,
-                                        );
-                                    }
-                                }
-
-                                let def_id_path = res::def_id_path(self.tcx, def_id);
-                                let scope_def_id_path = res::def_id_path(self.tcx, current_scope);
-                                let relative_def_id_path = &def_id_path[scope_def_id_path.len()..];
-                                self.overwrite_path_with_def_path(path, &relative_def_id_path, true);
-                            }
-                        }
+                        let visible_def_path = self.expect_visible_def_path(def_id, path.span);
+                        let visible_def_id_path = visible_def_path.def_id_path().collect::<Vec<_>>();
+                        self.overwrite_path_with_def_path(path, &visible_def_id_path, !visible_def_path.global);
                     }
 
                     | hir::DefKind::TyParam
@@ -317,7 +295,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
             (None, Some(res)) => self.sanitize_path(path, res),
 
-            // `Self::$assoc` paths
+            // Non-qualified path reference to assoc item in inherent or trait impl.
             (qself @ None, None) => {
                 let Some(body_res) = &self.current_body_res else { return; };
 
@@ -338,20 +316,47 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     None
                 }) else { unreachable!() };
 
-                match def_kind {
-                    hir::DefKind::AssocTy | hir::DefKind::AssocConst | hir::DefKind::AssocFn => {
+                // Only assoc items match this case: non-qualified paths with context-dependent resolution.
+                assert_matches!(def_kind, hir::DefKind::AssocTy | hir::DefKind::AssocConst | hir::DefKind::AssocFn);
+
+                match self.tcx.def_kind(self.tcx.parent(def_id)) {
+                    // Non-qualified path reference to assoc item in inherent impl.
+                    hir::DefKind::Impl { of_trait: false } => {
+                        self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
+                        *qself = None;
+                    }
+
+                    // Non-qualified path reference to assoc item in trait impl.
+                    hir::DefKind::Trait | hir::DefKind::TraitAlias => {
+                        let Some([parent_path_segment, _]) = path.segments.last_chunk::<2>() else { unreachable!() };
+                        let Some(container_res) = self.def_res.node_res(parent_path_segment.id) else { unreachable!() };
+
+                        let self_ty_ast = match container_res {
+                            | hir::Res::SelfTyAlias { .. }
+                            | hir::Res::SelfTyParam { .. }
+                            => ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
+
+                            hir::Res::Def(_, container_def_id) => {
+                                let container_def_path = self.expect_visible_def_path(container_def_id, parent_path_segment.span());
+                                ast::mk::ty(DUMMY_SP, ast::TyKind::Path(None, container_def_path.ast_path()))
+                            }
+
+                            _ => unreachable!(),
+                        };
+
                         self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
                         *qself = Some(P(ast::QSelf {
-                            ty: ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
+                            ty: self_ty_ast,
                             path_span: DUMMY_SP,
                             position: path.segments.len() - 1,
                         }));
                     }
-                    _ => self.sanitize_path(path, hir::Res::Def(def_kind, def_id)),
+
+                    _ => unreachable!(),
                 }
             }
 
-            // `<$Ty as $Trait>::$assoc` paths
+            // Qualified path reference to assoc item in inherent or trait impl.
             (qself @ Some(_), _) => {
                 let Some(body_res) = &self.current_body_res else { return; };
 
@@ -375,25 +380,25 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 });
 
                 // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
-                *qself = match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
+                match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
                     hir::DefKind::Trait | hir::DefKind::TraitAlias => {
                         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
                         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
                         let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
 
                         self.sanitize_path(path, qres.expect_non_local());
-                        Some(P(ast::QSelf {
+                        *qself = Some(P(ast::QSelf {
                             ty: qself_ty_ast,
                             path_span: DUMMY_SP,
                             position: path.segments.len() - 1,
-                        }))
-                    },
+                        }));
+                    }
 
                     // If the portion of the path within the qself does not refer to a trait,
                     // then the resolved path no longer needs a qualified self.
                     _ => {
                         self.sanitize_path(path, qres.expect_non_local());
-                        None
+                        *qself = None;
                     }
                 }
             }

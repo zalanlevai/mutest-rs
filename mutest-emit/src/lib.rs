@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
 #![feature(extract_if)]

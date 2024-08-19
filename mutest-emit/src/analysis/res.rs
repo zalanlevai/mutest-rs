@@ -1,12 +1,13 @@
 use std::hash::Hash;
 
 use rustc_hash::FxHashSet;
+use smallvec::{SmallVec, smallvec};
 use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
-use crate::analysis::ty::{self, TyCtxt};
+use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym, kw};
 
@@ -99,6 +100,25 @@ pub fn fn_def_id<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Option<hir::DefId>
     match def_path_res(tcx, path) {
         Res::Def(DefKind::Fn | DefKind::AssocFn, trait_id) => Some(trait_id),
         _ => None,
+    }
+}
+
+pub fn parent_iter<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> DefIdParentIter<'tcx> {
+    DefIdParentIter { tcx, def_id }
+}
+
+pub struct DefIdParentIter<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    def_id: hir::DefId,
+}
+
+impl<'tcx> std::iter::Iterator for DefIdParentIter<'tcx> {
+    type Item = hir::DefId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let parent_def_id = self.tcx.opt_parent(self.def_id)?;
+        self.def_id = parent_def_id;
+        Some(parent_def_id)
     }
 }
 
@@ -290,7 +310,97 @@ impl DefPath {
     }
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> ThinVec<DefPath> {
+fn inherent_impl_ty_to_def_id<'tcx>(impl_ty: Ty<'tcx>) -> hir::DefId {
+    match impl_ty.kind() {
+        ty::TyKind::Adt(adt_def, _) => adt_def.did(),
+        _ => unreachable!("inherent impl is for unhandled type {impl_ty:?}"),
+    }
+}
+
+fn concretize_inherent_impl_in_def_path_segment<'tcx>(tcx: TyCtxt<'tcx>, segment: &mut DefPathSegment) {
+    let impl_subject = tcx.impl_subject(segment.def_id);
+    let ty::ImplSubject::Inherent(implementer_ty) = impl_subject.instantiate_identity() else { unreachable!("encountered trait impl in def path") };
+
+    let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
+
+    segment.def_id = implementer_def_id;
+    segment.ident = tcx.opt_item_ident(implementer_def_id).unwrap();
+}
+
+pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId) -> Option<DefPath> {
+    if !tcx.is_descendant_of(def_id, scope) { return None; }
+
+    let full_def_id_path = def_id_path(tcx, def_id);
+    let scope_def_id_path = def_id_path(tcx, scope);
+    let relative_def_id_path = &full_def_id_path[scope_def_id_path.len()..];
+
+    let mut def_path = DefPath { segments: Vec::with_capacity(relative_def_id_path.len()), global: false };
+    for &def_id in relative_def_id_path {
+        let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+        let name = tcx.opt_item_name(def_id).unwrap_or(kw::Empty);
+        def_path.segments.push(DefPathSegment { def_id, ident: Ident::new(name, span) });
+    }
+
+    for segment in &mut def_path.segments {
+        let hir::DefKind::Impl { of_trait: _ } = tcx.def_kind(segment.def_id) else { continue; };
+        concretize_inherent_impl_in_def_path_segment(tcx, segment);
+    }
+
+    Some(def_path)
+}
+
+pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut scope: hir::DefId) -> Result<DefPath, hir::DefId> {
+    if !tcx.is_descendant_of(def_id, scope) {
+        'fail: {
+            // For some scopes, we can make an adjustment and try to find a relative path from the parent scope.
+            let is_transparent = |def_kind: hir::DefKind| matches!(def_kind,
+                | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::Union | hir::DefKind::Variant | hir::DefKind::TyAlias
+                | hir::DefKind::ForeignMod | hir::DefKind::ForeignTy
+                | hir::DefKind::Trait | hir::DefKind::Impl { .. } | hir::DefKind::TraitAlias
+                | hir::DefKind::Fn | hir::DefKind::Const | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
+                | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
+            );
+            while is_transparent(tcx.def_kind(scope)) && let Some(parent_scope) = tcx.opt_parent(scope) {
+                scope = parent_scope;
+                // Adjustment succeeded, escape failing case.
+                if tcx.is_descendant_of(def_id, parent_scope) { break 'fail; }
+            }
+
+            return Err(scope);
+        }
+    }
+
+    Ok(relative_def_path(tcx, def_id, scope).unwrap())
+}
+
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
+    let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
+    match impl_parents.next() {
+        // `..::{impl#?}::..` path.
+        Some((1.., _)) => unreachable!("encountered def path with impl at unexpected position: {def_id:?}"),
+
+        // `..::{impl#?}::$assoc_item` path.
+        Some((0, impl_parent_def_id)) => {
+            let impl_subject = tcx.impl_subject(impl_parent_def_id);
+            let ty::ImplSubject::Inherent(implementer_ty) = impl_subject.instantiate_identity() else { unreachable!("encountered trait impl in def path") };
+            let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
+
+            let mut visible_root_def_paths = visible_def_paths(tcx, implementer_def_id, scope);
+            if visible_root_def_paths.is_empty() { return smallvec![]; }
+
+            for visible_root_def_path in &mut visible_root_def_paths {
+                visible_root_def_path.segments.push(DefPathSegment {
+                    def_id: def_id,
+                    ident: tcx.opt_item_ident(def_id).unwrap(),
+                });
+            }
+
+            return visible_root_def_paths;
+        }
+
+        None => {}
+    };
+
     let extern_crates = tcx.hir_crate_items(()).definitions()
         .filter(|&def_id| matches!(tcx.def_kind(def_id), hir::DefKind::ExternCrate))
         .filter_map(|def_id| {
@@ -330,10 +440,10 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                         || tcx.opt_local_parent(extern_crate_def_id) == Some(CRATE_DEF_ID)
                         || scope.is_some_and(|scope| tcx.is_descendant_of(extern_crate_def_id.to_def_id(), scope))
                 });
-            let Some((reachable_extern_crate_def_id, _cnum)) = reachable_extern_crates.next() else { return thin_vec![]; };
+            let Some((reachable_extern_crate_def_id, _cnum)) = reachable_extern_crates.next() else { return smallvec![]; };
 
             let root_def_id = def_id.krate.as_def_id();
-            let Some(mut root_def_path) = DefPath::from_def_id(tcx, reachable_extern_crate_def_id.to_def_id()) else { return thin_vec![] };
+            let Some(mut root_def_path) = DefPath::from_def_id(tcx, reachable_extern_crate_def_id.to_def_id()) else { return smallvec![] };
 
             if let Some(scope) = scope && tcx.is_descendant_of(reachable_extern_crate_def_id.to_def_id(), scope) {
                 let scope_def_id_path = def_id_path(tcx, scope);
@@ -346,10 +456,10 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
     };
 
     if root_def_id == def_id {
-        return thin_vec![root_def_path];
+        return smallvec![root_def_path];
     }
 
-    let mut paths = thin_vec![];
+    let mut paths = smallvec![];
 
     let mut seen_containers: FxHashSet<hir::DefId> = Default::default();
     let mut worklist = vec![(root_def_id, root_def_path)];
@@ -394,8 +504,8 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
     paths
 }
 
-pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> ThinVec<ast::Path> {
-    visible_def_paths(tcx, def_id, scope).into_iter().map(|path| path.ast_path()).collect::<ThinVec<_>>()
+pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> SmallVec<[ast::Path; 1]> {
+    visible_def_paths(tcx, def_id, scope).into_iter().map(|path| path.ast_path()).collect::<SmallVec<_>>()
 }
 
 macro interned {
