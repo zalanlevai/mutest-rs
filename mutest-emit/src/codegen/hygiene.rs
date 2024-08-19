@@ -45,6 +45,8 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident) {
         None => (false, ident.as_str()),
     };
 
+    if bare_ident == "_" { return; };
+
     assert!(!bare_ident.starts_with("__rustc_expn_"), "encountered ident starting with `__rustc_expn_` at {:?}: the macro might have been sanitized twice", ident.span);
 
     let expn_id = ident.span.ctxt().outer_expn();
@@ -749,8 +751,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_ident(&mut self, ident: &mut Ident) {
+        if ident.name == kw::SelfLower || ident.name == kw::Underscore { return; }
         if self.protected_idents.contains(ident) { return; }
-        if ident.name == kw::SelfLower { return; }
         sanitize_ident_if_from_expansion(ident);
     }
 
