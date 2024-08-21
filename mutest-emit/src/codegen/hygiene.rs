@@ -339,6 +339,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     None
                 }) else { unreachable!() };
 
+                if let hir::DefKind::Ctor(..) = def_kind {
+                    return self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
+                }
+
                 // Only assoc items match this case: non-qualified paths with context-dependent resolution.
                 assert_matches!(def_kind, hir::DefKind::AssocTy | hir::DefKind::AssocConst | hir::DefKind::AssocFn);
 
