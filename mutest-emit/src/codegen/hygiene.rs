@@ -837,7 +837,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
             //       See https://github.com/rust-lang/rust/pull/76897.
             let builtin_panic_hook = panic::take_hook();
             panic::set_hook(Box::new(|_panic_info| {}));
-            let Ok(def_kind) = panic::catch_unwind(panic::AssertUnwindSafe(|| tcx.def_kind(def_id))) else { return false; };
+            let Ok(def_kind) = panic::catch_unwind(panic::AssertUnwindSafe(|| cstore.def_kind_untracked(def_id))) else { return false; };
             panic::set_hook(builtin_panic_hook);
 
             matches!(def_kind, hir::DefKind::Macro(_))
