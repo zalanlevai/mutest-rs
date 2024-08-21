@@ -476,49 +476,52 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
 }
 
 macro def_flat_map_item_fns(
-    $(fn $ident:ident: $item_kind:ident [$into_ast_fn_item:path] |$item:ident| {
+    $(fn $ident:ident: $item_kind:ident [$into_ast_fn_item:path] |$self:ident, $item:ident, $def_id:ident| {
         $(check { $($check_stmt:stmt)+ })?
+        $(scope { $($scope_stmt:stmt)+ })?
     });+;
 ) {
     $(
-        fn $ident(&mut self, mut $item: P<ast::Item<ast::$item_kind>>) -> SmallVec<[P<ast::Item<ast::$item_kind>>; 1]> {
+        fn $ident(&mut $self, mut $item: P<ast::Item<ast::$item_kind>>) -> SmallVec<[P<ast::Item<ast::$item_kind>>; 1]> {
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
             if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
             $($($check_stmt)+)?
 
-            let Some(&def_id) = self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
+            let Some(&$def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
 
             // Store new context scope.
-            let previous_scope = mem::replace(&mut self.current_scope, Some(def_id.to_def_id()));
+            let previous_scope = mem::replace(&mut $self.current_scope, Some($def_id.to_def_id()));
 
             // Store new typeck scope, if needed.
-            let previous_typeck_ctx = self.current_typeck_ctx;
-            let typeck_root_def_id = self.tcx.typeck_root_def_id(def_id.to_def_id());
+            let previous_typeck_ctx = $self.current_typeck_ctx;
+            let typeck_root_def_id = $self.tcx.typeck_root_def_id($def_id.to_def_id());
             let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
-            if let Some(typeck_root_body_id) = self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
+            if let Some(typeck_root_body_id) = $self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
                 if !previous_typeck_ctx.is_some_and(|previous_typeck_ctx| typeck_root_def_id == previous_typeck_ctx.hir_owner.to_def_id()) {
-                    self.current_typeck_ctx = Some(self.tcx.typeck_body(typeck_root_body_id));
+                    $self.current_typeck_ctx = Some($self.tcx.typeck_body(typeck_root_body_id));
                 }
             }
 
             // Store new body resolution scope, if available.
-            let previous_body_res = self.current_body_res.take();
+            let previous_body_res = $self.current_body_res.take();
             match &$item.kind {
                 ast::$item_kind::Fn(_) => {
                     let Some(fn_ast) = $into_ast_fn_item(&$item) else { unreachable!() };
-                    let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                    self.current_body_res = Some(ast_lowering::resolve_fn_body(self.tcx, &fn_ast, &fn_hir));
+                    let Some(fn_hir) = hir::FnItem::from_node($self.tcx, $self.tcx.hir_node_by_def_id($def_id)) else { unreachable!() };
+                    $self.current_body_res = Some(ast_lowering::resolve_fn_body($self.tcx, &fn_ast, &fn_hir));
                 }
                 ast::$item_kind::Const(const_ast) => {
-                    let Some(const_hir) = hir::ConstItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                    self.current_body_res = Some(ast_lowering::resolve_const_body(self.tcx, &const_ast, &const_hir));
+                    let Some(const_hir) = hir::ConstItem::from_node($self.tcx, $self.tcx.hir_node_by_def_id($def_id)) else { unreachable!() };
+                    $self.current_body_res = Some(ast_lowering::resolve_const_body($self.tcx, &const_ast, &const_hir));
                 }
                 _ => {}
             }
 
+            $($($scope_stmt)+)?
+
             // Match definition ident if this is an assoc item corresponding to a trait.
-            if let Some(assoc_item) = self.tcx.opt_associated_item(def_id.to_def_id()) {
+            if let Some(assoc_item) = $self.tcx.opt_associated_item($def_id.to_def_id()) {
                 match assoc_item.container {
                     ty::AssocItemContainer::TraitContainer => {
                         // Trait items make new standalone definitions rather than referring to another definition,
@@ -528,19 +531,19 @@ macro def_flat_map_item_fns(
                         // Adjustment only needed if this assoc item is in a trait impl, not a bare impl.
                         if let Some(trait_item_def_id) = assoc_item.trait_item_def_id {
                             // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
-                            let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
+                            let Some(trait_item_ident_span) = $self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
                             copy_def_span_ctxt(&mut $item.ident, &trait_item_ident_span);
                         }
                     }
                 }
             }
 
-            let item = ast::mut_visit::noop_flat_map_item($item, self);
+            let item = ast::mut_visit::noop_flat_map_item($item, $self);
 
             // Restore previous context.
-            self.current_body_res = previous_body_res;
-            self.current_typeck_ctx = previous_typeck_ctx;
-            self.current_scope = previous_scope;
+            $self.current_body_res = previous_body_res;
+            $self.current_typeck_ctx = previous_typeck_ctx;
+            $self.current_scope = previous_scope;
 
             item
         }
@@ -549,7 +552,7 @@ macro def_flat_map_item_fns(
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
     def_flat_map_item_fns! {
-        fn flat_map_item: ItemKind [ast::FnItem::from_item] |item| {
+        fn flat_map_item: ItemKind [ast::FnItem::from_item] |self, item, def_id| {
             check {
                 let name = item.ident.name;
 
@@ -563,10 +566,19 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     return smallvec![item];
                 }
             }
+            scope {
+                match &item.kind {
+                    ast::ItemKind::Static(static_ast) => {
+                        let Some(static_hir) = hir::StaticItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_static_body(self.tcx, &static_ast, &static_hir));
+                    }
+                    _ => {}
+                }
+            }
         };
 
-        fn flat_map_trait_item: AssocItemKind [ast::FnItem::from_assoc_item] |item| {};
-        fn flat_map_impl_item: AssocItemKind [ast::FnItem::from_assoc_item] |item| {};
+        fn flat_map_trait_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {};
+        fn flat_map_impl_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {};
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {

@@ -88,6 +88,10 @@ pub mod visit {
             walk_const(self, const_ast, const_hir);
         }
 
+        fn visit_static(&mut self, static_ast: &'ast ast::StaticItem, static_hir: &hir::StaticItem<'hir>) {
+            walk_static(self, static_ast, static_hir);
+        }
+
         fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
             walk_block(self, block_ast, block_hir);
         }
@@ -164,6 +168,13 @@ pub mod visit {
         visit_matching_ty(visitor, &const_ast.ty, const_hir.ty);
         // TODO: Visit generic params
         if let Some(expr_ast) = &const_ast.expr && let Some(body_hir) = const_hir.body {
+            visit_matching_expr(visitor, expr_ast, &body_hir.value)
+        }
+    }
+
+    pub fn walk_static<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, static_ast: &'ast ast::StaticItem, static_hir: &hir::StaticItem<'hir>) {
+        visit_matching_ty(visitor, &static_ast.ty, static_hir.ty);
+        if let Some(expr_ast) = &static_ast.expr && let Some(body_hir) = static_hir.body {
             visit_matching_expr(visitor, expr_ast, &body_hir.value)
         }
     }
@@ -813,6 +824,10 @@ impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'
         visit::walk_const(self, const_ast, const_hir);
     }
 
+    fn visit_static(&mut self, static_ast: &'ast ast::StaticItem, static_hir: &hir::StaticItem<'hir>) {
+        visit::walk_static(self, static_ast, static_hir);
+    }
+
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         self.node_id_to_hir_id.insert_same(block_ast.id, block_hir.hir_id);
         self.hir_id_to_node_id.insert_same(block_hir.hir_id, block_ast.id);
@@ -881,6 +896,22 @@ pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, const_ast: &ast::ConstItem, c
     };
 
     visit::AstHirVisitor::visit_const(&mut collector, const_ast, const_hir);
+
+    BodyResolutions {
+        tcx,
+        node_id_to_hir_id: collector.node_id_to_hir_id,
+        hir_id_to_node_id: collector.hir_id_to_node_id,
+    }
+}
+
+pub fn resolve_static_body<'tcx>(tcx: TyCtxt<'tcx>, static_ast: &ast::StaticItem, static_hir: &hir::StaticItem<'tcx>) -> BodyResolutions<'tcx> {
+    let mut collector = BodyResolutionsCollector {
+        tcx,
+        node_id_to_hir_id: Default::default(),
+        hir_id_to_node_id: Default::default(),
+    };
+
+    visit::AstHirVisitor::visit_static(&mut collector, static_ast, static_hir);
 
     BodyResolutions {
         tcx,

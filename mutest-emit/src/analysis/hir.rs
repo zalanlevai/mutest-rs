@@ -3,6 +3,7 @@ pub use rustc_hir::def::*;
 pub use rustc_hir::def_id::*;
 pub use rustc_hir::definitions::*;
 
+use rustc_ast as ast;
 use rustc_hir as hir;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::Span;
@@ -75,6 +76,26 @@ impl<'tcx: 'hir, 'hir> ConstItem<'hir> {
                 let hir::ImplItemKind::Const(ty, body) = kind else { return None; };
                 let body = Some(tcx.hir().body(*body));
                 Some(ConstItem { ty, generics: None, body })
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StaticItem<'hir> {
+    pub ty: &'hir hir::Ty<'hir>,
+    pub mutability: ast::Mutability,
+    pub body: Option<&'hir hir::Body<'hir>>,
+}
+
+impl<'tcx: 'hir, 'hir> StaticItem<'hir> {
+    pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
+        match node {
+            hir::Node::Item(&hir::Item { ref kind, .. }) => {
+                let hir::ItemKind::Static(ty, mutability, body) = kind else { return None; };
+                let body = Some(tcx.hir().body(*body));
+                Some(StaticItem { ty, mutability: *mutability, body })
             }
             _ => None,
         }
