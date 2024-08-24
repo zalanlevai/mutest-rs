@@ -88,7 +88,17 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
 impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_id_path: &[hir::DefId], mut relative: bool) {
         let mut segments_with_generics = path.segments.iter()
-            .filter_map(|segment| segment.args.as_ref().and_then(|args| self.def_res.node_res(segment.id).and_then(|res| res.opt_def_id()).map(|def_id| (def_id, args.clone()))))
+            .filter_map(|segment| {
+                let args = segment.args.as_ref()?;
+                let res = self.def_res.node_res(segment.id)?;
+                let mut def_id = res.opt_def_id()?;
+                if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
+                    // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
+                    // so that the segment def ids match up.
+                    def_id = self.tcx.parent(def_id);
+                }
+                Some((def_id, args.clone()))
+            })
             .collect::<Vec<_>>();
 
         let mut segments = def_id_path.iter()
