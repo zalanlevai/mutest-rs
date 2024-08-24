@@ -86,7 +86,7 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
 }
 
 impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
-    fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_id_path: &[hir::DefId], mut relative: bool) {
+    fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_path: &res::DefPath) {
         let mut segments_with_generics = path.segments.iter()
             .filter_map(|segment| {
                 let args = segment.args.as_ref()?;
@@ -101,21 +101,31 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             })
             .collect::<Vec<_>>();
 
-        let mut segments = def_id_path.iter()
-            .flat_map(|&def_id| {
-                // NOTE: The only reason we do not use `tcx.opt_item_ident(def_id)?` here is that
-                //       it panics if no span is found, which happens for crate root defs.
-                let span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
-                let name = match () {
-                    _ if def_id == LOCAL_CRATE.as_def_id() => {
-                        // We must not make the path global if we use the `crate` keyword.
-                        relative = true;
+        let mut relative = !def_path.global;
 
-                        kw::Crate
+        let mut segments = def_path.segments.iter()
+            .flat_map(|def_path_segment| {
+                let def_id = def_path_segment.def_id;
+
+                let mut ident = match def_path_segment.reexport {
+                    None => {
+                        // NOTE: The only reason we do not use `tcx.opt_item_ident(def_id)?` here is that
+                        //       it panics if no span is found, which happens for crate root defs.
+                        let span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+                        let name = match () {
+                            _ if def_id == LOCAL_CRATE.as_def_id() => {
+                                // We must not make the path global if we use the `crate` keyword.
+                                relative = true;
+
+                                kw::Crate
+                            }
+                            _ => self.tcx.opt_item_name(def_id)?,
+                        };
+                        // TODO: Use path.span with copy_def_span_ctxt.
+                        Ident::new(name, span)
                     }
-                    _ => self.tcx.opt_item_name(def_id)?,
+                    Some(_) => def_path_segment.ident,
                 };
-                let mut ident = Ident::new(name, span);
                 sanitize_ident_if_from_expansion(&mut ident);
 
                 let mut segment = ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None };
@@ -251,8 +261,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     //       later in `sanitize_qualified_path` by appending the appropriate path qualification with the corresponding type.
                                     if let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind() {
                                         let Some(relative_def_path) = res::relative_def_path(self.tcx, def_id, impl_parent_def_id) else { unreachable!() };
-                                        let relative_def_id_path = relative_def_path.def_id_path().collect::<Vec<_>>();
-                                        return self.overwrite_path_with_def_path(path, &relative_def_id_path, true);
+                                        return self.overwrite_path_with_def_path(path, &relative_def_path);
                                     }
                                 }
                             }
@@ -260,8 +269,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         }
 
                         let visible_def_path = self.expect_visible_def_path(def_id, path.span);
-                        let visible_def_id_path = visible_def_path.def_id_path().collect::<Vec<_>>();
-                        self.overwrite_path_with_def_path(path, &visible_def_id_path, !visible_def_path.global);
+                        self.overwrite_path_with_def_path(path, &visible_def_path);
                     }
 
                     | hir::DefKind::TyParam

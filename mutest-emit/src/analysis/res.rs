@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use rustc_hash::FxHashSet;
+use rustc_middle::metadata::Reexport;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::{ThinVec, thin_vec};
 
@@ -16,6 +17,7 @@ pub struct ItemChild {
     pub ident: Ident,
     pub vis: ty::Visibility<hir::DefId>,
     pub res: Res,
+    pub reexport: Option<Reexport>,
 }
 
 pub fn item_children<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Box<dyn Iterator<Item = ItemChild> + 'tcx> {
@@ -29,7 +31,16 @@ pub fn item_children<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Box<dyn Ite
             let iter = mod_children.iter()
                 .map(|child| {
                     let res = child.res.expect_non_local();
-                    ItemChild { ident: child.ident, vis: child.vis, res }
+                    let reexport = 'reexport: {
+                        let [reexport, ..] = &child.reexport_chain[..] else { break 'reexport None; };
+                        match reexport {
+                            Reexport::Single(_) => Some(*reexport),
+                            Reexport::Glob(_) => None,
+                            Reexport::ExternCrate(_) => Some(*reexport),
+                            Reexport::MacroUse | Reexport::MacroExport => Some(*reexport),
+                        }
+                    };
+                    ItemChild { ident: child.ident, vis: child.vis, res, reexport }
                 });
             Box::new(iter)
         }
@@ -39,7 +50,7 @@ pub fn item_children<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Box<dyn Ite
                     let ident = tcx.opt_item_ident(assoc_def_id).unwrap();
                     let vis = tcx.visibility(assoc_def_id);
                     let res = Res::Def(tcx.def_kind(assoc_def_id), assoc_def_id);
-                    ItemChild { ident, vis, res }
+                    ItemChild { ident, vis, res, reexport: None }
                 });
             Box::new(iter)
         }
@@ -262,6 +273,7 @@ where
 pub struct DefPathSegment {
     pub def_id: hir::DefId,
     pub ident: Ident,
+    pub reexport: Option<Reexport>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,7 +288,7 @@ impl DefPath {
             .map(|def_id| {
                 let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
                 let name = tcx.opt_item_name(def_id)?;
-                Some(DefPathSegment { def_id, ident: Ident::new(name, span) })
+                Some(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None })
             })
             .try_collect::<Vec<_>>()?;
         Some(Self { segments, global: true })
@@ -338,7 +350,7 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     for &def_id in relative_def_id_path {
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
         let name = tcx.opt_item_name(def_id).unwrap_or(kw::Empty);
-        def_path.segments.push(DefPathSegment { def_id, ident: Ident::new(name, span) });
+        def_path.segments.push(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None });
     }
 
     for segment in &mut def_path.segments {
@@ -393,6 +405,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                 visible_root_def_path.segments.push(DefPathSegment {
                     def_id: def_id,
                     ident: tcx.opt_item_ident(def_id).unwrap(),
+                    reexport: None,
                 });
             }
 
@@ -425,16 +438,16 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
         Some(_) => {
             let root_def_id = CRATE_DEF_ID.to_def_id();
             let root_ident = Ident::new(kw::Crate, DUMMY_SP);
-            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident }], global: true };
+            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
             (root_def_id, root_def_path)
         }
         None if let crate_name = tcx.crate_name(def_id.krate) && extern_prelude.contains(&crate_name) => {
             let root_def_id = def_id.krate.as_def_id();
             let root_ident = Ident::new(crate_name, DUMMY_SP);
-            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident }], global: true };
+            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
             (root_def_id, root_def_path)
         }
-        None => {
+        None => 'root: {
             let mut reachable_extern_crates = extern_crates
                 .filter(|&(_extern_crate_def_id, cnum)| cnum == def_id.krate)
                 .filter(|&(extern_crate_def_id, _cnum)| {
@@ -442,7 +455,23 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                         || tcx.opt_local_parent(extern_crate_def_id) == Some(CRATE_DEF_ID)
                         || scope.is_some_and(|scope| tcx.is_descendant_of(extern_crate_def_id.to_def_id(), scope))
                 });
-            let Some((reachable_extern_crate_def_id, _cnum)) = reachable_extern_crates.next() else { return smallvec![]; };
+            let Some((reachable_extern_crate_def_id, _cnum)) = reachable_extern_crates.next() else {
+                let visible_parent_map = tcx.visible_parent_map(());
+                let mut visible_def_id = def_id;
+                while let Some(&visible_parent) = visible_parent_map.get(&visible_def_id) {
+                    visible_def_id = visible_parent;
+                    if let Some(cnum) = visible_def_id.as_crate_root() {
+                        let crate_name = tcx.crate_name(cnum);
+                        if !extern_prelude.contains(&crate_name) { continue; }
+
+                        let root_ident = Ident::new(tcx.crate_name(cnum), DUMMY_SP);
+                        let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: visible_def_id, ident: root_ident, reexport: None }], global: true };
+                        break 'root (visible_def_id, root_def_path);
+                    }
+                }
+
+                panic!("expected {def_id:?} to be reached through another crate in the extern prelude");
+            };
 
             let root_def_id = def_id.krate.as_def_id();
             let Some(mut root_def_path) = DefPath::from_def_id(tcx, reachable_extern_crate_def_id.to_def_id()) else { return smallvec![] };
@@ -482,7 +511,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
 
                 if child.res.opt_def_id() == Some(def_id) {
                     let mut path = container_def_path.clone();
-                    path.segments.push(DefPathSegment { def_id, ident: child.ident });
+                    path.segments.push(DefPathSegment { def_id, ident: child.ident, reexport: child.reexport });
                     paths.push(path);
                 }
 
@@ -492,7 +521,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                         seen_containers.insert(child_def_id);
 
                         let mut path = container_def_path.clone();
-                        path.segments.push(DefPathSegment { def_id: child_def_id, ident: child.ident });
+                        path.segments.push(DefPathSegment { def_id: child_def_id, ident: child.ident, reexport: child.reexport });
                         new_worklist.push((child_def_id, path));
                     }
                     _ => {}
