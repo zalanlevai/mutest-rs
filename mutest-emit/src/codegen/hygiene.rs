@@ -231,8 +231,15 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                         let mut impl_parents = res::parent_iter(self.tcx, def_id).enumerate().filter(|(_, def_id)| matches!(self.tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
                         match impl_parents.next() {
-                            // `..::{impl#?}::..` path.
-                            Some((1.., _)) => unreachable!("encountered def path with impl at unexpected position: {def_id:?}"),
+                            // `..::{impl#?}::$assoc_item::..` path.
+                            Some((1.., impl_parent_def_id)) => {
+                                let impl_subject = self.tcx.impl_subject(impl_parent_def_id);
+                                if let ty::ImplSubject::Inherent(ty) = impl_subject.instantiate_identity() {
+                                    if let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind() {
+                                        unreachable!("encountered def path with impl at unexpected position: {def_id:?}")
+                                    }
+                                }
+                            }
                             // `..::{impl#?}::$assoc_item` path.
                             Some((0, impl_parent_def_id)) => {
                                 let impl_subject = self.tcx.impl_subject(impl_parent_def_id);

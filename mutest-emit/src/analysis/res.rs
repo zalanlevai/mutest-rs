@@ -376,8 +376,9 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
 pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
-        // `..::{impl#?}::..` path.
-        Some((1.., _)) => unreachable!("encountered def path with impl at unexpected position: {def_id:?}"),
+        // `..::{impl#?}::$assoc_item::..` path.
+        // NOTE: Such paths will never be accessible outside of the scope of the assoc item.
+        Some((1.., _)) => { return smallvec![]; }
 
         // `..::{impl#?}::$assoc_item` path.
         Some((0, impl_parent_def_id)) => {
