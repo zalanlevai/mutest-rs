@@ -342,6 +342,12 @@ fn concretize_inherent_impl_in_def_path_segment<'tcx>(tcx: TyCtxt<'tcx>, segment
 pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId) -> Option<DefPath> {
     if !tcx.is_descendant_of(def_id, scope) { return None; }
 
+    if def_id == scope {
+        let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+        let name = tcx.opt_item_name(def_id)?;
+        return Some(DefPath { segments: vec![DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None }], global: false });
+    }
+
     let full_def_id_path = def_id_path(tcx, def_id);
     let scope_def_id_path = def_id_path(tcx, scope);
     let relative_def_id_path = &full_def_id_path[scope_def_id_path.len()..];

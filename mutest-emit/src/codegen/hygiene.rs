@@ -87,6 +87,8 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
 
 impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_path: &res::DefPath) {
+        assert!(!def_path.segments.is_empty());
+
         let mut segments_with_generics = path.segments.iter()
             .filter_map(|segment| {
                 let args = segment.args.as_ref()?;
@@ -186,6 +188,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         *path = ast::Path { span: path.span, segments, tokens: None };
 
+        assert!(!path.segments.is_empty(), "path at {span:?} was sanitized into an empty path",
+            span = path.span,
+        );
         assert!(segments_with_generics.is_empty(), "path at {span:?} contained segments with generics which could not be matched against the new path segments",
             span = path.span,
         );
