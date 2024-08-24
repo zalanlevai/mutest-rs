@@ -48,6 +48,10 @@ macro m($x:ident) {
     fn ref_ref_s(s: &&S) -> usize { s.x }
     assert_eq!(ref_ref_s(&&s), 100);
 
+    // TEST: Field access through Box and reference auto-derefs.
+    fn ref_ref_box_ref_s(s: &&Box<&S>) -> usize { s.x }
+    assert_eq!(ref_ref_box_ref_s(&&Box::new(&s)), 100);
+
     impl S {
         fn self_s(&self) -> usize { self.x }
     }
