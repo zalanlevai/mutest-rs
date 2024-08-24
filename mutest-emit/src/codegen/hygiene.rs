@@ -664,7 +664,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 let Some(res) = self.def_res.node_res(struct_expr.path.segments.last().unwrap().id) else { break 'arm; };
 
                 let variant_def = match res {
-                    hir::Res::SelfTyAlias { alias_to: alias_def_id, .. } => {
+                    | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
+                    | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id) => {
                         let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
@@ -751,7 +752,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 let Some(res) = self.def_res.node_res(path.segments.last().unwrap().id) else { break 'arm; };
 
                 let variant_def = match res {
-                    hir::Res::SelfTyAlias { alias_to: alias_def_id, .. } => {
+                    | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
+                    | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id) => {
                         let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
