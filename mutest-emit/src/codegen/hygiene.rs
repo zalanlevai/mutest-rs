@@ -175,6 +175,38 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                     // Copy modified args.
                     segment.args = Some(args);
+                } else {
+                    // If there are no corresponding args in the original path, we may still have to
+                    // add dummy generics with type inference holes for the required generics of the def
+                    // to generate a valid path.
+                    let has_generics = matches!(self.tcx.def_kind(def_id),
+                        | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::TyAlias
+                        | hir::DefKind::Trait | hir::DefKind::TraitAlias
+                        | hir::DefKind::Fn | hir::DefKind::Const
+                        | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
+                    );
+                    if has_generics {
+                        let generics = self.tcx.generics_of(def_id);
+
+                        let mut args = ThinVec::with_capacity(generics.own_params.len());
+                        if generics.own_params.len() >= 1 {
+                            for generic_param in &generics.own_params[(generics.has_self as usize)..] {
+                                match &generic_param.kind {
+                                    ty::GenericParamDefKind::Lifetime => {}
+                                    ty::GenericParamDefKind::Type { has_default, synthetic } => {
+                                        if *has_default || *synthetic { continue; }
+                                        let ty = ast::mk::ty(DUMMY_SP, ast::TyKind::Infer);
+                                        args.push(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty)));
+                                    }
+                                    ty::GenericParamDefKind::Const { .. } => {}
+                                }
+                            }
+                        }
+
+                        if args.len() >= 1 {
+                            segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args })));
+                        }
+                    }
                 }
 
                 Some(segment)
