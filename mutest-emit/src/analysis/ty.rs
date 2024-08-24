@@ -113,6 +113,12 @@ pub mod print {
                 if let Some(visible_def_path) = visible_def_paths.into_iter().next() {
                     return Some(printer.print_res_def_path(visible_def_path)).transpose();
                 }
+                if let Some(scope) = scope {
+                    let visible_def_path = res::locally_visible_def_path(printer.tcx(), def_id, scope);
+                    if let Ok(visible_def_path) = visible_def_path {
+                        return Some(printer.print_res_def_path(visible_def_path)).transpose();
+                    }
+                }
 
                 let visible_parent_map = printer.tcx().visible_parent_map(());
                 let mut cur_def_key = printer.tcx().def_key(def_id);
