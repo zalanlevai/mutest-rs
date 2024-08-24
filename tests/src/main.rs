@@ -299,6 +299,8 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         #[cfg(windows)]
         cmd.args(["-L", windows_lib.as_str()]);
 
+        cmd.args(["-L", AUX_OUT_DIR]);
+
         if opts.verbosity >= 1 {
             eprintln!("running {cmd:?}");
         }
