@@ -113,6 +113,26 @@ pub mod visit {
         fn visit_ty(&mut self, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
             walk_ty(self, ty_ast, ty_hir);
         }
+
+        fn visit_path(&mut self, qself_ast: Option<&'ast ast::QSelf>, path_ast: &'ast ast::Path, qpath_hir: &'hir hir::QPath<'hir>) {
+            walk_path(self, qself_ast, path_ast, qpath_hir);
+        }
+
+        fn visit_path_segment(&mut self, path_segment_ast: &'ast ast::PathSegment, path_segment_hir: &'hir hir::PathSegment<'hir>) {
+            walk_path_segment(self, path_segment_ast, path_segment_hir);
+        }
+
+        fn visit_generic_args(&mut self, generic_args_ast: &'ast ast::GenericArgs, generic_args_hir: &'hir hir::GenericArgs<'hir>) {
+            walk_generic_args(self, generic_args_ast, generic_args_hir);
+        }
+
+        fn visit_generic_arg(&mut self, generic_arg_ast: &'ast ast::GenericArg, generic_arg_hir: &'hir hir::GenericArg<'hir>) {
+            walk_generic_arg(self, generic_arg_ast, generic_arg_hir);
+        }
+
+        fn visit_assoc_item_constraint(&mut self, constraint_ast: &'ast ast::AssocConstraint, constraint_hir: &'hir hir::TypeBinding<'hir>) {
+            walk_assoc_item_constraint(self, constraint_ast, constraint_hir);
+        }
     }
 
     pub fn walk_fn<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, kind_ast: ast::visit::FnKind<'ast>, _span_ast: Span, _id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, sig_hir: hir::FnSig<'hir>, body_hir: Option<hir::BodyId>, _span_hir: Span, _id_hir: hir::HirId) {
@@ -516,8 +536,8 @@ pub mod visit {
                     }
                 }
             }
-            (ast::ExprKind::Path(_, _), hir::ExprKind::Path(_)) => {
-                // TODO
+            (ast::ExprKind::Path(qself_ast, path_ast), hir::ExprKind::Path(qpath_hir)) => {
+                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
             }
             (ast::ExprKind::AddrOf(_, _, expr_ast), hir::ExprKind::AddrOf(_, _, expr_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
@@ -541,10 +561,9 @@ pub mod visit {
             (ast::ExprKind::InlineAsm(_), hir::ExprKind::InlineAsm(_)) => {
                 // TODO
             }
-            (ast::ExprKind::Struct(struct_ast), hir::ExprKind::Struct(_, fields_hir, base_hir)) => {
-                // TODO
+            (ast::ExprKind::Struct(struct_ast), hir::ExprKind::Struct(qpath_hir, fields_hir, base_hir)) => {
+                walk_path(visitor, struct_ast.qself.as_deref(), &struct_ast.path, qpath_hir);
                 for (field_ast, field_hir) in iter::zip(&struct_ast.fields, *fields_hir) {
-                    // TODO
                     visit_matching_expr(visitor, &field_ast.expr, field_hir.expr);
                 }
                 if let ast::StructRest::Base(base_ast) = &struct_ast.rest && let Some(base_hir) = base_hir {
@@ -650,8 +669,8 @@ pub mod visit {
             (ast::PatKind::Ident(_, _ident_ast, None), hir::PatKind::Path(_qpath_hir)) => {
                 // TODO: Visit path
             }
-            (ast::PatKind::Path(qself_ast, path_ast), hir::PatKind::Path(_qpath_hir)) => {
-                // TODO
+            (ast::PatKind::Path(qself_ast, path_ast), hir::PatKind::Path(qpath_hir)) => {
+                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
             }
             (ast::PatKind::Tuple(pats_ast), hir::PatKind::Tuple(pats_hir, _)) => {
                 let pats_ast = pats_ast.iter().filter(|pat_ast| !pat_ast.is_rest());
@@ -659,14 +678,14 @@ pub mod visit {
                     visit_matching_pat(visitor, pat_ast, pat_hir);
                 }
             }
-            (ast::PatKind::Struct(_qself_ast, _path_ast, pat_fields_ast, _), hir::PatKind::Struct(_qpath_hir, pat_fields_hir, _)) => {
-                // TODO: Visit path
+            (ast::PatKind::Struct(qself_ast, path_ast, pat_fields_ast, _), hir::PatKind::Struct(qpath_hir, pat_fields_hir, _)) => {
+                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
                 for (pat_field_ast, pat_field_hir) in iter::zip(pat_fields_ast, *pat_fields_hir) {
                     visit_matching_pat(visitor, &pat_field_ast.pat, pat_field_hir.pat);
                 }
             }
-            (ast::PatKind::TupleStruct(_qself_ast, _path_ast, pats_ast), hir::PatKind::TupleStruct(_qpath_hir, pats_hir, _)) => {
-                // TODO: Visit path
+            (ast::PatKind::TupleStruct(qself_ast, path_ast, pats_ast), hir::PatKind::TupleStruct(qpath_hir, pats_hir, _)) => {
+                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
                 let pats_ast = pats_ast.iter().filter(|pat_ast| !pat_ast.is_rest());
                 for (pat_ast, pat_hir) in iter::zip(pats_ast, *pats_hir) {
                     visit_matching_pat(visitor, pat_ast, pat_hir);
@@ -740,8 +759,8 @@ pub mod visit {
             (ast::TyKind::Err(_), _) | (_, hir::TyKind::Err(_)) => {}
 
             (ast::TyKind::Never, hir::TyKind::Never) => {}
-            (ast::TyKind::Path(_qself_ast, _path_ast), hir::TyKind::Path(_qpath_hir)) => {
-                // TODO
+            (ast::TyKind::Path(qself_ast, path_ast), hir::TyKind::Path(qpath_hir)) => {
+                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
             }
             (ast::TyKind::Ptr(mut_ty_ast), hir::TyKind::Ptr(mut_ty_hir)) => {
                 visit_matching_ty(visitor, &mut_ty_ast.ty, mut_ty_hir.ty);
@@ -818,6 +837,94 @@ pub mod visit {
                 diagnostic.span_note(ty_hir.span, format!("HIR node: {}", hir_kind.descr()));
                 diagnostic.emit();
             }
+        }
+    }
+
+    pub fn walk_path<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, qself_ast: Option<&'ast ast::QSelf>, path_ast: &'ast ast::Path, qpath_hir: &'hir hir::QPath<'hir>) {
+        match qpath_hir {
+            hir::QPath::Resolved(_ty_hir, path_hir) => {
+                // TODO: Visit qself
+                for (path_segment_ast, path_segment_hir) in iter::zip(&path_ast.segments, path_hir.segments) {
+                    walk_path_segment(visitor, path_segment_ast, path_segment_hir);
+                }
+            }
+            hir::QPath::TypeRelative(_ty_hir, path_segment_hir) => {
+                // TODO: Visit qself
+                let Some(last_path_segment_ast) = path_ast.segments.last() else { unreachable!() };
+                walk_path_segment(visitor, last_path_segment_ast, path_segment_hir);
+            }
+            hir::QPath::LangItem(_, _) => {}
+        }
+    }
+
+    pub fn walk_path_segment<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, path_segment_ast: &'ast ast::PathSegment, path_segment_hir: &'hir hir::PathSegment<'hir>) {
+        if let Some(generic_args_ast) = &path_segment_ast.args && let Some(generic_args_hir) = path_segment_hir.args {
+            walk_generic_args(visitor, generic_args_ast, generic_args_hir);
+        }
+    }
+
+    pub fn walk_generic_args<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, generic_args_ast: &'ast ast::GenericArgs, generic_args_hir: &'hir hir::GenericArgs<'hir>) {
+        match (generic_args_ast, generic_args_hir.parenthesized) {
+            (ast::GenericArgs::AngleBracketed(generic_args_ast), hir::GenericArgsParentheses::No) => {
+                let mut args_hir = generic_args_hir.args.iter();
+                let mut constraints_hir = generic_args_hir.bindings.iter();
+                for generic_arg_ast in &generic_args_ast.args {
+                    match generic_arg_ast {
+                        ast::AngleBracketedArg::Arg(arg_ast) => {
+                            let Some(arg_hir) = args_hir.next() else { unreachable!() };
+                            walk_generic_arg(visitor, arg_ast, arg_hir);
+                        }
+                        ast::AngleBracketedArg::Constraint(constraint_ast) => {
+                            let Some(constraint_hir) = constraints_hir.next() else { unreachable!() };
+                            walk_assoc_item_constraint(visitor, constraint_ast, constraint_hir);
+                        }
+                    }
+                }
+            }
+            (ast::GenericArgs::Parenthesized(generic_args_ast), hir::GenericArgsParentheses::ParenSugar) => {
+                let mut args_hir = generic_args_hir.args.iter();
+                for input_ty_ast in &generic_args_ast.inputs {
+                    let Some(arg_hir) = args_hir.next() else { unreachable!() };
+                    let hir::GenericArg::Type(ty_hir) = arg_hir else { unreachable!() };
+                    visit_matching_ty(visitor, input_ty_ast, ty_hir);
+                }
+                if let ast::FnRetTy::Ty(ret_ty_ast) = &generic_args_ast.output {
+                    let Some(arg_hir) = args_hir.next() else { unreachable!() };
+                    let hir::GenericArg::Type(ty_hir) = arg_hir else { unreachable!() };
+                    visit_matching_ty(visitor, ret_ty_ast, ty_hir);
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn walk_generic_arg<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, generic_arg_ast: &'ast ast::GenericArg, generic_arg_hir: &'hir hir::GenericArg<'hir>) {
+        match (generic_arg_ast, generic_arg_hir) {
+            (ast::GenericArg::Lifetime(_lifetime_ast), hir::GenericArg::Lifetime(_lifetime_hir)) => {
+                // TODO
+            }
+            (ast::GenericArg::Type(ty_ast), hir::GenericArg::Type(ty_hir)) => {
+                visit_matching_ty(visitor, ty_ast, ty_hir);
+            }
+            (ast::GenericArg::Const(_anon_const_ast), hir::GenericArg::Const(_const_arg_hir)) => {
+                // TODO
+            }
+            _ => {
+                let mut diagnostic = visitor.tcx().dcx().struct_warn("unrecognized AST-HIR node pair");
+                diagnostic.span_note(generic_arg_ast.span(), format!("AST node: {}", match generic_arg_ast {
+                    ast::GenericArg::Lifetime(_) => "lifetime",
+                    ast::GenericArg::Type(_) => "type",
+                    ast::GenericArg::Const(_) => "constant",
+                }));
+                diagnostic.span_note(generic_arg_hir.span(), format!("HIR node: {}", generic_arg_hir.descr()));
+                diagnostic.emit();
+            }
+        }
+    }
+
+    pub fn walk_assoc_item_constraint<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, constraint_ast: &'ast ast::AssocConstraint, constraint_hir: &'hir hir::TypeBinding<'hir>) {
+        if let Some(generic_args_ast) = &constraint_ast.gen_args {
+            walk_generic_args(visitor, generic_args_ast, constraint_hir.gen_args);
         }
     }
 }
@@ -936,6 +1043,32 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
         self.hir_id_to_node_id.insert_same(ty_hir.hir_id, ty_ast.id);
 
         visit::walk_ty(self, ty_ast, ty_hir);
+    }
+
+    fn visit_path(&mut self, qself_ast: Option<&'ast ast::QSelf>, path_ast: &'ast ast::Path, qpath_hir: &'hir hir::QPath<'hir>) {
+        visit::walk_path(self, qself_ast, path_ast, qpath_hir);
+    }
+
+    fn visit_path_segment(&mut self, path_segment_ast: &'ast ast::PathSegment, path_segment_hir: &'hir hir::PathSegment<'hir>) {
+        self.node_id_to_hir_id.insert_same(path_segment_ast.id, path_segment_hir.hir_id);
+        self.hir_id_to_node_id.insert_same(path_segment_hir.hir_id, path_segment_ast.id);
+
+        visit::walk_path_segment(self, path_segment_ast, path_segment_hir);
+    }
+
+    fn visit_generic_args(&mut self, generic_args_ast: &'ast ast::GenericArgs, generic_args_hir: &'hir hir::GenericArgs<'hir>) {
+        visit::walk_generic_args(self, generic_args_ast, generic_args_hir);
+    }
+
+    fn visit_generic_arg(&mut self, generic_arg_ast: &'ast ast::GenericArg, generic_arg_hir: &'hir hir::GenericArg<'hir>) {
+        visit::walk_generic_arg(self, generic_arg_ast, generic_arg_hir);
+    }
+
+    fn visit_assoc_item_constraint(&mut self, constraint_ast: &'ast ast::AssocConstraint, constraint_hir: &'hir hir::TypeBinding<'hir>) {
+        self.node_id_to_hir_id.insert_same(constraint_ast.id, constraint_hir.hir_id);
+        self.hir_id_to_node_id.insert_same(constraint_hir.hir_id, constraint_ast.id);
+
+        visit::walk_assoc_item_constraint(self, constraint_ast, constraint_hir);
     }
 }
 
