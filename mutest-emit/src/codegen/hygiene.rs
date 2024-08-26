@@ -575,11 +575,11 @@ macro def_flat_map_item_fns(
                 ast::$item_kind::Fn(_) => {
                     let Some(fn_ast) = $into_ast_fn_item(&$item) else { unreachable!() };
                     let Some(fn_hir) = hir::FnItem::from_node($self.tcx, $self.tcx.hir_node_by_def_id($def_id)) else { unreachable!() };
-                    $self.current_body_res = Some(ast_lowering::resolve_fn_body($self.tcx, &fn_ast, &fn_hir));
+                    $self.current_body_res = Some(ast_lowering::resolve_fn_body($self.tcx, $self.def_res, &fn_ast, &fn_hir));
                 }
                 ast::$item_kind::Const(const_ast) => {
                     let Some(const_hir) = hir::ConstItem::from_node($self.tcx, $self.tcx.hir_node_by_def_id($def_id)) else { unreachable!() };
-                    $self.current_body_res = Some(ast_lowering::resolve_const_body($self.tcx, &const_ast, &const_hir));
+                    $self.current_body_res = Some(ast_lowering::resolve_const_body($self.tcx, $self.def_res, &const_ast, &const_hir));
                 }
                 _ => {}
             }
@@ -636,7 +636,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 match &item.kind {
                     ast::ItemKind::Static(static_ast) => {
                         let Some(static_hir) = hir::StaticItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_static_body(self.tcx, &static_ast, &static_hir));
+                        self.current_body_res = Some(ast_lowering::resolve_static_body(self.tcx, self.def_res, &static_ast, &static_hir));
                     }
                     _ => {}
                 }

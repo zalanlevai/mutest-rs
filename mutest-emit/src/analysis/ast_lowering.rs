@@ -49,6 +49,8 @@ pub mod visit {
 
         fn tcx(&mut self) -> TyCtxt<'hir>;
 
+        fn def_res(&mut self) -> &super::DefResolutions;
+
         fn nested_visit_map(&mut self) -> Self::Map {
             panic!(
                 "nested_visit_map must be implemented or consider using \
@@ -431,6 +433,49 @@ pub mod visit {
             (ast::ExprKind::Assign(left_ast, right_ast, _), hir::ExprKind::Assign(left_hir, right_hir, _)) => {
                 visit_matching_expr(visitor, left_ast, left_hir);
                 visit_matching_expr(visitor, right_ast, right_hir);
+            }
+            (ast::ExprKind::Assign(left_ast, right_ast, _), hir::ExprKind::Block(block_hir, None)) => {
+                // This is a simplified version of `rustc_ast_lowering::LoweringContext::destructure_assign_mut`
+                // to get the left-hand side subexpressions that get assignments in HIR.
+                fn assigned_subexprs<'ast>(def_res: &super::DefResolutions, expr: &'ast ast::Expr, out: &mut Vec<&'ast ast::Expr>) {
+                    match &expr.kind {
+                        ast::ExprKind::Underscore => {}
+                        ast::ExprKind::Paren(expr) => assigned_subexprs(def_res, expr, out),
+                        ast::ExprKind::Tup(exprs) | ast::ExprKind::Array(exprs) => {
+                            for expr in exprs {
+                                if let ast::ExprKind::Range(None, None, ast::RangeLimits::HalfOpen) = expr.kind { continue; }
+                                assigned_subexprs(def_res, expr, out);
+                            }
+                        }
+                        ast::ExprKind::Path(_, _) if let Some(res) = def_res.node_res(expr.id) && res.expected_in_unit_struct_pat() => {}
+                        ast::ExprKind::Call(_, args) => {
+                            for expr in args {
+                                if let ast::ExprKind::Range(None, None, ast::RangeLimits::HalfOpen) = expr.kind { continue; }
+                                assigned_subexprs(def_res, expr, out);
+                            }
+                        }
+                        ast::ExprKind::Struct(struct_expr) => {
+                            for field in &struct_expr.fields {
+                                assigned_subexprs(def_res, &field.expr, out);
+                            }
+                        }
+                        _ => { out.push(expr); }
+                    }
+                }
+
+                let mut assigned_subexprs_ast = vec![];
+                assigned_subexprs(visitor.def_res(), left_ast, &mut assigned_subexprs_ast);
+
+                if let [destructure_let_hir, assignments_hir @ ..] = block_hir.stmts {
+                    for (assigned_subexpr_ast, assignment_hir) in iter::zip(assigned_subexprs_ast, assignments_hir) {
+                        let hir::StmtKind::Expr(assignment_hir) = assignment_hir.kind else { unreachable!() };
+                        let hir::ExprKind::Assign(assigned_subexpr_hir, _, _) = assignment_hir.kind else { unreachable!() };
+                        visit_matching_expr(visitor, assigned_subexpr_ast, assigned_subexpr_hir);
+                    }
+                    let hir::StmtKind::Let(destructure_let_hir) = destructure_let_hir.kind else { unreachable!() };
+                    let hir::LetStmt { init: Some(right_hir), source: hir::LocalSource::AssignDesugar(_), .. } = destructure_let_hir else { unreachable!() };
+                    visit_matching_expr(visitor, right_ast, right_hir);
+                }
             }
             (ast::ExprKind::AssignOp(_, left_ast, right_ast), hir::ExprKind::AssignOp(_, left_hir, right_hir)) => {
                 visit_matching_expr(visitor, left_ast, left_hir);
@@ -817,17 +862,22 @@ impl<'tcx> BodyResolutions<'tcx> {
     }
 }
 
-struct BodyResolutionsCollector<'tcx> {
+struct BodyResolutionsCollector<'tcx, 'op> {
     tcx: TyCtxt<'tcx>,
+    def_res: &'op DefResolutions,
     node_id_to_hir_id: FxHashMap<ast::NodeId, hir::HirId>,
     hir_id_to_node_id: FxHashMap<hir::HirId, ast::NodeId>,
 }
 
-impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'hir> {
+impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'hir, 'op> {
     type NestedFilter = rustc_middle::hir::nested_filter::OnlyBodies;
 
     fn tcx(&mut self) -> TyCtxt<'hir> {
         self.tcx
+    }
+
+    fn def_res(&mut self) -> &DefResolutions {
+        self.def_res
     }
 
     fn nested_visit_map(&mut self) -> Self::Map {
@@ -889,9 +939,10 @@ impl<'ast, 'hir> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'
     }
 }
 
-pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
+pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
     let mut collector = BodyResolutionsCollector {
         tcx,
+        def_res,
         node_id_to_hir_id: Default::default(),
         hir_id_to_node_id: Default::default(),
     };
@@ -913,9 +964,10 @@ pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, fn_ast: &ast::FnItem, fn_hir: &h
     }
 }
 
-pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, const_ast: &ast::ConstItem, const_hir: &hir::ConstItem<'tcx>) -> BodyResolutions<'tcx> {
+pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, const_ast: &ast::ConstItem, const_hir: &hir::ConstItem<'tcx>) -> BodyResolutions<'tcx> {
     let mut collector = BodyResolutionsCollector {
         tcx,
+        def_res,
         node_id_to_hir_id: Default::default(),
         hir_id_to_node_id: Default::default(),
     };
@@ -929,9 +981,10 @@ pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, const_ast: &ast::ConstItem, c
     }
 }
 
-pub fn resolve_static_body<'tcx>(tcx: TyCtxt<'tcx>, static_ast: &ast::StaticItem, static_hir: &hir::StaticItem<'tcx>) -> BodyResolutions<'tcx> {
+pub fn resolve_static_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, static_ast: &ast::StaticItem, static_hir: &hir::StaticItem<'tcx>) -> BodyResolutions<'tcx> {
     let mut collector = BodyResolutionsCollector {
         tcx,
+        def_res,
         node_id_to_hir_id: Default::default(),
         hir_id_to_node_id: Default::default(),
     };
