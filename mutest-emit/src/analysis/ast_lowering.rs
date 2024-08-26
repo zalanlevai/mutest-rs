@@ -602,7 +602,7 @@ pub mod visit {
             //       To use this, `rustc_session::config::UnstableOptions::flatten_format_args`
             //       must be set to `false` in `config.opts.unstable_opts.flatten_format_args`.
             (ast::ExprKind::FormatArgs(format_args_ast), hir::ExprKind::Call(_, args_hir)) => {
-                if let [_, format_args_expr_hir] = args_hir {
+                if let [_, format_args_expr_hir, ..] = args_hir {
                     let hir::ExprKind::AddrOf(_, _, format_args_expr_hir) = format_args_expr_hir.kind else { unreachable!() };
 
                     match format_args_expr_hir.kind {

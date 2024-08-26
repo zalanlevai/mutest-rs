@@ -25,6 +25,8 @@ macro m() {
         format_args!("{a}, {b:?}, {c}", a = msg, b = &&s, c = n);
         format_args!("{n}, {}, {s:?}", msg);
         format_args!("{a:?}, {n}, {}, {c:?}", msg, a = s, c = s);
+
+        format_args!("{n:08x?} {n:+0.2}");
     }
 }
 
