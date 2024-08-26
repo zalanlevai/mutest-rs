@@ -236,6 +236,11 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     // Compile the crate in test-mode to access tests defined behind `#[cfg(test)]`.
     compiler_config.opts.test = true;
 
+    // NOTE: We must turn off `format_args` optimizations to be able to match up
+    //       argument nodes between the AST and the HIR.
+    //       See `mutest_emit::analysis::ast_lowering` for more details.
+    compiler_config.opts.unstable_opts.flatten_format_args = false;
+
     let opts = &mut config.opts;
     let source_name = compiler_config.input.source_name();
 

@@ -532,8 +532,33 @@ pub mod visit {
             (ast::ExprKind::IncludedBytes(_), _) => {
                 // TODO
             }
-            (ast::ExprKind::FormatArgs(_), _) => {
-                // TODO
+            // NOTE: By default, rustc performs flattening on `format_args` during lowering to the HIR,
+            //       which prevents us from matching up the corresponding `format_args` arguments
+            //       between the AST and the HIR.
+            //       To use this, `rustc_session::config::UnstableOptions::flatten_format_args`
+            //       must be set to `false` in `config.opts.unstable_opts.flatten_format_args`.
+            (ast::ExprKind::FormatArgs(format_args_ast), hir::ExprKind::Call(_, args_hir)) => {
+                if let [_, format_args_expr_hir] = args_hir {
+                    let hir::ExprKind::AddrOf(_, _, format_args_expr_hir) = format_args_expr_hir.kind else { unreachable!() };
+
+                    match format_args_expr_hir.kind {
+                        hir::ExprKind::Match(format_args_match_expr_hir, _, hir::MatchSource::FormatArgs) => {
+                            let hir::ExprKind::Tup(format_arg_exprs_hir) = format_args_match_expr_hir.kind else { unreachable!() };
+                            for (format_arg_ast, format_arg_expr_hir) in iter::zip(format_args_ast.arguments.all_args(), format_arg_exprs_hir) {
+                                let hir::ExprKind::AddrOf(_, _, format_arg_expr_hir) = format_arg_expr_hir.kind else { unreachable!() };
+                                visit_matching_expr(visitor, &format_arg_ast.expr, format_arg_expr_hir);
+                            }
+                        }
+                        hir::ExprKind::Array(format_arg_format_exprs_hir) => {
+                            for (format_arg_ast, format_arg_format_expr_hir) in iter::zip(format_args_ast.arguments.all_args(), format_arg_format_exprs_hir) {
+                                let hir::ExprKind::Call(_, [format_arg_expr_hir]) = format_arg_format_expr_hir.kind else { unreachable!() };
+                                let hir::ExprKind::AddrOf(_, _, format_arg_expr_hir) = format_arg_expr_hir.kind else { unreachable!() };
+                                visit_matching_expr(visitor, &format_arg_ast.expr, format_arg_expr_hir);
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
             }
 
             (ast_kind, hir_kind) => {
