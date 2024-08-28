@@ -435,6 +435,63 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         };
 
                         self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
+
+                        let param_data = match container_res {
+                            hir::Res::SelfTyAlias { alias_to: impl_def_id, .. } => {
+                                let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
+                                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id);
+                                Some((generic_predicates, 0))
+                            }
+                            hir::Res::SelfTyParam { trait_: trait_def_id } => {
+                                let generic_predicates = self.tcx.predicates_of(trait_def_id);
+                                Some((generic_predicates, 0))
+                            }
+                            hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
+                                let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
+                                let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
+                                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id));
+                                Some((generic_predicates, param_index))
+                            }
+                            _ => None,
+                        };
+
+                        if let Some((generic_predicates, param_index)) = param_data {
+                            let predicates = generic_predicates.predicates.iter()
+                                .filter_map(|&(clause, _)| clause.as_trait_clause().map(|p| p.skip_binder()))
+                                .filter(|trait_predicate| {
+                                    let ty::TyKind::Param(param_ty) = trait_predicate.self_ty().kind() else { return false; };
+                                    param_ty.index == param_index
+                                })
+                                .collect::<Vec<_>>();
+
+                            let Some(trait_predicate) = predicates.iter().find(|trait_predicate| trait_predicate.def_id() == self.tcx.parent(def_id)) else { unreachable!() };
+
+                            let args_ast = trait_predicate.trait_ref.args[1..].iter()
+                                .filter_map(|generic_arg| {
+                                    match generic_arg.unpack() {
+                                        ty::GenericArgKind::Lifetime(region) => {
+                                            let span = match ty::region_opt_param_def_id(region, self.tcx) {
+                                                Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
+                                                None => DUMMY_SP,
+                                            };
+                                            let mut ident = Ident::new(region.get_name()?, span);
+                                            sanitize_ident_if_from_expansion(&mut ident);
+
+                                            let lifetime = ast::mk::lifetime(DUMMY_SP, ident);
+                                            Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
+                                        }
+                                        ty::GenericArgKind::Type(_) => None,
+                                        ty::GenericArgKind::Const(_) => None,
+                                    }
+                                })
+                                .collect::<ThinVec<_>>();
+
+                            let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
+                            if !args_ast.is_empty() {
+                                segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })));
+                            }
+                        }
+
                         *qself = Some(P(ast::QSelf {
                             ty: self_ty_ast,
                             path_span: DUMMY_SP,
