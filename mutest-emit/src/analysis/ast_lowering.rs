@@ -38,6 +38,7 @@ pub mod visit {
     use rustc_hir::intravisit::nested_filter::{self, NestedFilter};
     use rustc_middle::ty::TyCtxt;
     use rustc_span::Span;
+    use rustc_span::symbol::kw;
     use rustc_target::spec::abi::Abi;
 
     use crate::analysis::Descr;
@@ -537,7 +538,7 @@ pub mod visit {
                 }
             }
             (ast::ExprKind::Path(qself_ast, path_ast), hir::ExprKind::Path(qpath_hir)) => {
-                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
+                visitor.visit_path(qself_ast.as_deref(), path_ast, qpath_hir);
             }
             (ast::ExprKind::AddrOf(_, _, expr_ast), hir::ExprKind::AddrOf(_, _, expr_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
@@ -562,7 +563,7 @@ pub mod visit {
                 // TODO
             }
             (ast::ExprKind::Struct(struct_ast), hir::ExprKind::Struct(qpath_hir, fields_hir, base_hir)) => {
-                walk_path(visitor, struct_ast.qself.as_deref(), &struct_ast.path, qpath_hir);
+                visitor.visit_path(struct_ast.qself.as_deref(), &struct_ast.path, qpath_hir);
                 for (field_ast, field_hir) in iter::zip(&struct_ast.fields, *fields_hir) {
                     visit_matching_expr(visitor, &field_ast.expr, field_hir.expr);
                 }
@@ -670,7 +671,7 @@ pub mod visit {
                 // TODO: Visit path
             }
             (ast::PatKind::Path(qself_ast, path_ast), hir::PatKind::Path(qpath_hir)) => {
-                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
+                visitor.visit_path(qself_ast.as_deref(), path_ast, qpath_hir);
             }
             (ast::PatKind::Tuple(pats_ast), hir::PatKind::Tuple(pats_hir, _)) => {
                 let pats_ast = pats_ast.iter().filter(|pat_ast| !pat_ast.is_rest());
@@ -679,13 +680,13 @@ pub mod visit {
                 }
             }
             (ast::PatKind::Struct(qself_ast, path_ast, pat_fields_ast, _), hir::PatKind::Struct(qpath_hir, pat_fields_hir, _)) => {
-                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
+                visitor.visit_path(qself_ast.as_deref(), path_ast, qpath_hir);
                 for (pat_field_ast, pat_field_hir) in iter::zip(pat_fields_ast, *pat_fields_hir) {
                     visit_matching_pat(visitor, &pat_field_ast.pat, pat_field_hir.pat);
                 }
             }
             (ast::PatKind::TupleStruct(qself_ast, path_ast, pats_ast), hir::PatKind::TupleStruct(qpath_hir, pats_hir, _)) => {
-                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
+                visitor.visit_path(qself_ast.as_deref(), path_ast, qpath_hir);
                 let pats_ast = pats_ast.iter().filter(|pat_ast| !pat_ast.is_rest());
                 for (pat_ast, pat_hir) in iter::zip(pats_ast, *pats_hir) {
                     visit_matching_pat(visitor, pat_ast, pat_hir);
@@ -760,7 +761,7 @@ pub mod visit {
 
             (ast::TyKind::Never, hir::TyKind::Never) => {}
             (ast::TyKind::Path(qself_ast, path_ast), hir::TyKind::Path(qpath_hir)) => {
-                walk_path(visitor, qself_ast.as_deref(), path_ast, qpath_hir);
+                visitor.visit_path(qself_ast.as_deref(), path_ast, qpath_hir);
             }
             (ast::TyKind::Ptr(mut_ty_ast), hir::TyKind::Ptr(mut_ty_hir)) => {
                 visit_matching_ty(visitor, &mut_ty_ast.ty, mut_ty_hir.ty);
@@ -841,42 +842,68 @@ pub mod visit {
     }
 
     pub fn walk_path<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, qself_ast: Option<&'ast ast::QSelf>, path_ast: &'ast ast::Path, qpath_hir: &'hir hir::QPath<'hir>) {
-        match qpath_hir {
-            hir::QPath::Resolved(_ty_hir, path_hir) => {
-                // TODO: Visit qself
-                for (path_segment_ast, path_segment_hir) in iter::zip(&path_ast.segments, path_hir.segments) {
-                    walk_path_segment(visitor, path_segment_ast, path_segment_hir);
+        fn walk_path_impl<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, qself_ast: Option<&'ast ast::QSelf>, path_segments_ast: &'ast [ast::PathSegment], qpath_hir: &'hir hir::QPath<'hir>) {
+            match qpath_hir {
+                hir::QPath::Resolved(ty_hir, path_hir) => {
+                    match (qself_ast, ty_hir) {
+                        (Some(qself_ast), Some(ty_hir)) => visit_matching_ty(visitor, &qself_ast.ty, ty_hir),
+                        (Some(qself_ast), None) if qself_ast.position == 0 => {}
+                        (None, None) => {}
+                        _ => unreachable!(),
+                    }
+
+                    let (offset_ast, offset_hir) = match (path_segments_ast.first().is_some_and(|segment| segment.ident.name == kw::PathRoot), path_hir.is_global()) {
+                        (true, true) => (0, 0),
+                        (true, false) => (1, 0),
+                        (false, true) => (0, 1),
+                        (false, false) => (0, 0),
+                    };
+
+                    for (path_segment_ast, path_segment_hir) in iter::zip(&path_segments_ast[offset_ast..], &path_hir.segments[offset_hir..]) {
+                        visitor.visit_path_segment(path_segment_ast, path_segment_hir);
+                    }
                 }
+                hir::QPath::TypeRelative(ty_hir, path_segment_hir) => {
+                    if let hir::TyKind::Path(qself_qpath_hir) = &ty_hir.kind {
+                        walk_path_impl(visitor, qself_ast, &path_segments_ast[0..(path_segments_ast.len() - 1)], qself_qpath_hir);
+                    } else {
+                        let Some(qself_ast) = qself_ast else { unreachable!() };
+                        visit_matching_ty(visitor, &qself_ast.ty, ty_hir);
+                    }
+
+                    let Some(last_path_segment_ast) = path_segments_ast.last() else { unreachable!() };
+                    visitor.visit_path_segment(last_path_segment_ast, path_segment_hir);
+                }
+                hir::QPath::LangItem(_, _) => unreachable!(),
             }
-            hir::QPath::TypeRelative(_ty_hir, path_segment_hir) => {
-                // TODO: Visit qself
-                let Some(last_path_segment_ast) = path_ast.segments.last() else { unreachable!() };
-                walk_path_segment(visitor, last_path_segment_ast, path_segment_hir);
-            }
-            hir::QPath::LangItem(_, _) => {}
         }
+
+        walk_path_impl(visitor, qself_ast, &path_ast.segments, qpath_hir);
     }
 
     pub fn walk_path_segment<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, path_segment_ast: &'ast ast::PathSegment, path_segment_hir: &'hir hir::PathSegment<'hir>) {
         if let Some(generic_args_ast) = &path_segment_ast.args && let Some(generic_args_hir) = path_segment_hir.args {
-            walk_generic_args(visitor, generic_args_ast, generic_args_hir);
+            visitor.visit_generic_args(generic_args_ast, generic_args_hir);
         }
     }
 
     pub fn walk_generic_args<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, generic_args_ast: &'ast ast::GenericArgs, generic_args_hir: &'hir hir::GenericArgs<'hir>) {
         match (generic_args_ast, generic_args_hir.parenthesized) {
             (ast::GenericArgs::AngleBracketed(generic_args_ast), hir::GenericArgsParentheses::No) => {
-                let mut args_hir = generic_args_hir.args.iter();
+                let mut args_hir = generic_args_hir.args.iter().filter(|arg_hir| {
+                    let hir::GenericArg::Lifetime(lifetime_hir) = arg_hir else { return true; };
+                    !lifetime_hir.ident.name.is_empty()
+                });
                 let mut constraints_hir = generic_args_hir.bindings.iter();
                 for generic_arg_ast in &generic_args_ast.args {
                     match generic_arg_ast {
                         ast::AngleBracketedArg::Arg(arg_ast) => {
                             let Some(arg_hir) = args_hir.next() else { unreachable!() };
-                            walk_generic_arg(visitor, arg_ast, arg_hir);
+                            visitor.visit_generic_arg(arg_ast, arg_hir);
                         }
                         ast::AngleBracketedArg::Constraint(constraint_ast) => {
                             let Some(constraint_hir) = constraints_hir.next() else { unreachable!() };
-                            walk_assoc_item_constraint(visitor, constraint_ast, constraint_hir);
+                            visitor.visit_assoc_item_constraint(constraint_ast, constraint_hir);
                         }
                     }
                 }
@@ -924,7 +951,7 @@ pub mod visit {
 
     pub fn walk_assoc_item_constraint<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, constraint_ast: &'ast ast::AssocConstraint, constraint_hir: &'hir hir::TypeBinding<'hir>) {
         if let Some(generic_args_ast) = &constraint_ast.gen_args {
-            walk_generic_args(visitor, generic_args_ast, constraint_hir.gen_args);
+            visitor.visit_generic_args(generic_args_ast, constraint_hir.gen_args);
         }
     }
 }
@@ -976,6 +1003,15 @@ struct BodyResolutionsCollector<'tcx, 'op> {
     hir_id_to_node_id: FxHashMap<hir::HirId, ast::NodeId>,
 }
 
+impl<'tcx, 'op> BodyResolutionsCollector<'tcx, 'op> {
+    fn insert_ids(&mut self, node_id: ast::NodeId, hir_id: hir::HirId) {
+        if node_id == ast::DUMMY_NODE_ID || hir_id == hir::HirId::INVALID { return; }
+
+        self.node_id_to_hir_id.insert_same(node_id, hir_id);
+        self.hir_id_to_node_id.insert_same(hir_id, node_id);
+    }
+}
+
 impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollector<'hir, 'op> {
     type NestedFilter = rustc_middle::hir::nested_filter::OnlyBodies;
 
@@ -996,9 +1032,7 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
     }
 
     fn visit_param(&mut self, param_ast: &'ast ast::Param, param_hir: &'hir hir::Param<'hir>, param_hir_ty: &'hir hir::Ty<'hir>) {
-        self.node_id_to_hir_id.insert_same(param_ast.id, param_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(param_hir.hir_id, param_ast.id);
-
+        self.insert_ids(param_ast.id, param_hir.hir_id);
         visit::walk_param(self, param_ast, param_hir, param_hir_ty);
     }
 
@@ -1011,37 +1045,27 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
     }
 
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
-        self.node_id_to_hir_id.insert_same(block_ast.id, block_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(block_hir.hir_id, block_ast.id);
-
+        self.insert_ids(block_ast.id, block_hir.hir_id);
         visit::walk_block(self, block_ast, block_hir);
     }
 
     fn visit_stmt(&mut self, stmt_ast: &'ast ast::Stmt, stmt_hir: &'hir hir::Stmt<'hir>) {
-        self.node_id_to_hir_id.insert_same(stmt_ast.id, stmt_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(stmt_hir.hir_id, stmt_ast.id);
-
+        self.insert_ids(stmt_ast.id, stmt_hir.hir_id);
         visit::walk_stmt(self, stmt_ast, stmt_hir);
     }
 
     fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
-        self.node_id_to_hir_id.insert_same(expr_ast.id, expr_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(expr_hir.hir_id, expr_ast.id);
-
+        self.insert_ids(expr_ast.id, expr_hir.hir_id);
         visit::walk_expr(self, expr_ast, expr_hir);
     }
 
     fn visit_pat(&mut self, pat_ast: &'ast ast::Pat, pat_hir: &'hir hir::Pat<'hir>) {
-        self.node_id_to_hir_id.insert_same(pat_ast.id, pat_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(pat_hir.hir_id, pat_ast.id);
-
+        self.insert_ids(pat_ast.id, pat_hir.hir_id);
         visit::walk_pat(self, pat_ast, pat_hir);
     }
 
     fn visit_ty(&mut self, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
-        self.node_id_to_hir_id.insert_same(ty_ast.id, ty_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(ty_hir.hir_id, ty_ast.id);
-
+        self.insert_ids(ty_ast.id, ty_hir.hir_id);
         visit::walk_ty(self, ty_ast, ty_hir);
     }
 
@@ -1050,9 +1074,7 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
     }
 
     fn visit_path_segment(&mut self, path_segment_ast: &'ast ast::PathSegment, path_segment_hir: &'hir hir::PathSegment<'hir>) {
-        self.node_id_to_hir_id.insert_same(path_segment_ast.id, path_segment_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(path_segment_hir.hir_id, path_segment_ast.id);
-
+        self.insert_ids(path_segment_ast.id, path_segment_hir.hir_id);
         visit::walk_path_segment(self, path_segment_ast, path_segment_hir);
     }
 
@@ -1065,9 +1087,7 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
     }
 
     fn visit_assoc_item_constraint(&mut self, constraint_ast: &'ast ast::AssocConstraint, constraint_hir: &'hir hir::TypeBinding<'hir>) {
-        self.node_id_to_hir_id.insert_same(constraint_ast.id, constraint_hir.hir_id);
-        self.hir_id_to_node_id.insert_same(constraint_hir.hir_id, constraint_ast.id);
-
+        self.insert_ids(constraint_ast.id, constraint_hir.hir_id);
         visit::walk_assoc_item_constraint(self, constraint_ast, constraint_hir);
     }
 }
