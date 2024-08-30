@@ -1,6 +1,7 @@
 //@ build
-//@ mutation-operators: call_value_default_shadow
 //@ stderr: empty
+//@ mutation-operators: call_value_default_shadow
+//@ mutest-flags: --Zsanitize-macro-expns
 // TODO: //@ run (without mutest test harness)
 
 #![feature(decl_macro)]

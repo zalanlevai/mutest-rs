@@ -316,6 +316,12 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     if opts.verbosity >= 1 { println!(); }
                 }
 
+                mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
+
+                if opts.sanitize_macro_expns {
+                    mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &def_res, &mut generated_crate_ast);
+                }
+
                 let t_mutation_analysis_start = Instant::now();
                 let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
                 if opts.verbosity >= 1 {
@@ -471,14 +477,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutest_emit::codegen::entry_point::clean_entry_points(sess, &mut generated_crate_ast);
                 mutest_emit::codegen::entry_point::generate_dummy_main(tcx, &mut generated_crate_ast);
 
-                mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
                 if !opts.sanitize_macro_expns {
+                    mutest_emit::codegen::expansion::load_modules(sess, &mut crate_ast);
                     mutest_emit::codegen::expansion::revert_non_local_macro_expansions(&mut generated_crate_ast, &crate_ast);
-                }
-                mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
-
-                if opts.sanitize_macro_expns {
-                    mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &def_res, &mut generated_crate_ast);
                 }
 
                 mutest_emit::codegen::substitution::resolve_syntax_ambiguities(tcx, &mut generated_crate_ast);
