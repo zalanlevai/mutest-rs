@@ -41,6 +41,12 @@ macro m() {
             <Self as B>::A::f();
         }
     }
+
+    fn h() {
+        struct GenericS<'a, T>(std::marker::PhantomData<&'a T>);
+        impl<'a, T> B for GenericS<'a, T> { type A = S; }
+        let _: <GenericS<'static, S> as B>::A = S;
+    }
 }
 
 m!();

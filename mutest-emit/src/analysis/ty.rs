@@ -322,8 +322,7 @@ pub mod print {
             let mut path = 'path: {
                 if let DefPathHandling::PreferVisible(scoped_item_paths) | DefPathHandling::ForceVisible(scoped_item_paths) = self.def_path_handling {
                     if let Some(path) = self.try_print_visible_def_path(def_id, self.scope, scoped_item_paths)? {
-                        if args.is_empty() { break 'path Ok(path); }
-                        break 'path self.path_generic_args(path, args, iter::empty());
+                        break 'path Ok(path);
                     }
 
                     if let DefPathHandling::ForceVisible(_) = self.def_path_handling {
@@ -336,10 +335,15 @@ pub mod print {
             }?;
 
             if self.sanitize_macro_expns {
+                // HACK: This is inefficient, as it resolves the path again, which already happens in `try_print_visible_def_path`.
+                // TODO: Remove most code in `try_print_visible_def_path` and just use the logic in the `hygiene` module once sanitization becomes the default.
                 hygiene::sanitize_path(self.tcx, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
             }
 
-            Ok(path)
+            if args.is_empty() { return Ok(path); }
+            let args = self.tcx().generics_of(def_id).own_args(args);
+            if args.is_empty() { return Ok(path); }
+            self.path_generic_args(path, args, iter::empty())
         }
 
         fn print_region(&mut self, region: ty::Region<'_>) -> Result<Self::Region, Self::Error> {
