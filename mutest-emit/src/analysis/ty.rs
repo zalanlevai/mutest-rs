@@ -354,16 +354,28 @@ pub mod print {
 
                 ty::RegionKind::ReEarlyParam(region) => {
                     if region.name == kw::Empty { return Ok(None); }
-                    Ok(Some(ast::mk::lifetime(sp, Ident::new(region.name, sp))))
+
+                    let mut ident = Ident::new(region.name, sp);
+                    if self.sanitize_macro_expns {
+                        let def_ident_span = self.tcx.def_ident_span(region.def_id).unwrap_or(DUMMY_SP);
+                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+                    }
+                    Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
 
                 | ty::RegionKind::ReBound(_, ty::BoundRegion { kind: region, .. })
                 | ty::RegionKind::ReLateParam(ty::LateParamRegion { bound_region: region, .. })
                 | ty::RegionKind::RePlaceholder(ty::Placeholder { bound: ty::BoundRegion { kind: region, .. }, .. })
                 => {
-                    let ty::BoundRegionKind::BrNamed(_, region_name) = region else { return Ok(None); };
+                    let ty::BoundRegionKind::BrNamed(def_id, region_name) = region else { return Ok(None); };
                     if region_name == kw::Empty || region_name == kw::UnderscoreLifetime { return Ok(None); }
-                    Ok(Some(ast::mk::lifetime(sp, Ident::new(region_name, sp))))
+
+                    let mut ident = Ident::new(region_name, sp);
+                    if self.sanitize_macro_expns {
+                        let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+                    }
+                    Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
 
                 ty::RegionKind::ReVar(_) | ty::RegionKind::ReErased => Ok(None),
