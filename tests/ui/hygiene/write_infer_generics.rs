@@ -9,6 +9,7 @@ macro m() {
     let _: Vec<usize> = <[_]>::into_vec(Box::new([]));
 
     let _ = String::from("str");
+    let _ = u8::from(false);
 }
 
 #[test]

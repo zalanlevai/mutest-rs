@@ -7,7 +7,6 @@ use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_hash::FxHashSet;
 use rustc_hir_analysis::collect::ItemCtxt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
-use rustc_middle::ty::TyCtxt;
 use rustc_span::edition::Edition;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
@@ -15,7 +14,7 @@ use thin_vec::ThinVec;
 use crate::analysis::ast_lowering;
 use crate::analysis::hir::{self, LOCAL_CRATE};
 use crate::analysis::res;
-use crate::analysis::ty;
+use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast::{self, AstDeref, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
@@ -369,6 +368,63 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         self.adjust_path_from_expansion(path, res);
     }
 
+    fn transform_path_root_into_sanitized_self_ty(&mut self, partial_path: &[ast::PathSegment], res: hir::Res<ast::NodeId>) -> P<ast::Ty> {
+        match res {
+            | hir::Res::SelfTyAlias { .. }
+            | hir::Res::SelfTyParam { .. }
+            => ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
+
+            hir::Res::Def(_, _) => {
+                let mut path = ast::Path { span: DUMMY_SP, segments: ThinVec::from(partial_path), tokens: None };
+                self.adjust_path_from_expansion(&mut path, res);
+                ast::mk::ty(DUMMY_SP, ast::TyKind::Path(None, path))
+            }
+
+            hir::Res::PrimTy(prim_ty) => {
+                self.sanitize_self_ty(match prim_ty {
+                    hir::PrimTy::Bool => self.tcx.types.bool,
+                    hir::PrimTy::Char => self.tcx.types.char,
+                    hir::PrimTy::Int(int_ty) => Ty::new_int(self.tcx, ty::int_ty(int_ty)),
+                    hir::PrimTy::Uint(uint_ty) => Ty::new_uint(self.tcx, ty::uint_ty(uint_ty)),
+                    hir::PrimTy::Float(float_ty) => Ty::new_float(self.tcx, ty::float_ty(float_ty)),
+                    hir::PrimTy::Str => self.tcx.types.str_,
+                })
+            }
+
+            | hir::Res::Local(_)
+            | hir::Res::SelfCtor(..)
+            | hir::Res::ToolMod
+            | hir::Res::NonMacroAttr(..)
+            | hir::Res::Err
+            => unreachable!(),
+        }
+    }
+
+    fn sanitize_self_ty(&mut self, ty: Ty<'tcx>) -> P<ast::Ty> {
+        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
+        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
+        let Some(mut ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
+
+        match ty.kind() {
+            // `<Type as Trait>::AssocType`
+            // HACK: Attach qualified self to malformed path out of `ty::ast_repr`.
+            // TODO: Allow `ty::print::AstTyPrinter` to output qualified paths, and implement this behaviour directly.
+            ty::Alias(ty::Projection, alias_ty) => {
+                let ast::TyKind::Path(qpath, path) = &mut ty_ast.kind else { unreachable!() };
+
+                let Some(self_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, alias_ty.self_ty(), def_path_handling, opaque_ty_handling, true) else { unreachable!() };
+                *qpath = Some(P(ast::QSelf {
+                    ty: self_ty_ast,
+                    path_span: DUMMY_SP,
+                    position: path.segments.len() - 1,
+                }));
+            }
+            _ => {}
+        }
+
+        ty_ast
+    }
+
     fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) {
         // Short-circuit if not in a macro expansion.
         if !is_macro_expn_span(path.span) {
@@ -425,19 +481,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let Some([parent_path_segment, _]) = path.segments.last_chunk::<2>() else { unreachable!() };
                         let Some(container_res) = self.def_res.node_res(parent_path_segment.id) else { unreachable!() };
 
-                        let self_ty_ast = match container_res {
-                            | hir::Res::SelfTyAlias { .. }
-                            | hir::Res::SelfTyParam { .. }
-                            => ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
-
-                            hir::Res::Def(_, _) => {
-                                let mut path = ast::mk::path(DUMMY_SP, false, vec![parent_path_segment.ident]);
-                                self.adjust_path_from_expansion(&mut path, container_res);
-                                ast::mk::ty(DUMMY_SP, ast::TyKind::Path(None, path))
-                            }
-
-                            _ => unreachable!(),
-                        };
+                        let self_ty_ast = self.transform_path_root_into_sanitized_self_ty(&path.segments[..(path.segments.len() - 1)], container_res);
 
                         self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
 
@@ -534,24 +578,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
                 match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
                     hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
-                        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                        let Some(mut qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
-
-                        match qself_ty.kind() {
-                            ty::Alias(ty::Projection, alias_ty) => {
-                                let ast::TyKind::Path(qpath, path) = &mut qself_ty_ast.kind else { unreachable!() };
-
-                                let Some(qself_self_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, alias_ty.self_ty(), def_path_handling, opaque_ty_handling, true) else { unreachable!() };
-                                *qpath = Some(P(ast::QSelf {
-                                    ty: qself_self_ty_ast,
-                                    path_span: DUMMY_SP,
-                                    position: path.segments.len() - 1,
-                                }));
-                            }
-                            _ => {}
-                        }
-
+                        let qself_ty_ast = self.sanitize_self_ty(qself_ty);
                         self.sanitize_path(path, qres.expect_non_local());
                         *qself = Some(P(ast::QSelf {
                             ty: qself_ty_ast,
@@ -569,10 +596,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
                         && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
                     => {
-                        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
-                        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                        let Some(qself_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, qself_ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
-
+                        let qself_ty_ast = self.sanitize_self_ty(qself_ty);
                         self.sanitize_path(path, qres.expect_non_local());
                         // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
                         *qself = Some(P(ast::QSelf {
