@@ -542,22 +542,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             ty::Alias(ty::Projection, alias_ty) => {
                                 let ast::TyKind::Path(qpath, path) = &mut qself_ty_ast.kind else { unreachable!() };
 
-                                let Some(qself_self_ty_ast) = (match alias_ty.self_ty().kind() {
-                                    // HACK: Print top-level type parameter manually to retain hygiene.
-                                    // TODO: Implement hygienic type parameter printing.
-                                    ty::TyKind::Param(param_ty) => {
-                                        let Some(scope) = self.current_scope else { unreachable!() };
-                                        let span = param_ty.span_from_generics(self.tcx, scope);
-                                        let param_def_id = self.tcx.generics_of(scope).type_param(*param_ty, self.tcx).def_id;
-
-                                        let mut path = ast::mk::path(DUMMY_SP, false, vec![Ident::new(param_ty.name, span)]);
-                                        self.adjust_path_from_expansion(&mut path, hir::Res::Def(hir::DefKind::TyParam, param_def_id));
-                                        Some(ast::mk::ty(DUMMY_SP, ast::TyKind::Path(None, path)))
-                                    }
-
-                                    _ => ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, alias_ty.self_ty(), def_path_handling, opaque_ty_handling, true),
-                                }) else { unreachable!() };
-
+                                let Some(qself_self_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, alias_ty.self_ty(), def_path_handling, opaque_ty_handling, true) else { unreachable!() };
                                 *qpath = Some(P(ast::QSelf {
                                     ty: qself_self_ty_ast,
                                     path_span: DUMMY_SP,

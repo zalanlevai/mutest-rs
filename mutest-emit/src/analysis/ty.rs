@@ -633,7 +633,16 @@ pub mod print {
                     }
                 }
                 ty::TyKind::Param(param_ty) => {
-                    Ok(ast::mk::ty_ident(sp, None, Ident::new(param_ty.name, sp)))
+                    let mut ident = Ident::new(param_ty.name, sp);
+                    if self.sanitize_macro_expns {
+                        'sanitize: {
+                            let Some(scope) = self.scope else { break 'sanitize; };
+                            if ident.name == kw::SelfUpper { break 'sanitize; }
+                            let def_ident_span = param_ty.span_from_generics(self.tcx, scope);
+                            hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+                        }
+                    }
+                    Ok(ast::mk::ty_ident(sp, None, ident))
                 }
 
                 ty::TyKind::FnPtr(sig) => {
