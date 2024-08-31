@@ -400,6 +400,64 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         }
     }
 
+    /// Extract lifetime bounds from local trait bounds corresponding to the parameter,
+    /// which must be appended to the trait subpath if the parameter is in a qualified self position:
+    /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
+    fn extract_local_lifetime_trait_bounds(&mut self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>) -> Option<P<ast::GenericArgs>> {
+        let (generic_predicates, param_index) = match param_res {
+            hir::Res::SelfTyAlias { alias_to: impl_def_id, .. } => {
+                let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
+                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id);
+                (generic_predicates, 0)
+            }
+            hir::Res::SelfTyParam { trait_: trait_def_id } => {
+                let generic_predicates = self.tcx.predicates_of(trait_def_id);
+                (generic_predicates, 0)
+            }
+            hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
+                let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
+                let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
+                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id));
+                (generic_predicates, param_index)
+            }
+            _ => { return None; }
+        };
+
+        let predicates = generic_predicates.predicates.iter()
+            .filter_map(|&(clause, _)| clause.as_trait_clause().map(|p| p.skip_binder()))
+            .filter(|trait_predicate| {
+                let ty::TyKind::Param(param_ty) = trait_predicate.self_ty().kind() else { return false; };
+                param_ty.index == param_index
+            })
+            .collect::<Vec<_>>();
+
+        let Some(trait_predicate) = predicates.iter().find(|trait_predicate| trait_predicate.def_id() == trait_def_id) else { unreachable!() };
+
+        let args_ast = trait_predicate.trait_ref.args[1..].iter()
+            .filter_map(|generic_arg| {
+                match generic_arg.unpack() {
+                    ty::GenericArgKind::Lifetime(region) => {
+                        let span = match ty::region_opt_param_def_id(region, self.tcx) {
+                            Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
+                            None => DUMMY_SP,
+                        };
+                        let mut ident = Ident::new(region.get_name()?, span);
+                        sanitize_ident_if_from_expansion(&mut ident);
+
+                        let lifetime = ast::mk::lifetime(DUMMY_SP, ident);
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
+                    }
+                    ty::GenericArgKind::Type(_) => None,
+                    ty::GenericArgKind::Const(_) => None,
+                }
+            })
+            .collect::<ThinVec<_>>();
+
+        if args_ast.is_empty() { return None; }
+
+        Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
+    }
+
     fn sanitize_self_ty(&mut self, ty: Ty<'tcx>) -> P<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
@@ -484,61 +542,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let self_ty_ast = self.transform_path_root_into_sanitized_self_ty(&path.segments[..(path.segments.len() - 1)], container_res);
 
                         self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
-
-                        let param_data = match container_res {
-                            hir::Res::SelfTyAlias { alias_to: impl_def_id, .. } => {
-                                let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
-                                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id);
-                                Some((generic_predicates, 0))
-                            }
-                            hir::Res::SelfTyParam { trait_: trait_def_id } => {
-                                let generic_predicates = self.tcx.predicates_of(trait_def_id);
-                                Some((generic_predicates, 0))
-                            }
-                            hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
-                                let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
-                                let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
-                                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id));
-                                Some((generic_predicates, param_index))
-                            }
-                            _ => None,
-                        };
-
-                        if let Some((generic_predicates, param_index)) = param_data {
-                            let predicates = generic_predicates.predicates.iter()
-                                .filter_map(|&(clause, _)| clause.as_trait_clause().map(|p| p.skip_binder()))
-                                .filter(|trait_predicate| {
-                                    let ty::TyKind::Param(param_ty) = trait_predicate.self_ty().kind() else { return false; };
-                                    param_ty.index == param_index
-                                })
-                                .collect::<Vec<_>>();
-
-                            let Some(trait_predicate) = predicates.iter().find(|trait_predicate| trait_predicate.def_id() == self.tcx.parent(def_id)) else { unreachable!() };
-
-                            let args_ast = trait_predicate.trait_ref.args[1..].iter()
-                                .filter_map(|generic_arg| {
-                                    match generic_arg.unpack() {
-                                        ty::GenericArgKind::Lifetime(region) => {
-                                            let span = match ty::region_opt_param_def_id(region, self.tcx) {
-                                                Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
-                                                None => DUMMY_SP,
-                                            };
-                                            let mut ident = Ident::new(region.get_name()?, span);
-                                            sanitize_ident_if_from_expansion(&mut ident);
-
-                                            let lifetime = ast::mk::lifetime(DUMMY_SP, ident);
-                                            Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
-                                        }
-                                        ty::GenericArgKind::Type(_) => None,
-                                        ty::GenericArgKind::Const(_) => None,
-                                    }
-                                })
-                                .collect::<ThinVec<_>>();
-
+                        // Append lifetime bounds from local trait bounds corresponding to parameter types to the trait subpath.
+                        if let Some(generic_args_ast) = self.extract_local_lifetime_trait_bounds(self.tcx.parent(def_id), container_res) {
                             let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
-                            if !args_ast.is_empty() {
-                                segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })));
-                            }
+                            segment.args = Some(generic_args_ast);
                         }
 
                         *qself = Some(P(ast::QSelf {
@@ -579,7 +586,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
                     hir::DefKind::Trait | hir::DefKind::TraitAlias => {
                         let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+
                         self.sanitize_path(path, qres.expect_non_local());
+                        // NOTE: There is no need to append lifetime bounds from local trait bounds corresponding to parameter types,
+                        //       because the path is already qualified, so
+                        //       the necessary trait arguments should already be present in the corresponding path segment.
+
                         *qself = Some(P(ast::QSelf {
                             ty: qself_ty_ast,
                             path_span: DUMMY_SP,
