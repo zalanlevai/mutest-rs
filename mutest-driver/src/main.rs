@@ -214,8 +214,12 @@ pub fn main() {
                 .collect::<Vec<_>>()
         };
 
-        let call_graph_depth = *mutest_arg_matches.get_one::<usize>("call-graph-depth").unwrap();
+        let mut call_graph_depth = *mutest_arg_matches.get_one::<usize>("call-graph-depth").unwrap();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
+
+        if call_graph_depth < mutation_depth {
+            call_graph_depth = mutation_depth;
+        }
 
         let mutation_batching_algorithm = {
             use mutest_driver_cli::mutant_batch_algorithm::*;
