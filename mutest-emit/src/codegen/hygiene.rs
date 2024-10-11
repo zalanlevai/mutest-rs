@@ -564,15 +564,46 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     // Non-qualified path reference to assoc item in trait impl.
                     hir::DefKind::Trait | hir::DefKind::TraitAlias => {
                         let Some([parent_path_segment, _]) = path.segments.last_chunk::<2>() else { unreachable!() };
-                        let Some(container_res) = self.def_res.node_res(parent_path_segment.id) else { unreachable!() };
+                        let container_res = self.def_res.node_res(parent_path_segment.id);
 
-                        let self_ty_ast = self.transform_path_root_into_sanitized_self_ty(&path.segments[..(path.segments.len() - 1)], container_res);
+                        let self_ty_ast = match container_res {
+                            // `<$ty::$assoc_ty as $trait>::$assoc` path.
+                            Some(container_res) => {
+                                let self_ty_ast = self.transform_path_root_into_sanitized_self_ty(&path.segments[..(path.segments.len() - 1)], container_res);
+                                self_ty_ast
+                            }
+
+                            // `$ty::$assoc_ty::$assoc`path.
+                            None => {
+                                let Some(node_hir) = body_res.hir_node(node_id) else { unreachable!() };
+                                let Some(typeck) = &self.current_typeck_ctx else { unreachable!() };
+
+                                let qpath = match self.tcx.hir_node(node_hir_id) {
+                                    hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
+                                    hir::Node::Pat(pat_hir) if let hir::PatKind::Path(qpath) = pat_hir.kind => qpath,
+                                    hir::Node::Ty(ty_hir) if let hir::TyKind::Path(qpath) = ty_hir.kind => qpath,
+                                    _ => unreachable!(),
+                                };
+
+                                let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
+                                let qself_ty = self.current_typeck_ctx.as_ref().and_then(|typeck| typeck.node_type_opt(qself_hir_ty.hir_id)).unwrap_or_else(|| {
+                                    let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
+                                    icx.lower_ty(qself_hir_ty)
+                                });
+
+                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+
+                                qself_ty_ast
+                            }
+                        };
 
                         self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
-                        // Append lifetime bounds from local trait bounds corresponding to parameter types to the trait subpath.
-                        if let Some(generic_args_ast) = self.extract_local_lifetime_trait_bounds(self.tcx.parent(def_id), container_res) {
-                            let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
-                            segment.args = Some(generic_args_ast);
+                        if let Some(container_res) = container_res {
+                            // Append lifetime bounds from local trait bounds corresponding to parameter types to the trait subpath.
+                            if let Some(generic_args_ast) = self.extract_local_lifetime_trait_bounds(self.tcx.parent(def_id), container_res) {
+                                let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
+                                segment.args = Some(generic_args_ast);
+                            }
                         }
 
                         *qself = Some(P(ast::QSelf {
