@@ -1004,6 +1004,23 @@ struct BodyResolutionsCollector<'tcx, 'op> {
 }
 
 impl<'tcx, 'op> BodyResolutionsCollector<'tcx, 'op> {
+    fn new(tcx: TyCtxt<'tcx>, def_res: &'op DefResolutions) -> Self {
+        Self {
+            tcx,
+            def_res,
+            node_id_to_hir_id: Default::default(),
+            hir_id_to_node_id: Default::default(),
+        }
+    }
+
+    fn finalize(self) -> BodyResolutions<'tcx> {
+        BodyResolutions {
+            tcx: self.tcx,
+            node_id_to_hir_id: self.node_id_to_hir_id,
+            hir_id_to_node_id: self.hir_id_to_node_id,
+        }
+    }
+
     fn insert_ids(&mut self, node_id: ast::NodeId, hir_id: hir::HirId) {
         if node_id == ast::DUMMY_NODE_ID || hir_id == hir::HirId::INVALID { return; }
 
@@ -1093,12 +1110,7 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
 }
 
 pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector {
-        tcx,
-        def_res,
-        node_id_to_hir_id: Default::default(),
-        hir_id_to_node_id: Default::default(),
-    };
+    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
 
     let kind_ast = ast::visit::FnKind::Fn(fn_ast.ctx, fn_ast.ident, &fn_ast.sig, &fn_ast.vis, &fn_ast.generics, fn_ast.body.as_ref());
     let span_ast = fn_ast.span;
@@ -1110,45 +1122,19 @@ pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, fn_ast
     let id_hir = tcx.local_def_id_to_hir_id(fn_hir.owner_id.def_id);
     visit::AstHirVisitor::visit_fn(&mut collector, kind_ast, span_ast, id_ast, kind_hir, sig_hir, body_hir, span_hir, id_hir);
 
-    BodyResolutions {
-        tcx,
-        node_id_to_hir_id: collector.node_id_to_hir_id,
-        hir_id_to_node_id: collector.hir_id_to_node_id,
-    }
+    collector.finalize()
 }
 
 pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, const_ast: &ast::ConstItem, const_hir: &hir::ConstItem<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector {
-        tcx,
-        def_res,
-        node_id_to_hir_id: Default::default(),
-        hir_id_to_node_id: Default::default(),
-    };
-
+    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
     visit::AstHirVisitor::visit_const(&mut collector, const_ast, const_hir);
-
-    BodyResolutions {
-        tcx,
-        node_id_to_hir_id: collector.node_id_to_hir_id,
-        hir_id_to_node_id: collector.hir_id_to_node_id,
-    }
+    collector.finalize()
 }
 
 pub fn resolve_static_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, static_ast: &ast::StaticItem, static_hir: &hir::StaticItem<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector {
-        tcx,
-        def_res,
-        node_id_to_hir_id: Default::default(),
-        hir_id_to_node_id: Default::default(),
-    };
-
+    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
     visit::AstHirVisitor::visit_static(&mut collector, static_ast, static_hir);
-
-    BodyResolutions {
-        tcx,
-        node_id_to_hir_id: collector.node_id_to_hir_id,
-        hir_id_to_node_id: collector.hir_id_to_node_id,
-    }
+    collector.finalize()
 }
 
 struct AstBodyChildItemCollector<'ast> {
