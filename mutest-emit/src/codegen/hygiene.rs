@@ -18,7 +18,7 @@ use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast::{self, AstDeref, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
-use crate::codegen::symbols::hygiene::ExpnData;
+use crate::codegen::symbols::hygiene::{ExpnData, Transparency};
 
 fn is_macro_expn(expn: &ExpnData) -> bool {
     match expn.kind {
@@ -35,9 +35,28 @@ fn is_macro_expn_span(span: Span) -> bool {
     is_macro_expn(&span.ctxt().outer_expn_data())
 }
 
-fn sanitize_ident_if_from_expansion(ident: &mut Ident) {
-    let expn = ident.span.ctxt().outer_expn_data();
+enum IdentResKind {
+    Local,
+    Label,
+    Def,
+}
+
+fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResKind) {
+    let syntax_ctxt = ident.span.ctxt();
+
+    let expn = syntax_ctxt.outer_expn_data();
     if !is_macro_expn(&expn) { return; }
+
+    // Some identifiers produced by semi-transparent expansions (e.g. macro_rules macros)
+    // may be resolved at call-site, rather than at definition-site, meaning that
+    // they are not actually hygienic.
+    if let Some((_, Transparency::SemiTransparent)) = syntax_ctxt.marks().last() {
+        // Local variables and labels get resolved at definition-site (i.e. hygienic),
+        // everything else at definition-site (i.e. not hygienic).
+        // NOTE: `$crate` also gets resolved at definition-site but is handled
+        //       before our sanitization step.
+        let (IdentResKind::Local | IdentResKind::Label) = ident_res_kind else { return; };
+    }
 
     let (is_label, bare_ident) = match ident.as_str().strip_prefix("'") {
         Some(bare_ident) => (true, bare_ident),
@@ -46,7 +65,7 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident) {
 
     assert!(!bare_ident.starts_with("__rustc_expn_"), "encountered ident starting with `__rustc_expn_` at {:?}: the macro might have been sanitized twice", ident.span);
 
-    let expn_id = ident.span.ctxt().outer_expn();
+    let expn_id = syntax_ctxt.outer_expn();
 
     ident.name = Symbol::intern(&format!("{prefix}__rustc_expn_{expn_crate_id}_{expn_local_id}_{bare_ident}",
         prefix = is_label.then(|| "'").unwrap_or(""),
@@ -64,7 +83,15 @@ fn copy_def_span_ctxt(ident: &mut Ident, def_ident_span: Span) {
 
 pub fn sanitize_ident_if_def_from_expansion(ident: &mut Ident, def_ident_span: Span) {
     copy_def_span_ctxt(ident, def_ident_span);
-    sanitize_ident_if_from_expansion(ident);
+    sanitize_ident_if_from_expansion(ident, IdentResKind::Def);
+}
+
+fn sanitize_standalone_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResKind) {
+    if ident.name == kw::SelfLower { return; }
+    if ident.name == kw::StaticLifetime { return; }
+    if ident.name == kw::Underscore || ident.name == kw::UnderscoreLifetime { return; }
+
+    sanitize_ident_if_from_expansion(ident, ident_res_kind);
 }
 
 fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attribute) -> bool {
@@ -132,7 +159,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     }
                     Some(_) => def_path_segment.ident,
                 };
-                sanitize_ident_if_from_expansion(&mut ident);
+                sanitize_ident_if_from_expansion(&mut ident, IdentResKind::Def);
 
                 let mut segment = ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None };
 
@@ -167,7 +194,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             // Copy and sanitize assoc item definition ident.
                                             let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
                                             copy_def_span_ctxt(&mut assoc_constraint.ident, assoc_item_ident_span);
-                                            sanitize_ident_if_from_expansion(&mut assoc_constraint.ident);
+                                            sanitize_ident_if_from_expansion(&mut assoc_constraint.ident, IdentResKind::Def);
                                         }
                                     }
                                     ast::AngleBracketedArg::Arg(_) => {}
@@ -252,7 +279,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         match res {
             hir::Res::Local(_) => {
                 let Some(last_segment) = path.segments.last_mut() else { unreachable!() };
-                sanitize_ident_if_from_expansion(&mut last_segment.ident);
+                sanitize_ident_if_from_expansion(&mut last_segment.ident, IdentResKind::Local);
             }
 
             hir::Res::Def(def_kind, mut def_id) => {
@@ -318,7 +345,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::ConstParam
                     => {
                         let Some(last_segment) = path.segments.last_mut() else { unreachable!() };
-                        sanitize_ident_if_from_expansion(&mut last_segment.ident);
+                        sanitize_ident_if_from_expansion(&mut last_segment.ident, IdentResKind::Def);
                     }
 
                     hir::DefKind::Field => {
@@ -442,7 +469,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             None => DUMMY_SP,
                         };
                         let mut ident = Ident::new(region.get_name()?, span);
-                        sanitize_ident_if_from_expansion(&mut ident);
+                        sanitize_ident_if_from_expansion(&mut ident, IdentResKind::Def);
 
                         let lifetime = ast::mk::lifetime(DUMMY_SP, ident);
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
@@ -740,7 +767,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     if symbol.is_none() { *symbol = Some(name); }
 
                     // Sanitize local name of extern.
-                    sanitize_ident_if_from_expansion(&mut item.ident);
+                    sanitize_ident_if_from_expansion(&mut item.ident, IdentResKind::Def);
 
                     return smallvec![item];
                 }
@@ -884,12 +911,20 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_pat(&mut self, pat: &mut P<ast::Pat>) {
+        let mut protected_ident = None;
+
         // HACK: Even though NodeId is a Copy type, the copy itself
         //       counts as an immutable borrow, so we have to do it
         //       before `&mut pat.kind`.
         let pat_id = pat.id;
 
         match &mut pat.kind {
+            ast::PatKind::Ident(_, ident, _) => {
+                if let Some(hir::Res::Local(..)) = self.def_res.node_res(pat_id) {
+                    sanitize_standalone_ident_if_from_expansion(ident, IdentResKind::Local);
+                    protected_ident = Some(*ident);
+                }
+            }
             ast::PatKind::Path(qself, path) => {
                 return self.sanitize_qualified_path(qself, path, pat_id);
             }
@@ -925,7 +960,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             _ => {}
         }
 
+        if let Some(protected_ident) = protected_ident { self.protected_idents.insert(protected_ident); }
         ast::mut_visit::noop_visit_pat(pat, self);
+        if let Some(protected_ident) = protected_ident { self.protected_idents.remove(&protected_ident); }
     }
 
     fn visit_path(&mut self, path: &mut ast::Path) {
@@ -934,13 +971,13 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         self.sanitize_path(path, res);
     }
 
-    fn visit_ident(&mut self, ident: &mut Ident) {
-        if ident.name == kw::SelfLower { return; }
-        if ident.name == kw::StaticLifetime { return; }
-        if ident.name == kw::Underscore || ident.name == kw::UnderscoreLifetime { return; }
-        if self.protected_idents.contains(ident) { return; }
+    fn visit_label(&mut self, label: &mut ast::Label) {
+        sanitize_standalone_ident_if_from_expansion(&mut label.ident, IdentResKind::Label);
+    }
 
-        sanitize_ident_if_from_expansion(ident);
+    fn visit_ident(&mut self, ident: &mut Ident) {
+        if self.protected_idents.contains(ident) { return; }
+        sanitize_standalone_ident_if_from_expansion(ident, IdentResKind::Def);
     }
 
     fn visit_vis(&mut self, vis: &mut ast::Visibility) {
