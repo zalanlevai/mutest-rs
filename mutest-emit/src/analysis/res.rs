@@ -388,7 +388,14 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
         }
     }
 
-    Ok(relative_def_path(tcx, def_id, scope).unwrap())
+    let mut def_path = relative_def_path(tcx, def_id, scope).unwrap();
+
+    if let hir::DefKind::Impl { of_trait: _ } = tcx.def_kind(scope) {
+        let ident = Ident::new(kw::SelfUpper, DUMMY_SP);
+        def_path.segments.insert(0, DefPathSegment { def_id: scope, ident, reexport: None });
+    }
+
+    Ok(def_path)
 }
 
 pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {

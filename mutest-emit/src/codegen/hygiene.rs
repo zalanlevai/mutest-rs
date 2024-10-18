@@ -158,6 +158,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                 kw::Crate
                             }
+
+                            // Keep `Self` keyword segment in path from def path resolution.
+                            _ if def_path_segment.ident.name == kw::SelfUpper => kw::SelfUpper,
+
                             _ => self.tcx.opt_item_name(def_id)?,
                         };
                         // TODO: Use path.span with copy_def_span_ctxt.
