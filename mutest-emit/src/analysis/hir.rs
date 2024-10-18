@@ -102,6 +102,41 @@ impl<'tcx: 'hir, 'hir> StaticItem<'hir> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum TyAliasItem<'hir> {
+    Item(&'hir hir::Ty<'hir>, &'hir hir::Generics<'hir>),
+    TraitItem(hir::GenericBounds<'hir>, Option<&'hir hir::Ty<'hir>>),
+    ImplItem(&'hir hir::Ty<'hir>),
+}
+
+impl<'tcx: 'hir, 'hir> TyAliasItem<'hir> {
+    pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
+        match node {
+            hir::Node::Item(&hir::Item { ref kind, .. }) => {
+                let hir::ItemKind::TyAlias(ty, generics) = kind else { return None; };
+                Some(TyAliasItem::Item(ty, generics))
+            }
+            hir::Node::TraitItem(&hir::TraitItem { ref kind, .. }) => {
+                let hir::TraitItemKind::Type(generic_bounds, ty) = kind else { return None; };
+                Some(TyAliasItem::TraitItem(generic_bounds, *ty))
+            }
+            hir::Node::ImplItem(&hir::ImplItem { ref kind, .. }) => {
+                let hir::ImplItemKind::Type(ty) = kind else { return None; };
+                Some(TyAliasItem::ImplItem(ty))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn ty(&self) -> Option<&'hir hir::Ty<'hir>> {
+        match self {
+            Self::Item(ty, _) => Some(ty),
+            Self::TraitItem(_, ty) => *ty,
+            Self::ImplItem(ty) => Some(ty),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum DefItem<'hir> {
     Item(&'hir hir::Item<'hir>),

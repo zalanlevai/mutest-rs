@@ -395,6 +395,21 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         self.adjust_path_from_expansion(path, res);
     }
 
+    fn typeck_for(&self, owner_id: hir::OwnerId) -> Option<&'tcx ty::TypeckResults<'tcx>> {
+        self.current_typeck_ctx.filter(|typeck| typeck.hir_owner == owner_id)
+    }
+
+    fn lookup_hir_node_ty(&self, ty_hir: &hir::Ty<'tcx>) -> Ty<'tcx> {
+        if let Some(typeck) = self.typeck_for(ty_hir.hir_id.owner) {
+            if let Some(ty) = typeck.node_type_opt(ty_hir.hir_id) {
+                return ty;
+            }
+        }
+
+        let icx = ItemCtxt::new(self.tcx, ty_hir.hir_id.owner.def_id);
+        icx.lower_ty(ty_hir)
+    }
+
     fn transform_path_root_into_sanitized_self_ty(&mut self, partial_path: &[ast::PathSegment], res: hir::Res<ast::NodeId>) -> P<ast::Ty> {
         match res {
             | hir::Res::SelfTyAlias { .. }
@@ -533,7 +548,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
 
                 // NOTE: This returns the trait item definition, not the impl item definition.
-                let Some((def_kind, def_id)) = self.current_typeck_ctx.as_ref().and_then(|typeck| typeck.type_dependent_def(node_hir_id)).or_else(|| {
+                let Some((def_kind, def_id)) = self.typeck_for(node_hir_id.owner).and_then(|typeck| typeck.type_dependent_def(node_hir_id)).or_else(|| {
                     if let hir::Node::Ty(ty_hir) = self.tcx.hir_node(node_hir_id) {
                         let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
                         let ty = icx.lower_ty(ty_hir);
@@ -576,7 +591,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             // `$ty::$assoc_ty::$assoc`path.
                             None => {
                                 let Some(node_hir) = body_res.hir_node(node_id) else { unreachable!() };
-                                let Some(typeck) = &self.current_typeck_ctx else { unreachable!() };
 
                                 let qpath = match self.tcx.hir_node(node_hir_id) {
                                     hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
@@ -586,10 +600,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 };
 
                                 let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
-                                let qself_ty = self.current_typeck_ctx.as_ref().and_then(|typeck| typeck.node_type_opt(qself_hir_ty.hir_id)).unwrap_or_else(|| {
-                                    let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
-                                    icx.lower_ty(qself_hir_ty)
-                                });
+                                let qself_ty = self.lookup_hir_node_ty(qself_hir_ty);
 
                                 let qself_ty_ast = self.sanitize_self_ty(qself_ty);
 
@@ -635,10 +646,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 });
 
                 let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
-                let qself_ty = self.current_typeck_ctx.as_ref().and_then(|typeck| typeck.node_type_opt(qself_hir_ty.hir_id)).unwrap_or_else(|| {
-                    let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
-                    icx.lower_ty(qself_hir_ty)
-                });
+                let qself_ty = self.lookup_hir_node_ty(qself_hir_ty);
 
                 // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
                 match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
@@ -809,13 +817,63 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                         let Some(static_hir) = hir::StaticItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
                         self.current_body_res = Some(ast_lowering::resolve_static_body(self.tcx, self.def_res, &static_ast, &static_hir));
                     }
+                    ast::ItemKind::Enum(enum_def_ast, generics_ast) => {
+                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
+                        let hir::ItemKind::Enum(enum_def_hir, generics_hir) = &item_hir.kind else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_enum_body(self.tcx, self.def_res, enum_def_ast, generics_ast, enum_def_hir, generics_hir));
+                    }
+                    ast::ItemKind::Struct(variant_data_ast, generics_ast) | ast::ItemKind::Union(variant_data_ast, generics_ast) => {
+                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
+                        let (hir::ItemKind::Struct(variant_data_hir, generics_hir) | hir::ItemKind::Union(variant_data_hir, generics_hir)) = &item_hir.kind else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_struct_body(self.tcx, self.def_res, variant_data_ast, generics_ast, variant_data_hir, generics_hir));
+                    }
+                    ast::ItemKind::TyAlias(ty_alias_ast) => {
+                        let Some(ty_alias_hir) = hir::TyAliasItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_ty_alias_body(self.tcx, self.def_res, &ty_alias_ast, &ty_alias_hir));
+                    }
+                    ast::ItemKind::Trait(trait_ast) => {
+                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
+                        let hir::ItemKind::Trait(_, _, generics_hir, generic_bounds_hir, _) = &item_hir.kind else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_trait_body(self.tcx, self.def_res, trait_ast, generics_hir, generic_bounds_hir));
+                    }
+                    ast::ItemKind::TraitAlias(generics_ast, generic_bounds_ast) => {
+                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
+                        let hir::ItemKind::TraitAlias(generics_hir, generic_bounds_hir) = &item_hir.kind else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_trait_alias_body(self.tcx, self.def_res, generics_ast, generic_bounds_ast, generics_hir, generic_bounds_hir));
+                    }
+                    ast::ItemKind::Impl(impl_ast) => {
+                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
+                        let hir::ItemKind::Impl(impl_hir) = &item_hir.kind else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_impl_body(self.tcx, self.def_res, impl_ast, impl_hir));
+                    }
                     _ => {}
                 }
             }
         };
 
-        fn flat_map_trait_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {};
-        fn flat_map_impl_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {};
+        fn flat_map_trait_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {
+            scope {
+                match &item.kind {
+                    ast::AssocItemKind::Type(ty_alias_ast) => {
+                        let Some(ty_alias_hir) = hir::TyAliasItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_ty_alias_body(self.tcx, self.def_res, &ty_alias_ast, &ty_alias_hir));
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        fn flat_map_impl_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {
+            scope {
+                match &item.kind {
+                    ast::AssocItemKind::Type(ty_alias_ast) => {
+                        let Some(ty_alias_hir) = hir::TyAliasItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
+                        self.current_body_res = Some(ast_lowering::resolve_ty_alias_body(self.tcx, self.def_res, &ty_alias_ast, &ty_alias_hir));
+                    }
+                    _ => {}
+                }
+            }
+        };
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {
@@ -900,7 +958,6 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     break 'arm;
                 }
 
-                let Some(typeck) = &self.current_typeck_ctx else { break 'arm; };
                 let Some(body_res) = &self.current_body_res else { break 'arm; };
 
                 let Some(base_expr_hir) = body_res.hir_expr(&base_expr) else { break 'arm; };
@@ -908,6 +965,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 //       the expression for the `hir_expr` call because of
                 //       the `&mut expr.kind` partial borrow above.
                 let Some(expr_hir) = body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+
+                let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
 
                 let field_idx = typeck.field_index(expr_hir.hir_id);
 
@@ -919,13 +978,14 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 copy_def_span_ctxt(field_ident, field_def.ident(self.tcx).span);
             }
             ast::ExprKind::MethodCall(call) => 'arm: {
-                let Some(typeck) = &self.current_typeck_ctx else { break 'arm; };
                 let Some(body_res) = &self.current_body_res else { break 'arm; };
 
                 // HACK: The borrow checker does not allow for immutably referencing
                 //       the expression for the `hir_expr` call because of
                 //       the `&mut expr.kind` partial borrow above.
                 let Some(expr_hir) = body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+
+                let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
 
                 let Some(call_def_id) = typeck.type_dependent_def_id(expr_hir.hir_id) else { unreachable!() };
 
