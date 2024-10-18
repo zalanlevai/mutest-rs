@@ -42,6 +42,12 @@ enum IdentResKind {
 }
 
 fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResKind) {
+    // `crate`, `self`, `super` and `Super` are keywords that cannot be raw identifiers, see
+    // https://doc.rust-lang.org/reference/identifiers.html.
+    if ident.name == kw::Crate { return; }
+    if ident.name == kw::Super { return; }
+    if ident.name == kw::SelfLower || ident.name == kw::SelfUpper { return; }
+
     let syntax_ctxt = ident.span.ctxt();
 
     let expn = syntax_ctxt.outer_expn_data();
