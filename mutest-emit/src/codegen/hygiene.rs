@@ -660,7 +660,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     _ => unreachable!(),
                 };
 
-                let qres = self.current_typeck_ctx.as_ref().map(|typeck| typeck.qpath_res(&qpath, node_hir_id)).unwrap_or_else(|| {
+                let qres = self.typeck_for(node_hir_id.owner).map(|typeck| typeck.qpath_res(&qpath, node_hir_id)).unwrap_or_else(|| {
                     let hir::QPath::Resolved(_, path) = qpath else { unreachable!() };
                     path.res
                 });
