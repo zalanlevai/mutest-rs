@@ -459,24 +459,34 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         let (generic_predicates, param_index) = match param_res {
             hir::Res::SelfTyAlias { alias_to: impl_def_id, .. } => {
                 let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
-                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id);
+
+                // We instantiate the trait predicates with the impl's trait arguments
+                // for correct resolution of the local bounds later
+                // (e.g. if a lifetime is bound with a different name in the impl than in the trait).
+                // NOTE: To easily find the `Self` predicates later using the 0 parameter index,
+                //       we replace the concrete `Self` argument with the generic `Self` parameter type
+                //       that appears in the trait def.
+                let dummy_self_param_ty = ty::ParamTy::new(0, kw::SelfUpper).to_ty(self.tcx);
+                let args = self.tcx.mk_args_trait(dummy_self_param_ty, trait_ref.skip_binder().args.iter().skip(1));
+                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, args);
+
                 (generic_predicates, 0)
             }
             hir::Res::SelfTyParam { trait_: trait_def_id } => {
-                let generic_predicates = self.tcx.predicates_of(trait_def_id);
+                let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx);
                 (generic_predicates, 0)
             }
             hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
                 let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
                 let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
-                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id));
+                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id)).instantiate_identity(self.tcx);
                 (generic_predicates, param_index)
             }
             _ => { return None; }
         };
 
         let predicates = generic_predicates.predicates.iter()
-            .filter_map(|&(clause, _)| clause.as_trait_clause().map(|p| p.skip_binder()))
+            .filter_map(|&clause| clause.as_trait_clause().map(|p| p.skip_binder()))
             .filter(|trait_predicate| {
                 let ty::TyKind::Param(param_ty) = trait_predicate.self_ty().kind() else { return false; };
                 param_ty.index == param_index
