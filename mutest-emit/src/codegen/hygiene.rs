@@ -109,12 +109,12 @@ fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attri
 struct MacroExpansionSanitizer<'tcx, 'op> {
     tcx: TyCtxt<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
+    /// Body resolutions for interfacing with the HIR.
+    body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     syntax_extensions: Vec<SyntaxExtension>,
 
     /// Keep track of the current scope (e.g. items and bodies) for relative name resolution.
     current_scope: Option<hir::DefId>,
-    /// Keep track of the current body's resolutions for interfacing with the HIR.
-    current_body_res: Option<ast_lowering::BodyResolutions<'tcx>>,
     /// Keep track of the current type checking context for type-dependent name resolution.
     current_typeck_ctx: Option<&'tcx ty::TypeckResults<'tcx>>,
     /// We do not want to sanitize some idents (mostly temporarily) in the AST.
@@ -563,9 +563,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // Non-qualified path reference to assoc item in inherent or trait impl.
             (qself @ None, None) => {
-                let Some(body_res) = &self.current_body_res else { return; };
-
-                let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
+                let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return; };
 
                 // NOTE: This returns the trait item definition, not the impl item definition.
                 let Some((def_kind, def_id)) = self.typeck_for(node_hir_id.owner).and_then(|typeck| typeck.type_dependent_def(node_hir_id)).or_else(|| {
@@ -610,7 +608,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                             // `$ty::$assoc_ty::$assoc`path.
                             None => {
-                                let Some(node_hir) = body_res.hir_node(node_id) else { unreachable!() };
+                                let Some(node_hir) = self.body_res.hir_node(node_id) else { unreachable!() };
 
                                 let qpath = match self.tcx.hir_node(node_hir_id) {
                                     hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
@@ -650,9 +648,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // Qualified path reference to assoc item in inherent or trait impl.
             (qself @ Some(_), _) => {
-                let Some(body_res) = &self.current_body_res else { return; };
-
-                let Some(node_hir_id) = body_res.hir_id(node_id) else { return; };
+                let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return; };
                 let qpath = match self.tcx.hir_node(node_hir_id) {
                     hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
                     hir::Node::Pat(pat_hir) if let hir::PatKind::Path(qpath) = pat_hir.kind => qpath,
@@ -720,9 +716,9 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
     let mut sanitizer = MacroExpansionSanitizer {
         tcx,
         def_res,
+        body_res: &ast_lowering::BodyResolutions::empty(tcx),
         syntax_extensions: vec![],
         current_scope: scope,
-        current_body_res: None,
         current_typeck_ctx: None,
         protected_idents: Default::default(),
     };
@@ -767,12 +763,6 @@ macro def_flat_map_item_fns(
                 }
             }
 
-            // Store new body resolution scope, if available.
-            let previous_body_res = $self.current_body_res.take();
-            if let Some(body_res) = ast_lowering::resolve_body($self.tcx, $self.def_res, &$item, $self.tcx.hir_node_by_def_id(def_id)) {
-                $self.current_body_res = Some(body_res);
-            }
-
             // Match definition ident if this is an assoc item corresponding to a trait.
             if let Some(assoc_item) = $self.tcx.opt_associated_item(def_id.to_def_id()) {
                 match assoc_item.container {
@@ -794,7 +784,6 @@ macro def_flat_map_item_fns(
             let item = ast::mut_visit::noop_flat_map_item($item, $self);
 
             // Restore previous context.
-            $self.current_body_res = previous_body_res;
             $self.current_typeck_ctx = previous_typeck_ctx;
             $self.current_scope = previous_scope;
 
@@ -907,13 +896,11 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     break 'arm;
                 }
 
-                let Some(body_res) = &self.current_body_res else { break 'arm; };
-
-                let Some(base_expr_hir) = body_res.hir_expr(&base_expr) else { break 'arm; };
+                let Some(base_expr_hir) = self.body_res.hir_expr(&base_expr) else { break 'arm; };
                 // HACK: The borrow checker does not allow for immutably referencing
                 //       the expression for the `hir_expr` call because of
                 //       the `&mut expr.kind` partial borrow above.
-                let Some(expr_hir) = body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+                let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
 
@@ -927,12 +914,10 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 copy_def_span_ctxt(field_ident, field_def.ident(self.tcx).span);
             }
             ast::ExprKind::MethodCall(call) => 'arm: {
-                let Some(body_res) = &self.current_body_res else { break 'arm; };
-
                 // HACK: The borrow checker does not allow for immutably referencing
                 //       the expression for the `hir_expr` call because of
                 //       the `&mut expr.kind` partial borrow above.
-                let Some(expr_hir) = body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+                let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
 
@@ -1057,7 +1042,7 @@ fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
     ]);
 }
 
-pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, krate: &mut ast::Crate) {
+pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, body_res: &ast_lowering::BodyResolutions<'tcx>, krate: &mut ast::Crate) {
     let mut syntax_extensions = vec![];
     register_builtin_macros(&mut syntax_extensions);
 
@@ -1105,9 +1090,9 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
     let mut sanitizer = MacroExpansionSanitizer {
         tcx,
         def_res,
+        body_res,
         syntax_extensions,
         current_scope: Some(LOCAL_CRATE.as_def_id()),
-        current_body_res: None,
         current_typeck_ctx: None,
         protected_idents: Default::default(),
     };

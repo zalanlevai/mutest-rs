@@ -53,9 +53,9 @@ pub struct MutCtxt<'tcx, 'ast, 'op> {
     pub opts: &'op Options,
     pub tcx: TyCtxt<'tcx>,
     pub def_res: &'op ast_lowering::DefResolutions,
+    pub body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     pub def_site: Span,
     pub item_hir: &'op hir::FnItem<'tcx>,
-    pub body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     pub location: MutLoc<'ast, 'op>,
 }
 
@@ -287,10 +287,11 @@ struct MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
     opts: &'op Options,
     tcx: TyCtxt<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
+    body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     def_site: Span,
     unsafe_targeting: UnsafeTargeting,
     target: Option<&'trg Target<'trg>>,
-    current_fn: Option<(ast::FnItem<'ast>, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
+    current_fn: Option<(ast::FnItem<'ast>, hir::FnItem<'tcx>)>,
     current_closure: Option<hir::BodyId>,
     is_in_unsafe_block: bool,
     next_mut_index: u32,
@@ -346,26 +347,24 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         let Some(fn_def_id) = self.def_res.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
         let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(fn_def_id)) else { unreachable!() };
 
-        let body_res = ast_lowering::resolve_fn_body(self.tcx, self.def_res, &fn_ast, &fn_hir);
-
         register_mutations!(self, MutCtxt {
             opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
+            body_res: self.body_res,
             def_site: self.def_site,
             item_hir: &fn_hir,
-            body_res: &body_res,
             location: MutLoc::Fn(&fn_ast),
         });
 
-        self.current_fn = Some((fn_ast, fn_hir, body_res));
+        self.current_fn = Some((fn_ast, fn_hir));
         ast::visit::walk_fn(self, kind);
         self.current_fn = None;
     }
 
     fn visit_param(&mut self, param: &'ast ast::Param) {
-        let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(param_hir) = body_res.hir_param(param) else {
+        let Some((fn_ast, fn_hir)) = &self.current_fn else { return; };
+        let Some(param_hir) = self.body_res.hir_param(param) else {
             if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "parameter", fn_hir.owner_id.def_id, param.span);
             }
@@ -383,9 +382,9 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
+            body_res: self.body_res,
             def_site: self.def_site,
             item_hir: fn_hir,
-            body_res,
             location: MutLoc::FnParam(param, fn_ast),
         });
 
@@ -393,8 +392,8 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
     }
 
     fn visit_block(&mut self, block: &'ast ast::Block) {
-        let Some((_fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(block_hir) = body_res.hir_block(block) else {
+        let Some((_fn_ast, fn_hir)) = &self.current_fn else { return; };
+        let Some(block_hir) = self.body_res.hir_block(block) else {
             if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "block", fn_hir.owner_id.def_id, block.span);
             }
@@ -422,8 +421,8 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             _ => {}
         }
 
-        let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(stmt_hir) = body_res.hir_stmt(stmt) else {
+        let Some((fn_ast, fn_hir)) = &self.current_fn else { return; };
+        let Some(stmt_hir) = self.body_res.hir_stmt(stmt) else {
             if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "statement", fn_hir.owner_id.def_id, stmt.span);
             }
@@ -441,9 +440,9 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
+            body_res: self.body_res,
             def_site: self.def_site,
             item_hir: fn_hir,
-            body_res,
             location: MutLoc::FnBodyStmt(stmt, fn_ast),
         });
 
@@ -457,8 +456,8 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             _ => {}
         }
 
-        let Some((fn_ast, fn_hir, body_res)) = &self.current_fn else { return; };
-        let Some(expr_hir) = body_res.hir_expr(expr) else {
+        let Some((fn_ast, fn_hir)) = &self.current_fn else { return; };
+        let Some(expr_hir) = self.body_res.hir_expr(expr) else {
             if self.opts.verbosity >= 1 {
                 report_unmatched_ast_node(self.tcx, "expression", fn_hir.owner_id.def_id, expr.span);
             }
@@ -481,9 +480,9 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             opts: self.opts,
             tcx: self.tcx,
             def_res: self.def_res,
+            body_res: self.body_res,
             def_site: self.def_site,
             item_hir: fn_hir,
-            body_res,
             location: MutLoc::FnBodyExpr(expr, fn_ast),
         });
 
@@ -783,9 +782,10 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     targets.into_values().collect()
 }
 
-pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(
+pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
     def_res: &ast_lowering::DefResolutions,
+    body_res: &ast_lowering::BodyResolutions<'tcx>,
     krate: &'ast ast::Crate,
     targets: impl Iterator<Item = &'trg Target<'trg>>,
     ops: Operators<'_, 'm>,
@@ -804,6 +804,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'r, 'trg, 'm>(
         opts,
         tcx,
         def_res,
+        body_res,
         def_site,
         unsafe_targeting,
         target: None,

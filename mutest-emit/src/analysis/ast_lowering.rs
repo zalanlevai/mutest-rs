@@ -1300,6 +1300,10 @@ pub struct BodyResolutions<'tcx> {
 }
 
 impl<'tcx> BodyResolutions<'tcx> {
+    pub(crate) fn empty(tcx: TyCtxt<'tcx>) -> Self {
+        Self { tcx, node_id_to_hir_id: Default::default(), hir_id_to_node_id: Default::default() }
+    }
+
     pub fn ast_id(&self, hir_id: hir::HirId) -> Option<ast::NodeId> {
         self.hir_id_to_node_id.get(&hir_id).copied()
     }
@@ -1526,6 +1530,34 @@ pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, fn_ast
     let mut collector = BodyResolutionsCollector::new(tcx, def_res);
     visit::AstHirVisitor::visit_fn_item(&mut collector, fn_ast, fn_hir);
     collector.finalize()
+}
+
+struct BodyMetaVisitor<T> {
+    visitor: T,
+}
+
+impl<'ast, 'hir, T: visit::AstHirVisitor<'ast, 'hir>> ast::visit::Visitor<'ast> for BodyMetaVisitor<T> {
+    fn visit_item(&mut self, item: &'ast ast::Item) {
+        let Some(&def_id) = self.visitor.def_res().node_id_to_def_id.get(&item.id) else { return; };
+        let node_hir = self.visitor.tcx().hir_node_by_def_id(def_id);
+        visit::VisitWithHirNode::visit(item, &mut self.visitor, node_hir);
+
+        ast::visit::walk_item(self, item);
+    }
+
+    fn visit_assoc_item(&mut self, assoc_item: &'ast ast::AssocItem, _assoc_ctxt: ast::visit::AssocCtxt) {
+        let Some(&def_id) = self.visitor.def_res().node_id_to_def_id.get(&assoc_item.id) else { return; };
+        let node_hir = self.visitor.tcx().hir_node_by_def_id(def_id);
+        visit::VisitWithHirNode::visit(assoc_item, &mut self.visitor, node_hir);
+
+        ast::visit::walk_item(self, assoc_item);
+    }
+}
+
+pub fn resolve_bodies<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, krate_ast: &ast::Crate) -> BodyResolutions<'tcx> {
+    let mut body_visitor = BodyMetaVisitor { visitor: BodyResolutionsCollector::new(tcx, def_res) };
+    ast::visit::Visitor::visit_crate(&mut body_visitor, krate_ast);
+    body_visitor.visitor.finalize()
 }
 
 struct AstBodyChildItemCollector<'ast> {
