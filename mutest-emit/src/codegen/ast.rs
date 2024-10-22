@@ -10,48 +10,32 @@ use rustc_span::symbol::{Ident, Symbol};
 use crate::analysis::Descr;
 
 #[derive(Clone, Debug)]
-pub struct FnItem {
+pub struct FnItem<'ast> {
     pub id: ast::NodeId,
     pub span: Span,
     pub ctx: visit::FnCtxt,
-    pub vis: ast::Visibility,
+    pub vis: &'ast ast::Visibility,
     pub ident: Ident,
-    pub generics: ast::Generics,
-    pub sig: ast::FnSig,
-    pub body: Option<ast::Block>,
+    pub generics: &'ast ast::Generics,
+    pub sig: &'ast ast::FnSig,
+    pub body: Option<&'ast ast::Block>,
 }
 
-impl FnItem {
-    pub fn from_item(item: &ast::Item) -> Option<Self> {
+impl<'ast> FnItem<'ast> {
+    pub fn from_item(item: &'ast ast::Item) -> Option<Self> {
         let &ast::Item { id, span, ref vis, ident, ref kind, .. } = item;
         let ast::ItemKind::Fn(fn_item) = kind else { return None; };
         let ast::Fn { generics, sig, body, .. } = &**fn_item;
-        Some(Self {
-            id,
-            span,
-            ctx: visit::FnCtxt::Free,
-            vis: vis.clone(),
-            ident,
-            generics: generics.clone(),
-            sig: sig.clone(),
-            body: body.clone().map(P::into_inner),
-        })
+        let ctx = visit::FnCtxt::Free;
+        Some(Self { id, span, ctx, vis, ident, generics, sig, body: body.as_deref() })
     }
 
-    pub fn from_assoc_item(item: &ast::AssocItem) -> Option<Self> {
+    pub fn from_assoc_item(item: &'ast ast::AssocItem) -> Option<Self> {
         let &ast::Item { id, span, ref vis, ident, ref kind, .. } = item;
         let ast::AssocItemKind::Fn(fn_item) = kind else { return None; };
         let ast::Fn { generics, sig, body, .. } = &**fn_item;
-        Some(Self {
-            id,
-            span,
-            ctx: visit::FnCtxt::Free, // FIXME
-            vis: vis.clone(),
-            ident,
-            generics: generics.clone(),
-            sig: sig.clone(),
-            body: body.clone().map(P::into_inner),
-        })
+        let ctx = visit::FnCtxt::Free; // FIXME
+        Some(Self { id, span, ctx, vis, ident, generics, sig, body: body.as_deref() })
     }
 }
 

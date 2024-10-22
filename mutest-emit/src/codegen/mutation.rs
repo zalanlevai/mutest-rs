@@ -22,14 +22,14 @@ use crate::codegen::tool_attr;
 use crate::session::Options;
 
 #[derive(Clone, Copy)]
-pub enum MutLoc<'a> {
-    Fn(&'a ast::FnItem),
-    FnParam(&'a ast::Param, &'a ast::FnItem),
-    FnBodyStmt(&'a ast::Stmt, &'a ast::FnItem),
-    FnBodyExpr(&'a ast::Expr, &'a ast::FnItem),
+pub enum MutLoc<'ast, 'a> {
+    Fn(&'a ast::FnItem<'ast>),
+    FnParam(&'a ast::Param, &'a ast::FnItem<'ast>),
+    FnBodyStmt(&'a ast::Stmt, &'a ast::FnItem<'ast>),
+    FnBodyExpr(&'a ast::Expr, &'a ast::FnItem<'ast>),
 }
 
-impl<'a> MutLoc<'a> {
+impl<'ast, 'a> MutLoc<'ast, 'a> {
     pub fn span(&self) -> Span {
         match self {
             Self::Fn(fn_item) => fn_item.span,
@@ -39,7 +39,7 @@ impl<'a> MutLoc<'a> {
         }
     }
 
-    pub fn containing_fn(&self) -> Option<&ast::FnItem> {
+    pub fn containing_fn(&self) -> Option<&ast::FnItem<'ast>> {
         match self {
             Self::Fn(fn_item) => Some(fn_item),
             Self::FnParam(_, fn_item) => Some(fn_item),
@@ -49,14 +49,14 @@ impl<'a> MutLoc<'a> {
     }
 }
 
-pub struct MutCtxt<'tcx, 'op> {
+pub struct MutCtxt<'tcx, 'ast, 'op> {
     pub opts: &'op Options,
     pub tcx: TyCtxt<'tcx>,
     pub def_res: &'op ast_lowering::DefResolutions,
     pub def_site: Span,
     pub item_hir: &'op hir::FnItem<'tcx>,
     pub body_res: &'op ast_lowering::BodyResolutions<'tcx>,
-    pub location: MutLoc<'op>,
+    pub location: MutLoc<'ast, 'op>,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -282,7 +282,7 @@ impl UnsafeTargeting {
     }
 }
 
-struct MutationCollector<'tcx, 'op, 'trg, 'm> {
+struct MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
     operators: Operators<'op, 'm>,
     opts: &'op Options,
     tcx: TyCtxt<'tcx>,
@@ -290,7 +290,7 @@ struct MutationCollector<'tcx, 'op, 'trg, 'm> {
     def_site: Span,
     unsafe_targeting: UnsafeTargeting,
     target: Option<&'trg Target<'trg>>,
-    current_fn: Option<(ast::FnItem, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
+    current_fn: Option<(ast::FnItem<'ast>, hir::FnItem<'tcx>, ast_lowering::BodyResolutions<'tcx>)>,
     current_closure: Option<hir::BodyId>,
     is_in_unsafe_block: bool,
     next_mut_index: u32,
@@ -338,10 +338,10 @@ fn report_unmatched_ast_node<'tcx>(tcx: TyCtxt<'tcx>, node_kind: &str, def_id: h
     diagnostic.emit();
 }
 
-impl<'ast, 'tcx, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'op, 'trg, 'm> {
+impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
         let ast::visit::FnKind::Fn(ctx, ident, sig, vis, generics, body) = kind else { return; };
-        let fn_ast = ast::FnItem { id, span, ctx, vis: vis.clone(), ident, generics: generics.clone(), sig: sig.clone(), body: body.cloned() };
+        let fn_ast = ast::FnItem { id, span, ctx, vis, ident, generics, sig, body };
 
         let Some(fn_def_id) = self.def_res.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
         let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(fn_def_id)) else { unreachable!() };
