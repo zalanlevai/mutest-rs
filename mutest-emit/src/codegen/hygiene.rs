@@ -741,9 +741,8 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
 }
 
 macro def_flat_map_item_fns(
-    $(fn $ident:ident: $item_kind:ident [$into_ast_fn_item:path] |$self:ident, $item:ident, $def_id:ident| {
+    $(fn $ident:ident: $item_kind:ident |$self:ident, $item:ident| {
         $(check { $($check_stmt:stmt)+ })?
-        $(scope { $($scope_stmt:stmt)+ })?
     });+;
 ) {
     $(
@@ -753,14 +752,14 @@ macro def_flat_map_item_fns(
 
             $($($check_stmt)+)?
 
-            let Some(&$def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
+            let Some(&def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
 
             // Store new context scope.
-            let previous_scope = mem::replace(&mut $self.current_scope, Some($def_id.to_def_id()));
+            let previous_scope = mem::replace(&mut $self.current_scope, Some(def_id.to_def_id()));
 
             // Store new typeck scope, if needed.
             let previous_typeck_ctx = $self.current_typeck_ctx;
-            let typeck_root_def_id = $self.tcx.typeck_root_def_id($def_id.to_def_id());
+            let typeck_root_def_id = $self.tcx.typeck_root_def_id(def_id.to_def_id());
             let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
             if let Some(typeck_root_body_id) = $self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
                 if !previous_typeck_ctx.is_some_and(|previous_typeck_ctx| typeck_root_def_id == previous_typeck_ctx.hir_owner.to_def_id()) {
@@ -770,23 +769,12 @@ macro def_flat_map_item_fns(
 
             // Store new body resolution scope, if available.
             let previous_body_res = $self.current_body_res.take();
-            match &$item.kind {
-                ast::$item_kind::Fn(_) => {
-                    let Some(fn_ast) = $into_ast_fn_item(&$item) else { unreachable!() };
-                    let Some(fn_hir) = hir::FnItem::from_node($self.tcx, $self.tcx.hir_node_by_def_id($def_id)) else { unreachable!() };
-                    $self.current_body_res = Some(ast_lowering::resolve_fn_body($self.tcx, $self.def_res, &fn_ast, &fn_hir));
-                }
-                ast::$item_kind::Const(const_ast) => {
-                    let Some(const_hir) = hir::ConstItem::from_node($self.tcx, $self.tcx.hir_node_by_def_id($def_id)) else { unreachable!() };
-                    $self.current_body_res = Some(ast_lowering::resolve_const_body($self.tcx, $self.def_res, &const_ast, &const_hir));
-                }
-                _ => {}
+            if let Some(body_res) = ast_lowering::resolve_body($self.tcx, $self.def_res, &$item, $self.tcx.hir_node_by_def_id(def_id)) {
+                $self.current_body_res = Some(body_res);
             }
 
-            $($($scope_stmt)+)?
-
             // Match definition ident if this is an assoc item corresponding to a trait.
-            if let Some(assoc_item) = $self.tcx.opt_associated_item($def_id.to_def_id()) {
+            if let Some(assoc_item) = $self.tcx.opt_associated_item(def_id.to_def_id()) {
                 match assoc_item.container {
                     ty::AssocItemContainer::TraitContainer => {
                         // Trait items make new standalone definitions rather than referring to another definition,
@@ -817,7 +805,7 @@ macro def_flat_map_item_fns(
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
     def_flat_map_item_fns! {
-        fn flat_map_item: ItemKind [ast::FnItem::from_item] |self, item, def_id| {
+        fn flat_map_item: ItemKind |self, item| {
             check {
                 let name = item.ident.name;
 
@@ -831,69 +819,10 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     return smallvec![item];
                 }
             }
-            scope {
-                match &item.kind {
-                    ast::ItemKind::Static(static_ast) => {
-                        let Some(static_hir) = hir::StaticItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_static_body(self.tcx, self.def_res, &static_ast, &static_hir));
-                    }
-                    ast::ItemKind::Enum(enum_def_ast, generics_ast) => {
-                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
-                        let hir::ItemKind::Enum(enum_def_hir, generics_hir) = &item_hir.kind else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_enum_body(self.tcx, self.def_res, enum_def_ast, generics_ast, enum_def_hir, generics_hir));
-                    }
-                    ast::ItemKind::Struct(variant_data_ast, generics_ast) | ast::ItemKind::Union(variant_data_ast, generics_ast) => {
-                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
-                        let (hir::ItemKind::Struct(variant_data_hir, generics_hir) | hir::ItemKind::Union(variant_data_hir, generics_hir)) = &item_hir.kind else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_struct_body(self.tcx, self.def_res, variant_data_ast, generics_ast, variant_data_hir, generics_hir));
-                    }
-                    ast::ItemKind::TyAlias(ty_alias_ast) => {
-                        let Some(ty_alias_hir) = hir::TyAliasItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_ty_alias_body(self.tcx, self.def_res, &ty_alias_ast, &ty_alias_hir));
-                    }
-                    ast::ItemKind::Trait(trait_ast) => {
-                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
-                        let hir::ItemKind::Trait(_, _, generics_hir, generic_bounds_hir, _) = &item_hir.kind else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_trait_body(self.tcx, self.def_res, trait_ast, generics_hir, generic_bounds_hir));
-                    }
-                    ast::ItemKind::TraitAlias(generics_ast, generic_bounds_ast) => {
-                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
-                        let hir::ItemKind::TraitAlias(generics_hir, generic_bounds_hir) = &item_hir.kind else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_trait_alias_body(self.tcx, self.def_res, generics_ast, generic_bounds_ast, generics_hir, generic_bounds_hir));
-                    }
-                    ast::ItemKind::Impl(impl_ast) => {
-                        let hir::Node::Item(item_hir) = self.tcx.hir_node_by_def_id(def_id) else { unreachable!() };
-                        let hir::ItemKind::Impl(impl_hir) = &item_hir.kind else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_impl_body(self.tcx, self.def_res, impl_ast, impl_hir));
-                    }
-                    _ => {}
-                }
-            }
         };
 
-        fn flat_map_trait_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {
-            scope {
-                match &item.kind {
-                    ast::AssocItemKind::Type(ty_alias_ast) => {
-                        let Some(ty_alias_hir) = hir::TyAliasItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_ty_alias_body(self.tcx, self.def_res, &ty_alias_ast, &ty_alias_hir));
-                    }
-                    _ => {}
-                }
-            }
-        };
-
-        fn flat_map_impl_item: AssocItemKind [ast::FnItem::from_assoc_item] |self, item, def_id| {
-            scope {
-                match &item.kind {
-                    ast::AssocItemKind::Type(ty_alias_ast) => {
-                        let Some(ty_alias_hir) = hir::TyAliasItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(def_id)) else { unreachable!() };
-                        self.current_body_res = Some(ast_lowering::resolve_ty_alias_body(self.tcx, self.def_res, &ty_alias_ast, &ty_alias_hir));
-                    }
-                    _ => {}
-                }
-            }
-        };
+        fn flat_map_trait_item: AssocItemKind |self, item| {};
+        fn flat_map_impl_item: AssocItemKind |self, item| {};
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {

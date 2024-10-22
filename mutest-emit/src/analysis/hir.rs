@@ -109,8 +109,8 @@ pub enum TyAliasItem<'hir> {
     ImplItem(&'hir hir::Ty<'hir>),
 }
 
-impl<'tcx: 'hir, 'hir> TyAliasItem<'hir> {
-    pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
+impl<'hir> TyAliasItem<'hir> {
+    pub fn from_node(node: hir::Node<'hir>) -> Option<Self> {
         match node {
             hir::Node::Item(&hir::Item { ref kind, .. }) => {
                 let hir::ItemKind::TyAlias(ty, generics) = kind else { return None; };

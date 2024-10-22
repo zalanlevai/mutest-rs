@@ -34,7 +34,6 @@ pub mod visit {
     use std::assert_matches::assert_matches;
     use std::iter;
 
-    use rustc_ast as ast;
     use rustc_hir::intravisit::Map;
     use rustc_hir::intravisit::nested_filter::{self, NestedFilter};
     use rustc_middle::ty::TyCtxt;
@@ -44,6 +43,7 @@ pub mod visit {
 
     use crate::analysis::Descr;
     use crate::analysis::hir;
+    use crate::codegen::ast;
 
     pub trait AstHirVisitor<'ast, 'hir>: Sized {
         type Map: hir::intravisit::Map<'hir> = <Self::NestedFilter as NestedFilter<'hir>>::Map;
@@ -78,6 +78,19 @@ pub mod visit {
 
         fn nested_body(&mut self, id: hir::BodyId) -> Option<&'hir hir::Body<'hir>> {
             Self::NestedFilter::INTRA.then(|| self.nested_visit_map().body(id))
+        }
+
+        fn visit_fn_item(&mut self, fn_ast: &ast::FnItem<'ast>, fn_hir: &hir::FnItem<'hir>) {
+            let kind_ast = ast::visit::FnKind::Fn(fn_ast.ctx, fn_ast.ident, &fn_ast.sig, &fn_ast.vis, &fn_ast.generics, fn_ast.body);
+            let span_ast = fn_ast.span;
+            let id_ast = fn_ast.id;
+            let kind_hir = fn_hir.kind;
+            let generics_hir = Some(fn_hir.generics);
+            let sig_hir = *fn_hir.sig;
+            let body_hir = fn_hir.body.map(|body| body.id());
+            let span_hir = fn_hir.span;
+            let id_hir = self.tcx().local_def_id_to_hir_id(fn_hir.owner_id.def_id);
+            self.visit_fn(kind_ast, span_ast, id_ast, kind_hir, generics_hir, sig_hir, body_hir, span_hir, id_hir);
         }
 
         fn visit_fn(&mut self, kind_ast: ast::visit::FnKind<'ast>, span_ast: Span, id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, generics_hir: Option<&'hir hir::Generics<'hir>>, sig_hir: hir::FnSig<'hir>, body_hir: Option<hir::BodyId>, span_hir: Span, id_hir: hir::HirId) {
@@ -1195,6 +1208,89 @@ pub mod visit {
             visitor.visit_generic_args(generic_args_ast, constraint_hir.gen_args);
         }
     }
+
+    pub trait VisitWithHirNode {
+        fn visit<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(&'ast self, visitor: &mut T, node_hir: hir::Node<'hir>) -> bool;
+    }
+
+    impl VisitWithHirNode for ast::Item {
+        fn visit<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(&'ast self, visitor: &mut T, node_hir: hir::Node<'hir>) -> bool {
+            let tcx = visitor.tcx();
+
+            match &self.kind {
+                ast::ItemKind::Fn(_) => {
+                    let Some(fn_ast) = ast::FnItem::from_item(self) else { unreachable!() };
+                    let Some(fn_hir) = hir::FnItem::from_node(tcx, node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_fn_item(visitor, &fn_ast, &fn_hir);
+                }
+                ast::ItemKind::Const(const_ast) => {
+                    let Some(const_hir) = hir::ConstItem::from_node(tcx, node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_const(visitor, &const_ast, &const_hir);
+                }
+                ast::ItemKind::Static(static_ast) => {
+                    let Some(static_hir) = hir::StaticItem::from_node(tcx, node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_static(visitor, &static_ast, &static_hir);
+                }
+                ast::ItemKind::Enum(enum_def_ast, generics_ast) => {
+                    let hir::Node::Item(item_hir) = node_hir else { panic!("mismatched HIR node") };
+                    let hir::ItemKind::Enum(enum_def_hir, generics_hir) = &item_hir.kind else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_enum(visitor, enum_def_ast, generics_ast, enum_def_hir, generics_hir);
+                }
+                ast::ItemKind::Struct(variant_data_ast, generics_ast) | ast::ItemKind::Union(variant_data_ast, generics_ast) => {
+                    let hir::Node::Item(item_hir) = node_hir else { panic!("mismatched HIR node") };
+                    let (hir::ItemKind::Struct(variant_data_hir, generics_hir) | hir::ItemKind::Union(variant_data_hir, generics_hir)) = &item_hir.kind else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_struct(visitor, variant_data_ast, generics_ast, variant_data_hir, generics_hir);
+                }
+                ast::ItemKind::TyAlias(ty_alias_ast) => {
+                    let Some(ty_alias_hir) = hir::TyAliasItem::from_node(node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_ty_alias(visitor, &ty_alias_ast, &ty_alias_hir);
+                }
+                ast::ItemKind::Trait(trait_ast) => {
+                    let hir::Node::Item(item_hir) = node_hir else { panic!("mismatched HIR node") };
+                    let hir::ItemKind::Trait(_, _, generics_hir, generic_bounds_hir, _) = &item_hir.kind else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_trait(visitor, trait_ast, generics_hir, generic_bounds_hir);
+                }
+                ast::ItemKind::TraitAlias(generics_ast, generic_bounds_ast) => {
+                    let hir::Node::Item(item_hir) = node_hir else { panic!("mismatched HIR node") };
+                    let hir::ItemKind::TraitAlias(generics_hir, generic_bounds_hir) = &item_hir.kind else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_trait_alias(visitor, generics_ast, generic_bounds_ast, generics_hir, generic_bounds_hir);
+                }
+                ast::ItemKind::Impl(impl_ast) => {
+                    let hir::Node::Item(item_hir) = node_hir else { panic!("mismatched HIR node") };
+                    let hir::ItemKind::Impl(impl_hir) = &item_hir.kind else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_impl(visitor, impl_ast, impl_hir);
+                }
+                _ => { return false; }
+            }
+
+            true
+        }
+    }
+
+    impl VisitWithHirNode for ast::AssocItem {
+        fn visit<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(&'ast self, visitor: &mut T, node_hir: hir::Node<'hir>) -> bool {
+            let tcx = visitor.tcx();
+
+            match &self.kind {
+                ast::AssocItemKind::Fn(_) => {
+                    let Some(fn_ast) = ast::FnItem::from_assoc_item(self) else { unreachable!() };
+                    let Some(fn_hir) = hir::FnItem::from_node(tcx, node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_fn_item(visitor, &fn_ast, &fn_hir);
+                }
+                ast::AssocItemKind::Const(const_ast) => {
+                    let Some(const_hir) = hir::ConstItem::from_node(tcx, node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_const(visitor, &const_ast, &const_hir);
+                }
+                ast::AssocItemKind::Type(ty_alias_ast) => {
+                    let Some(ty_alias_hir) = hir::TyAliasItem::from_node(node_hir) else { panic!("mismatched HIR node") };
+                    AstHirVisitor::visit_ty_alias(visitor, &ty_alias_ast, &ty_alias_hir)
+                }
+                _ => { return false; }
+            }
+
+            true
+        }
+    }
 }
 
 pub struct BodyResolutions<'tcx> {
@@ -1414,68 +1510,21 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
     }
 }
 
+pub fn resolve_body<'tcx, K>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, item_ast: &ast::Item<K>, node_hir: hir::Node<'tcx>) -> Option<BodyResolutions<'tcx>>
+where
+    ast::Item<K>: visit::VisitWithHirNode,
+{
+    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
+
+    let visited = visit::VisitWithHirNode::visit(item_ast, &mut collector, node_hir);
+    if !visited { return None; }
+
+    Some(collector.finalize())
+}
+
 pub fn resolve_fn_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, fn_ast: &ast::FnItem, fn_hir: &hir::FnItem<'tcx>) -> BodyResolutions<'tcx> {
     let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-
-    let kind_ast = ast::visit::FnKind::Fn(fn_ast.ctx, fn_ast.ident, &fn_ast.sig, &fn_ast.vis, &fn_ast.generics, fn_ast.body);
-    let span_ast = fn_ast.span;
-    let id_ast = fn_ast.id;
-    let kind_hir = fn_hir.kind;
-    let generics_hir = Some(fn_hir.generics);
-    let sig_hir = *fn_hir.sig;
-    let body_hir = fn_hir.body.map(|body| body.id());
-    let span_hir = fn_hir.span;
-    let id_hir = tcx.local_def_id_to_hir_id(fn_hir.owner_id.def_id);
-    visit::AstHirVisitor::visit_fn(&mut collector, kind_ast, span_ast, id_ast, kind_hir, generics_hir, sig_hir, body_hir, span_hir, id_hir);
-
-    collector.finalize()
-}
-
-pub fn resolve_const_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, const_ast: &ast::ConstItem, const_hir: &hir::ConstItem<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_const(&mut collector, const_ast, const_hir);
-    collector.finalize()
-}
-
-pub fn resolve_static_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, static_ast: &ast::StaticItem, static_hir: &hir::StaticItem<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_static(&mut collector, static_ast, static_hir);
-    collector.finalize()
-}
-
-pub fn resolve_enum_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, enum_def_ast: &ast::EnumDef, generics_ast: &ast::Generics, enum_def_hir: &'tcx hir::EnumDef<'tcx>, generics_hir: &'tcx hir::Generics<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_enum(&mut collector, enum_def_ast, generics_ast, enum_def_hir, generics_hir);
-    collector.finalize()
-}
-
-pub fn resolve_struct_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, variant_data_ast: &ast::VariantData, generics_ast: &ast::Generics, variant_data_hir: &'tcx hir::VariantData<'tcx>, generics_hir: &'tcx hir::Generics<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_struct(&mut collector, variant_data_ast, generics_ast, variant_data_hir, generics_hir);
-    collector.finalize()
-}
-
-pub fn resolve_ty_alias_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, ty_alias_ast: &ast::TyAlias, ty_alias_hir: &hir::TyAliasItem<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_ty_alias(&mut collector, ty_alias_ast, ty_alias_hir);
-    collector.finalize()
-}
-
-pub fn resolve_trait_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, trait_ast: &ast::Trait, generics_hir: &'tcx hir::Generics<'tcx>, generic_bounds_hir: &'tcx hir::GenericBounds<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_trait(&mut collector, trait_ast, generics_hir, generic_bounds_hir);
-    collector.finalize()
-}
-
-pub fn resolve_trait_alias_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, generics_ast: &ast::Generics, generic_bounds_ast: &ast::GenericBounds, generics_hir: &'tcx hir::Generics<'tcx>, generic_bounds_hir: &'tcx hir::GenericBounds<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_trait_alias(&mut collector, generics_ast, generic_bounds_ast, generics_hir, generic_bounds_hir);
-    collector.finalize()
-}
-
-pub fn resolve_impl_body<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, impl_ast: &ast::Impl, impl_hir: &'tcx hir::Impl<'tcx>) -> BodyResolutions<'tcx> {
-    let mut collector = BodyResolutionsCollector::new(tcx, def_res);
-    visit::AstHirVisitor::visit_impl(&mut collector, impl_ast, impl_hir);
+    visit::AstHirVisitor::visit_fn_item(&mut collector, fn_ast, fn_hir);
     collector.finalize()
 }
 
