@@ -1117,13 +1117,18 @@ pub mod visit {
                     }
                 }
                 hir::QPath::TypeRelative(ty_hir, path_segment_hir) => {
-                    if let hir::TyKind::Path(qself_qpath_hir) = &ty_hir.kind {
-                        walk_qpath_impl(visitor, qself_ast, &path_segments_ast[0..(path_segments_ast.len() - 1)], qself_qpath_hir);
-                    } else {
-                        let Some(qself_ast) = qself_ast else { unreachable!() };
+                    // Visit the qualified self type, if the rest of the beginning of the path
+                    // (excluding the last path segment) was all denoted as a qualified self in the AST.
+                    if let Some(qself_ast) = qself_ast && qself_ast.position == path_segments_ast.len() - 1 {
                         visit_matching_ty(visitor, &qself_ast.ty, ty_hir);
                     }
 
+                    // Visit every path segment except the last one.
+                    if let hir::TyKind::Path(qself_qpath_hir) = &ty_hir.kind {
+                        walk_qpath_impl(visitor, qself_ast, &path_segments_ast[0..(path_segments_ast.len() - 1)], qself_qpath_hir);
+                    }
+
+                    // Visit the last path segment.
                     let Some(last_path_segment_ast) = path_segments_ast.last() else { unreachable!() };
                     visitor.visit_path_segment(last_path_segment_ast, path_segment_hir);
                 }
