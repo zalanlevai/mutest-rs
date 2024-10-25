@@ -555,9 +555,10 @@ pub mod visit {
                     visit_matching_expr(visitor, arg_ast, arg_hir);
                 }
             }
-            (ast::ExprKind::MethodCall(method_call_ast), hir::ExprKind::MethodCall(_, receiver_hir, args_hir, _)) => {
-                let ast::MethodCall { seg: _, receiver: receiver_ast, args: args_ast, span: _ } = &**method_call_ast;
+            (ast::ExprKind::MethodCall(method_call_ast), hir::ExprKind::MethodCall(path_segment_hir, receiver_hir, args_hir, _)) => {
+                let ast::MethodCall { seg: path_segment_ast, receiver: receiver_ast, args: args_ast, span: _ } = &**method_call_ast;
 
+                visitor.visit_path_segment(path_segment_ast, path_segment_hir);
                 visit_matching_expr(visitor, receiver_ast, receiver_hir);
                 for (expr_ast, expr_hir) in iter::zip(args_ast, *args_hir) {
                     visit_matching_expr(visitor, expr_ast, expr_hir);
