@@ -266,6 +266,14 @@ pub mod visit {
                         visitor.visit_param(param_ast, param_hir, param_hir_ty);
                     }
 
+                    match (&decl_ast.output, sig_hir.decl.output) {
+                        (ast::FnRetTy::Default(_), hir::FnRetTy::DefaultReturn(_)) => {}
+                        (ast::FnRetTy::Ty(ret_ty_ast), hir::FnRetTy::Return(ret_ty_hir)) => {
+                            visit_matching_ty(visitor, ret_ty_ast, ret_ty_hir);
+                        }
+                        _ => unreachable!(),
+                    }
+
                     visit_matching_expr(visitor, expr_ast, &body_hir.value);
                 }
             }
