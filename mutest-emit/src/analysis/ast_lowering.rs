@@ -1253,6 +1253,26 @@ pub mod visit {
         if let Some(generic_args_ast) = &constraint_ast.gen_args {
             visitor.visit_generic_args(generic_args_ast, constraint_hir.gen_args);
         }
+
+        match (&constraint_ast.kind, constraint_hir.kind) {
+            (ast::AssocConstraintKind::Equality { term: term_ast }, hir::TypeBindingKind::Equality { term: term_hir }) => {
+                match (term_ast, term_hir) {
+                    (ast::Term::Ty(ty_ast), hir::Term::Ty(ty_hir)) => {
+                        visit_matching_ty(visitor, ty_ast, ty_hir);
+                    }
+                    (ast::Term::Const(_anon_const_ast), hir::Term::Const(_const_arg_hir)) => {
+                        // TODO
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            (ast::AssocConstraintKind::Bound { bounds: generic_bounds_ast }, hir::TypeBindingKind::Constraint { bounds: generic_bounds_hir }) => {
+                for (generic_bound_ast, generic_bound_hir) in iter::zip(generic_bounds_ast, generic_bounds_hir) {
+                    visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 
     pub trait VisitWithHirNode {
