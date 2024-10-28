@@ -664,8 +664,8 @@ pub mod visit {
                         && let hir::StmtKind::Expr(inner_loop_block_expr_hir) = inner_loop_block_stmt_hir.kind
                         && let hir::ExprKind::Match(_, [_, inner_loop_match_some_arm_hir], hir::MatchSource::ForLoopDesugar) = inner_loop_block_expr_hir.kind
                     {
-                        if let hir::PatKind::TupleStruct(_, [inner_loop_match_some_arm_pat_hir], _) = inner_loop_match_some_arm_hir.pat.kind {
-                            visit_matching_pat(visitor, pat_ast, inner_loop_match_some_arm_pat_hir);
+                        if let hir::PatKind::Struct(_, [inner_loop_match_some_arm_pat_field_hir], _) = inner_loop_match_some_arm_hir.pat.kind {
+                            visit_matching_pat(visitor, pat_ast, inner_loop_match_some_arm_pat_field_hir.pat);
                         }
                         match kind_ast {
                             ast::ForLoopKind::For => {
