@@ -70,6 +70,10 @@ impl MutationBatchingRandomness {
     }
 }
 
+pub struct VerifyOptions {
+    pub ast_lowering: bool,
+}
+
 pub struct Options<'op, 'm> {
     pub mode: Mode,
     pub verbosity: u8,
@@ -83,6 +87,7 @@ pub struct Options<'op, 'm> {
     #[cfg(feature = "random")] pub mutation_batching_randomness: MutationBatchingRandomness,
     pub mutant_max_mutations_count: usize,
 
+    pub verify_opts: VerifyOptions,
     pub sanitize_macro_expns: bool,
 }
 

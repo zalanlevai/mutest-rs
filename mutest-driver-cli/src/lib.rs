@@ -84,6 +84,12 @@ pub mod graph_format {
     }
 }
 
+pub mod verify {
+    crate::opts! { ALL, possible_values where
+        AST_LOWERING = "ast_lowering";
+    }
+}
+
 pub fn command() -> clap::Command {
     let cmd = clap::command!("cargo mutest")
         .propagate_version(true)
@@ -127,6 +133,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"graph-exclude-unsafe" "Exclude unsafe mutations from the graph, only listing safe mutations.").display_order(102))
         .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(graph_format::possible_values()).default_value(graph_format::SIMPLE).display_order(102))
         // Experimental Flags
+        .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
         .arg(clap::arg!(--"Zsanitize-macro-expns" "Sanitize the identifiers and paths in the expanded output of bang-style macro invocations.").display_order(500))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that

@@ -1,12 +1,11 @@
 //@ build
+//@ verify: ast_lowering
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
-
-#![feature(decl_macro)]
 
 #![allow(unused)]
 
-macro m() {
+#[test]
+fn test() {
     _ = 0;
     (_, _) = (0, 1);
 
@@ -26,9 +25,4 @@ macro m() {
 
     struct R { a: usize, b: usize }
     R { a, b } = R { a: 1, b: 2 };
-}
-
-#[test]
-fn test() {
-    m!();
 }

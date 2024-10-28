@@ -271,6 +271,26 @@ pub fn main() {
 
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
+        let verify_opts = {
+            use mutest_driver_cli::verify::*;
+
+            let mut verify_opts = config::VerifyOptions {
+                ast_lowering: false,
+            };
+
+            let mut verify_names = mutest_arg_matches.get_many::<String>("Zverify").map(|verify| verify.map(String::as_str).collect::<FxHashSet<_>>()).unwrap_or_default();
+            if verify_names.contains("all") { verify_names = FxHashSet::from_iter(ALL.into_iter().map(|s| *s)); }
+
+            for verify_name in verify_names {
+                match verify_name {
+                    AST_LOWERING => verify_opts.ast_lowering = true,
+                    _ => unreachable!("invalid verify name: `{verify_name}`"),
+                }
+            }
+
+            verify_opts
+        };
+
         let sanitize_macro_expns = mutest_arg_matches.get_flag("Zsanitize-macro-expns");
 
         let config = Config {
@@ -290,6 +310,7 @@ pub fn main() {
                 #[cfg(feature = "random")] mutation_batching_randomness,
                 mutant_max_mutations_count,
 
+                verify_opts,
                 sanitize_macro_expns,
             },
         };

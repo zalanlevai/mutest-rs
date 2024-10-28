@@ -1,12 +1,11 @@
 //@ build
+//@ verify: ast_lowering
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
-
-#![feature(decl_macro)]
 
 #![allow(unused)]
 
-macro m() {
+#[test]
+fn test() {
     trait I {}
     trait Dummy {}
 
@@ -15,9 +14,4 @@ macro m() {
         V: Dummy,
         U: Dummy,
     {}
-}
-
-#[test]
-fn test() {
-    m!();
 }

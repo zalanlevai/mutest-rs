@@ -10,7 +10,7 @@ use crate::analysis::hir;
 use crate::analysis::ty::TyCtxt;
 use crate::analysis::res;
 use crate::codegen::ast;
-use crate::codegen::symbols::Span;
+use crate::codegen::symbols::{DUMMY_SP, Span};
 
 pub struct DefResolutions {
     pub node_id_to_def_id: ast::node_id::NodeMap<hir::LocalDefId>,
@@ -548,6 +548,34 @@ pub mod visit {
         }
     }
 
+    /// Get the left-hand side subexpressions of an assignment expression that get corresponding assignments in the HIR.
+    /// This is a simplified version of `rustc_ast_lowering::expr::{impl LoweringContext}::destructure_assign_mut`.
+    pub fn assigned_subexprs_in_expr_assign_lhs<'ast>(def_res: &super::DefResolutions, expr: &'ast ast::Expr, out: &mut Vec<&'ast ast::Expr>) {
+        match &expr.kind {
+            ast::ExprKind::Underscore => {}
+            ast::ExprKind::Paren(expr) => assigned_subexprs_in_expr_assign_lhs(def_res, expr, out),
+            ast::ExprKind::Tup(exprs) | ast::ExprKind::Array(exprs) => {
+                for expr in exprs {
+                    if let ast::ExprKind::Range(None, None, ast::RangeLimits::HalfOpen) = expr.kind { continue; }
+                    assigned_subexprs_in_expr_assign_lhs(def_res, expr, out);
+                }
+            }
+            ast::ExprKind::Path(_, _) if let Some(res) = def_res.node_res(expr.id) && res.expected_in_unit_struct_pat() => {}
+            ast::ExprKind::Call(_, args) => {
+                for expr in args {
+                    if let ast::ExprKind::Range(None, None, ast::RangeLimits::HalfOpen) = expr.kind { continue; }
+                    assigned_subexprs_in_expr_assign_lhs(def_res, expr, out);
+                }
+            }
+            ast::ExprKind::Struct(struct_expr) => {
+                for field in &struct_expr.fields {
+                    assigned_subexprs_in_expr_assign_lhs(def_res, &field.expr, out);
+                }
+            }
+            _ => { out.push(expr); }
+        }
+    }
+
     pub fn walk_expr<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
         match (&expr_ast.kind, &expr_hir.kind) {
             (_, hir::ExprKind::DropTemps(expr_hir)) => {
@@ -716,36 +744,8 @@ pub mod visit {
                 visit_matching_expr(visitor, right_ast, right_hir);
             }
             (ast::ExprKind::Assign(left_ast, right_ast, _), hir::ExprKind::Block(block_hir, None)) => {
-                // This is a simplified version of `rustc_ast_lowering::LoweringContext::destructure_assign_mut`
-                // to get the left-hand side subexpressions that get assignments in HIR.
-                fn assigned_subexprs<'ast>(def_res: &super::DefResolutions, expr: &'ast ast::Expr, out: &mut Vec<&'ast ast::Expr>) {
-                    match &expr.kind {
-                        ast::ExprKind::Underscore => {}
-                        ast::ExprKind::Paren(expr) => assigned_subexprs(def_res, expr, out),
-                        ast::ExprKind::Tup(exprs) | ast::ExprKind::Array(exprs) => {
-                            for expr in exprs {
-                                if let ast::ExprKind::Range(None, None, ast::RangeLimits::HalfOpen) = expr.kind { continue; }
-                                assigned_subexprs(def_res, expr, out);
-                            }
-                        }
-                        ast::ExprKind::Path(_, _) if let Some(res) = def_res.node_res(expr.id) && res.expected_in_unit_struct_pat() => {}
-                        ast::ExprKind::Call(_, args) => {
-                            for expr in args {
-                                if let ast::ExprKind::Range(None, None, ast::RangeLimits::HalfOpen) = expr.kind { continue; }
-                                assigned_subexprs(def_res, expr, out);
-                            }
-                        }
-                        ast::ExprKind::Struct(struct_expr) => {
-                            for field in &struct_expr.fields {
-                                assigned_subexprs(def_res, &field.expr, out);
-                            }
-                        }
-                        _ => { out.push(expr); }
-                    }
-                }
-
                 let mut assigned_subexprs_ast = vec![];
-                assigned_subexprs(visitor.def_res(), left_ast, &mut assigned_subexprs_ast);
+                assigned_subexprs_in_expr_assign_lhs(visitor.def_res(), left_ast, &mut assigned_subexprs_ast);
 
                 if let [destructure_let_hir, assignments_hir @ ..] = block_hir.stmts {
                     for (assigned_subexpr_ast, assignment_hir) in iter::zip(assigned_subexprs_ast, assignments_hir) {
@@ -1616,6 +1616,266 @@ pub fn resolve_bodies<'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, krate_a
     let mut body_visitor = BodyMetaVisitor { visitor: BodyResolutionsCollector::new(tcx, def_res) };
     ast::visit::Visitor::visit_crate(&mut body_visitor, krate_ast);
     body_visitor.visitor.finalize()
+}
+
+struct BodyResValidator<'tcx, 'op> {
+    def_res: &'op DefResolutions,
+    body_res: &'op BodyResolutions<'tcx>,
+}
+
+impl<'tcx, 'op> BodyResValidator<'tcx, 'op> {
+    fn check_node_id(&self, node_descr: &str, node_id: ast::NodeId, span: Span) {
+        if node_id == ast::DUMMY_NODE_ID || span == DUMMY_SP { return; }
+
+        let tcx = self.body_res.tcx;
+
+        let Some(_hir_id) = self.body_res.hir_id(node_id) else {
+            let mut diagnostic = tcx.dcx().struct_warn(format!("invalid AST-HIR mapping for {node_descr}"));
+            diagnostic.span(span);
+            diagnostic.span_label(span, "no matching HIR node found");
+            diagnostic.emit();
+
+            return;
+        };
+    }
+}
+
+impl<'ast, 'tcx, 'op> ast::visit::Visitor<'ast> for BodyResValidator<'tcx, 'op> {
+    fn visit_use_tree(&mut self, _use_tree: &'ast ast::UseTree, _id: ast::NodeId, _nested: bool) {
+        // Ignore use trees.
+    }
+
+    fn visit_attribute(&mut self, _attr: &'ast ast::Attribute) {
+        // Ignore attributes.
+    }
+
+    fn visit_vis(&mut self, _vis: &'ast ast::Visibility) {
+        // Ignore visibilities, as they are not represented directly in the HIR.
+    }
+
+    fn visit_fn(&mut self, fn_kind: ast::visit::FnKind<'ast>, _span: Span, _id: ast::NodeId) {
+        match fn_kind {
+            ast::visit::FnKind::Fn(_fn_ctxt, _ident, fn_sig, _vis, generics, body) => {
+                self.visit_fn_header(&fn_sig.header);
+                self.visit_generics(generics);
+                match body {
+                    Some(_) => {
+                        for param in &fn_sig.decl.inputs {
+                            self.visit_param(param);
+                        }
+                    }
+                    None => {
+                        for param in &fn_sig.decl.inputs {
+                            self.visit_ty(&param.ty);
+                        }
+                    }
+                }
+                self.visit_fn_ret_ty(&fn_sig.decl.output);
+                if let Some(body) = body { self.visit_block(body); }
+            }
+            ast::visit::FnKind::Closure(closure_binder, fn_decl, body) => {
+                self.visit_closure_binder(closure_binder);
+                for param in &fn_decl.inputs {
+                    self.visit_param(param);
+                }
+                self.visit_fn_ret_ty(&fn_decl.output);
+                self.visit_expr(body);
+            }
+        }
+    }
+
+    fn visit_param(&mut self, param: &'ast ast::Param) {
+        self.check_node_id("parameter", param.id, param.span);
+        ast::visit::walk_param(self, param)
+    }
+
+    fn visit_trait_ref(&mut self, trait_ref: &'ast ast::TraitRef) {
+        self.check_node_id("trait reference", trait_ref.ref_id, trait_ref.path.span);
+        ast::visit::walk_trait_ref(self, trait_ref)
+    }
+
+    fn visit_generic_param(&mut self, generic_param: &'ast ast::GenericParam) {
+        self.check_node_id("generic parameter", generic_param.id, generic_param.ident.span);
+        ast::visit::walk_generic_param(self, generic_param)
+    }
+
+    fn visit_precise_capturing_arg(&mut self, arg: &'ast ast::PreciseCapturingArg) {
+        match arg {
+            ast::PreciseCapturingArg::Arg(path, id) => {
+                self.check_node_id("precise capturing arg", *id, path.span);
+            }
+            _ => {}
+        }
+        ast::visit::walk_precise_capturing_arg(self, arg)
+    }
+
+    fn visit_variant(&mut self, variant: &'ast ast::Variant) {
+        self.check_node_id("variant", variant.id, variant.span);
+        ast::visit::walk_variant(self, variant)
+    }
+
+    fn visit_field_def(&mut self, field_def: &'ast ast::FieldDef) {
+        self.check_node_id("field definition", field_def.id, field_def.span);
+        ast::visit::walk_field_def(self, field_def)
+    }
+
+    fn visit_lifetime(&mut self, lifetime: &'ast ast::Lifetime, _ctxt: ast::visit::LifetimeCtxt) {
+        // TODO: Check node id.
+        ast::visit::walk_lifetime(self, lifetime)
+    }
+
+    fn visit_anon_const(&mut self, _anon_const: &'ast ast::AnonConst) {
+        // TODO: Check node id and walk subexpressions.
+    }
+
+    fn visit_block(&mut self, block: &'ast ast::Block) {
+        self.check_node_id("block", block.id, block.span);
+
+        let mut i = 0;
+        let last_index = block.stmts.len() - 1;
+        for stmt in &block.stmts {
+            // NOTE: A trailing expression is represented as an expression statement in the AST,
+            //       however the HIR has a dedicated block expression node with no statement node,
+            //       meaning that no mapping can be created for the AST statement node directly.
+            if i == last_index {
+                if let ast::StmtKind::Expr(expr) = &stmt.kind {
+                    self.visit_expr(expr);
+                    continue;
+                }
+            }
+            i += 1;
+
+            self.visit_stmt(stmt);
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+        match &stmt.kind {
+            | ast::StmtKind::Item(_)
+            | ast::StmtKind::Empty
+            | ast::StmtKind::MacCall(_) => {}
+            _ => self.check_node_id("statement", stmt.id, stmt.span),
+        }
+
+        ast::visit::walk_stmt(self, stmt)
+    }
+
+    fn visit_local(&mut self, local: &'ast ast::Local) {
+        self.check_node_id("local", local.id, local.span);
+        ast::visit::walk_local(self, local)
+    }
+
+    fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        match &expr.kind {
+            | ast::ExprKind::Paren(_)
+            | ast::ExprKind::Underscore
+            | ast::ExprKind::MacCall(_)
+            | ast::ExprKind::Dummy
+            | ast::ExprKind::Err(_) => {}
+            _ => self.check_node_id("expression", expr.id, expr.span),
+        }
+
+        match &expr.kind {
+            ast::ExprKind::MethodCall(method_call) => {
+                self.check_node_id("method call", method_call.seg.id, method_call.span);
+            }
+            _ => {}
+        }
+
+        match &expr.kind {
+            ast::ExprKind::Assign(lhs, rhs, _) => {
+                let mut assigned_subexprs = vec![];
+                visit::assigned_subexprs_in_expr_assign_lhs(self.def_res, lhs, &mut assigned_subexprs);
+                for assigned_subexpr in assigned_subexprs {
+                    self.visit_expr(assigned_subexpr);
+                }
+
+                self.visit_expr(rhs);
+            }
+
+            _ => ast::visit::walk_expr(self, expr),
+        }
+    }
+
+    fn visit_expr_field(&mut self, expr_field: &'ast ast::ExprField)  {
+        self.check_node_id("field expression", expr_field.id, expr_field.span);
+        ast::visit::walk_expr_field(self, expr_field)
+    }
+
+    fn visit_inline_asm_sym(&mut self, inline_asm_sym: &'ast ast::InlineAsmSym) {
+        self.check_node_id("inline assembly symbol", inline_asm_sym.id, inline_asm_sym.path.span);
+        ast::visit::walk_inline_asm_sym(self, inline_asm_sym)
+    }
+
+    fn visit_arm(&mut self, arm: &'ast ast::Arm) {
+        self.check_node_id("arm", arm.id, arm.span);
+        ast::visit::walk_arm(self, arm)
+    }
+
+    fn visit_pat(&mut self, pat: &'ast ast::Pat) {
+        match &pat.kind {
+            | ast::PatKind::Paren(_)
+            | ast::PatKind::Rest
+            | ast::PatKind::MacCall(..)
+            | ast::PatKind::Err(_) => {}
+            _ => self.check_node_id("pattern", pat.id, pat.span),
+        }
+
+        ast::visit::walk_pat(self, pat)
+    }
+
+    fn visit_pat_field(&mut self, pat_field: &'ast ast::PatField) {
+        self.check_node_id("field pattern", pat_field.id, pat_field.span);
+        ast::visit::walk_pat_field(self, pat_field)
+    }
+
+    fn visit_ty(&mut self, ty: &'ast ast::Ty) {
+        match &ty.kind {
+            | ast::TyKind::Paren(_)
+            | ast::TyKind::MacCall(..)
+            | ast::TyKind::Dummy
+            | ast::TyKind::Err(_) => {}
+            _ => self.check_node_id("type", ty.id, ty.span),
+        }
+
+        match &ty.kind {
+            ast::TyKind::ImplTrait(id, _, _) => {
+                self.check_node_id("impl trait", *id, ty.span);
+            }
+            ast::TyKind::AnonStruct(id, _) | ast::TyKind::AnonUnion(id, _) => {
+                self.check_node_id("anonymous type", *id, ty.span);
+            }
+            _ => {}
+        }
+
+        match &ty.kind {
+            ast::TyKind::BareFn(bare_fn_ty_ast) => {
+                for generic_param in &bare_fn_ty_ast.generic_params {
+                    self.visit_generic_param(generic_param);
+                }
+                for param in &bare_fn_ty_ast.decl.inputs {
+                    self.visit_ty(&param.ty);
+                }
+                self.visit_fn_ret_ty(&bare_fn_ty_ast.decl.output);
+            }
+            _ => ast::visit::walk_ty(self, ty),
+        }
+    }
+
+    fn visit_path_segment(&mut self, path_segment: &'ast ast::PathSegment) {
+        self.check_node_id("path segment", path_segment.id, path_segment.ident.span);
+        ast::visit::walk_path_segment(self, path_segment)
+    }
+
+    fn visit_assoc_constraint(&mut self, assoc_constraint: &'ast ast::AssocConstraint) {
+        self.check_node_id("associated item constraint", assoc_constraint.id, assoc_constraint.span);
+        ast::visit::walk_assoc_constraint(self, assoc_constraint)
+    }
+}
+
+pub fn validate_body_resolutions<'tcx>(body_res: &BodyResolutions<'tcx>, def_res: &DefResolutions, krate_ast: &ast::Crate) {
+    let mut validator = BodyResValidator { def_res, body_res };
+    ast::visit::Visitor::visit_crate(&mut validator, krate_ast);
 }
 
 struct AstBodyChildItemCollector<'ast> {

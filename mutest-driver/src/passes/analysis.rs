@@ -319,6 +319,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
 
                 let body_res = mutest_emit::analysis::ast_lowering::resolve_bodies(tcx, &def_res, &generated_crate_ast);
+                if opts.verify_opts.ast_lowering {
+                    mutest_emit::analysis::ast_lowering::validate_body_resolutions(&body_res, &def_res, &generated_crate_ast);
+                }
 
                 if opts.sanitize_macro_expns {
                     mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &def_res, &body_res, &mut generated_crate_ast);

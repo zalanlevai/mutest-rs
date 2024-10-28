@@ -246,6 +246,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
                 _ if directive.starts_with("aux-build:") => {}
                 _ if directive.starts_with("rustc-flags:") => {}
+                _ if directive.starts_with("verify:") => {}
                 _ if directive.starts_with("mutation-operators:") => {}
                 _ if directive.starts_with("mutest-flags:") => {}
                 _ if directive.starts_with("mutest-subcommand-flags:") => {}
@@ -358,6 +359,13 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut mutest_args = vec![];
+    let mut verifications = directives.iter().filter_map(|d| d.strip_prefix("verify:").map(str::trim))
+        .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))
+        .peekable();
+    if verifications.peek().is_some() {
+        mutest_args.push("--Zverify".to_owned());
+        mutest_args.push(verifications.intersperse(",").collect::<String>());
+    }
     let mut mutation_operators = directives.iter().filter_map(|d| d.strip_prefix("mutation-operators:").map(str::trim))
         .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))
         .peekable();

@@ -1,12 +1,11 @@
 //@ build
+//@ verify: ast_lowering
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
-
-#![feature(decl_macro)]
 
 #![allow(unused)]
 
-macro m() {
+#[test]
+fn test() {
     struct S;
     impl S {
         fn inherent_f() {}
@@ -25,9 +24,4 @@ macro m() {
     <S>::trait_f();
 
     <[usize]>::sort(&mut vec![3, 1, 2]);
-}
-
-#[test]
-fn test() {
-    m!();
 }
