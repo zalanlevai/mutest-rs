@@ -173,12 +173,28 @@ pub mod visit {
             walk_stmt(self, stmt_ast, stmt_hir);
         }
 
+        fn visit_local(&mut self, local_ast: &'ast ast::Local, local_hir: &'hir hir::LetStmt<'hir>) {
+            walk_local(self, local_ast, local_hir);
+        }
+
         fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
             walk_expr(self, expr_ast, expr_hir);
         }
 
+        fn visit_expr_field(&mut self, expr_field_ast: &'ast ast::ExprField, expr_field_hir: &'hir hir::ExprField<'hir>) {
+            walk_expr_field(self, expr_field_ast, expr_field_hir);
+        }
+
+        fn visit_arm(&mut self, arm_ast: &'ast ast::Arm, arm_hir: &'hir hir::Arm<'hir>) {
+            walk_arm(self, arm_ast, arm_hir);
+        }
+
         fn visit_pat(&mut self, pat_ast: &'ast ast::Pat, pat_hir: &'hir hir::Pat<'hir>) {
             walk_pat(self, pat_ast, pat_hir);
+        }
+
+        fn visit_pat_field(&mut self, pat_field_ast: &'ast ast::PatField, pat_field_hir: &'hir hir::PatField<'hir>) {
+            walk_pat_field(self, pat_field_ast, pat_field_hir);
         }
 
         fn visit_ty(&mut self, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
@@ -480,19 +496,7 @@ pub mod visit {
             }
 
             (ast::StmtKind::Let(local_ast), hir::StmtKind::Let(local_hir)) => {
-                visit_matching_pat(visitor, &local_ast.pat, local_hir.pat);
-                if let Some(ty_ast) = &local_ast.ty && let Some(ty_hir) = local_hir.ty {
-                    visit_matching_ty(visitor, ty_ast, ty_hir);
-                }
-                match (&local_ast.kind, local_hir.init) {
-                    | (ast::LocalKind::Init(expr_ast), Some(expr_hir))
-                    | (ast::LocalKind::InitElse(expr_ast, _), Some(expr_hir)) => {
-                        visit_matching_expr(visitor, expr_ast, expr_hir);
-                    }
-
-                    (ast::LocalKind::Decl, None) => {}
-                    _ => unreachable!(),
-                }
+                visitor.visit_local(local_ast, local_hir);
             }
 
             (ast::StmtKind::Item(_item_ast), hir::StmtKind::Item(_item_hir)) => {
@@ -508,6 +512,22 @@ pub mod visit {
                 diagnostic.span_note(stmt_hir.span, format!("HIR node: {}", hir_kind.descr()));
                 diagnostic.emit();
             }
+        }
+    }
+
+    pub fn walk_local<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, local_ast: &'ast ast::Local, local_hir: &'hir hir::LetStmt<'hir>) {
+        visit_matching_pat(visitor, &local_ast.pat, local_hir.pat);
+        if let Some(ty_ast) = &local_ast.ty && let Some(ty_hir) = local_hir.ty {
+            visit_matching_ty(visitor, ty_ast, ty_hir);
+        }
+        match (&local_ast.kind, local_hir.init) {
+            | (ast::LocalKind::Init(expr_ast), Some(expr_hir))
+            | (ast::LocalKind::InitElse(expr_ast, _), Some(expr_hir)) => {
+                visit_matching_expr(visitor, expr_ast, expr_hir);
+            }
+
+            (ast::LocalKind::Decl, None) => {}
+            _ => unreachable!(),
         }
     }
 
@@ -639,13 +659,7 @@ pub mod visit {
             (ast::ExprKind::Match(expr_ast, arms_ast, _), hir::ExprKind::Match(expr_hir, arms_hir, hir::MatchSource::Normal)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
                 for (arm_ast, arm_hir) in iter::zip(arms_ast, *arms_hir) {
-                    visit_matching_pat(visitor, &arm_ast.pat, arm_hir.pat);
-                    if let Some(arm_guard_ast) = &arm_ast.guard && let Some(arm_guard_hir) = arm_hir.guard {
-                        visit_matching_expr(visitor, arm_guard_ast, arm_guard_hir);
-                    }
-                    if let Some(arm_body_ast) = &arm_ast.body {
-                        visit_matching_expr(visitor, arm_body_ast, arm_hir.body);
-                    }
+                    visitor.visit_arm(arm_ast, arm_hir);
                 }
             }
             (ast::ExprKind::Closure(closure_ast), hir::ExprKind::Closure(closure_hir)) => {
@@ -811,7 +825,7 @@ pub mod visit {
             (ast::ExprKind::Struct(struct_ast), hir::ExprKind::Struct(qpath_hir, fields_hir, base_hir)) => {
                 visitor.visit_qpath(struct_ast.qself.as_deref(), &struct_ast.path, qpath_hir);
                 for (field_ast, field_hir) in iter::zip(&struct_ast.fields, *fields_hir) {
-                    visit_matching_expr(visitor, &field_ast.expr, field_hir.expr);
+                    visitor.visit_expr_field(field_ast, field_hir);
                 }
                 if let ast::StructRest::Base(base_ast) = &struct_ast.rest && let Some(base_hir) = base_hir {
                     visit_matching_expr(visitor, base_ast, base_hir);
@@ -881,6 +895,20 @@ pub mod visit {
         }
     }
 
+    pub fn walk_expr_field<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, expr_field_ast: &'ast ast::ExprField, expr_field_hir: &'hir hir::ExprField<'hir>) {
+        visit_matching_expr(visitor, &expr_field_ast.expr, expr_field_hir.expr);
+    }
+
+    pub fn walk_arm<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, arm_ast: &'ast ast::Arm, arm_hir: &'hir hir::Arm<'hir>) {
+        visit_matching_pat(visitor, &arm_ast.pat, arm_hir.pat);
+        if let Some(arm_guard_ast) = &arm_ast.guard && let Some(arm_guard_hir) = arm_hir.guard {
+            visit_matching_expr(visitor, arm_guard_ast, arm_guard_hir);
+        }
+        if let Some(arm_body_ast) = &arm_ast.body {
+            visit_matching_expr(visitor, arm_body_ast, arm_hir.body);
+        }
+    }
+
     pub fn visit_matching_pat<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, pat_ast: &'ast ast::Pat, pat_hir: &'hir hir::Pat<'hir>) {
         match (&pat_ast.kind, &pat_hir.kind) {
             (ast::PatKind::Paren(pat_ast), _) => {
@@ -928,7 +956,7 @@ pub mod visit {
             (ast::PatKind::Struct(qself_ast, path_ast, pat_fields_ast, _), hir::PatKind::Struct(qpath_hir, pat_fields_hir, _)) => {
                 visitor.visit_qpath(qself_ast.as_deref(), path_ast, qpath_hir);
                 for (pat_field_ast, pat_field_hir) in iter::zip(pat_fields_ast, *pat_fields_hir) {
-                    visit_matching_pat(visitor, &pat_field_ast.pat, pat_field_hir.pat);
+                    visitor.visit_pat_field(pat_field_ast, pat_field_hir);
                 }
             }
             (ast::PatKind::TupleStruct(qself_ast, path_ast, pats_ast), hir::PatKind::TupleStruct(qpath_hir, pats_hir, _)) => {
@@ -981,6 +1009,10 @@ pub mod visit {
                 diagnostic.emit();
             }
         }
+    }
+
+    pub fn walk_pat_field<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, pat_field_ast: &'ast ast::PatField, pat_field_hir: &'hir hir::PatField<'hir>) {
+        visit_matching_pat(visitor, &pat_field_ast.pat, pat_field_hir.pat);
     }
 
     pub fn visit_matching_ty<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
@@ -1478,14 +1510,34 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
         visit::walk_stmt(self, stmt_ast, stmt_hir);
     }
 
+    fn visit_local(&mut self, local_ast: &'ast ast::Local, local_hir: &'hir hir::LetStmt<'hir>) {
+        self.insert_ids(local_ast.id, local_hir.hir_id);
+        visit::walk_local(self, local_ast, local_hir);
+    }
+
     fn visit_expr(&mut self, expr_ast: &'ast ast::Expr, expr_hir: &'hir hir::Expr<'hir>) {
         self.insert_ids(expr_ast.id, expr_hir.hir_id);
         visit::walk_expr(self, expr_ast, expr_hir);
     }
 
+    fn visit_expr_field(&mut self, expr_field_ast: &'ast ast::ExprField, expr_field_hir: &'hir hir::ExprField<'hir>) {
+        self.insert_ids(expr_field_ast.id, expr_field_hir.hir_id);
+        visit::walk_expr_field(self, expr_field_ast, expr_field_hir);
+    }
+
+    fn visit_arm(&mut self, arm_ast: &'ast ast::Arm, arm_hir: &'hir hir::Arm<'hir>) {
+        self.insert_ids(arm_ast.id, arm_hir.hir_id);
+        visit::walk_arm(self, arm_ast, arm_hir);
+    }
+
     fn visit_pat(&mut self, pat_ast: &'ast ast::Pat, pat_hir: &'hir hir::Pat<'hir>) {
         self.insert_ids(pat_ast.id, pat_hir.hir_id);
         visit::walk_pat(self, pat_ast, pat_hir);
+    }
+
+    fn visit_pat_field(&mut self, pat_field_ast: &'ast ast::PatField, pat_field_hir: &'hir hir::PatField<'hir>) {
+        self.insert_ids(pat_field_ast.id, pat_field_hir.hir_id);
+        visit::walk_pat_field(self, pat_field_ast, pat_field_hir);
     }
 
     fn visit_ty(&mut self, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
