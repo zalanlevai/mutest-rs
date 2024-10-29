@@ -254,6 +254,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             })
             .collect::<ThinVec<_>>();
 
+        if let Some(root_ty) = def_path.type_root {
+            let ident = root_ty.as_ident(DUMMY_SP);
+            segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None });
+            relative = true;
+        }
+
         // Write non-relative paths as global paths to make sure that no name conflicts arise.
         if !relative {
             segments.insert(0, ast::PathSegment::path_root(path.span));

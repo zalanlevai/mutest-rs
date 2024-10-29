@@ -10,7 +10,7 @@ use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast;
-use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym, kw};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
 #[derive(Clone, Debug)]
 pub struct ItemChild {
@@ -269,6 +269,54 @@ where
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum DefPathRootTy {
+    Bool,
+    Char,
+    Int(ty::IntTy),
+    Uint(ty::UintTy),
+    Float(ty::FloatTy),
+    Str,
+}
+
+impl DefPathRootTy {
+    pub fn from_ty<'tcx>(ty: Ty<'tcx>) -> Option<Self> {
+        match ty.kind() {
+            ty::TyKind::Bool => Some(Self::Bool),
+            ty::TyKind::Char => Some(Self::Char),
+            ty::TyKind::Int(int_ty) => Some(Self::Int(*int_ty)),
+            ty::TyKind::Uint(uint_ty) => Some(Self::Uint(*uint_ty)),
+            ty::TyKind::Float(float_ty) => Some(Self::Float(*float_ty)),
+            ty::TyKind::Str => Some(Self::Str),
+            _ => None,
+        }
+    }
+
+    pub fn as_ident(&self, sp: Span) -> Ident {
+        match self {
+            Self::Bool => Ident::new(sym::bool, sp),
+            Self::Char => Ident::new(sym::char, sp),
+            Self::Int(ty::IntTy::I8) => Ident::new(sym::i8, sp),
+            Self::Int(ty::IntTy::I16) => Ident::new(sym::i16, sp),
+            Self::Int(ty::IntTy::I32) => Ident::new(sym::i32, sp),
+            Self::Int(ty::IntTy::I64) => Ident::new(sym::i64, sp),
+            Self::Int(ty::IntTy::I128) => Ident::new(sym::i128, sp),
+            Self::Int(ty::IntTy::Isize) => Ident::new(sym::isize, sp),
+            Self::Uint(ty::UintTy::U8) => Ident::new(sym::u8, sp),
+            Self::Uint(ty::UintTy::U16) => Ident::new(sym::u16, sp),
+            Self::Uint(ty::UintTy::U32) => Ident::new(sym::u32, sp),
+            Self::Uint(ty::UintTy::U64) => Ident::new(sym::u64, sp),
+            Self::Uint(ty::UintTy::U128) => Ident::new(sym::u128, sp),
+            Self::Uint(ty::UintTy::Usize) => Ident::new(sym::usize, sp),
+            Self::Float(ty::FloatTy::F16) => Ident::new(sym::f16, sp),
+            Self::Float(ty::FloatTy::F32) => Ident::new(sym::f32, sp),
+            Self::Float(ty::FloatTy::F64) => Ident::new(sym::f64, sp),
+            Self::Float(ty::FloatTy::F128) => Ident::new(sym::f128, sp),
+            Self::Str => Ident::new(sym::str, sp),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DefPathSegment {
     pub def_id: hir::DefId,
@@ -278,6 +326,7 @@ pub struct DefPathSegment {
 
 #[derive(Clone, Debug)]
 pub struct DefPath {
+    pub type_root: Option<DefPathRootTy>,
     pub segments: Vec<DefPathSegment>,
     pub global: bool,
 }
@@ -291,7 +340,7 @@ impl DefPath {
                 Some(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None })
             })
             .try_collect::<Vec<_>>()?;
-        Some(Self { segments, global: true })
+        Some(Self { type_root: None, segments, global: true })
     }
 
     pub fn def_id_path(&self) -> impl Iterator<Item = hir::DefId> + '_ {
@@ -313,6 +362,12 @@ impl DefPath {
 
             ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None }
         }).collect::<ThinVec<_>>();
+
+        if let Some(root_ty) = self.type_root {
+            let ident = root_ty.as_ident(DUMMY_SP);
+            segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None });
+            global = false;
+        }
 
         if global {
             segments.insert(0, ast::PathSegment::path_root(DUMMY_SP));
@@ -345,14 +400,14 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     if def_id == scope {
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
         let name = tcx.opt_item_name(def_id)?;
-        return Some(DefPath { segments: vec![DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None }], global: false });
+        return Some(DefPath { type_root: None, segments: vec![DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None }], global: false });
     }
 
     let full_def_id_path = def_id_path(tcx, def_id);
     let scope_def_id_path = def_id_path(tcx, scope);
     let relative_def_id_path = &full_def_id_path[scope_def_id_path.len()..];
 
-    let mut def_path = DefPath { segments: Vec::with_capacity(relative_def_id_path.len()), global: false };
+    let mut def_path = DefPath { type_root: None, segments: Vec::with_capacity(relative_def_id_path.len()), global: false };
     for &def_id in relative_def_id_path {
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
         let name = tcx.opt_item_name(def_id).unwrap_or(kw::Empty);
@@ -409,9 +464,15 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
         Some((0, impl_parent_def_id)) => {
             let impl_subject = tcx.impl_subject(impl_parent_def_id);
             let ty::ImplSubject::Inherent(implementer_ty) = impl_subject.instantiate_identity() else { unreachable!("encountered trait impl in def path") };
-            let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
 
-            let mut visible_root_def_paths = visible_def_paths(tcx, implementer_def_id, scope);
+            let mut visible_root_def_paths = match DefPathRootTy::from_ty(implementer_ty) {
+                Some(type_root) => smallvec![DefPath { type_root: Some(type_root), segments: vec![], global: false }],
+                None => {
+                    let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
+                    visible_def_paths(tcx, implementer_def_id, scope)
+                }
+            };
+
             if visible_root_def_paths.is_empty() { return smallvec![]; }
 
             for visible_root_def_path in &mut visible_root_def_paths {
@@ -451,13 +512,13 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
         Some(_) => {
             let root_def_id = CRATE_DEF_ID.to_def_id();
             let root_ident = Ident::new(kw::Crate, DUMMY_SP);
-            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
+            let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
             (root_def_id, root_def_path)
         }
         None if let crate_name = tcx.crate_name(def_id.krate) && extern_prelude.contains(&crate_name) => {
             let root_def_id = def_id.krate.as_def_id();
             let root_ident = Ident::new(crate_name, DUMMY_SP);
-            let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
+            let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
             (root_def_id, root_def_path)
         }
         None => 'root: {
@@ -478,7 +539,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                         if !extern_prelude.contains(&crate_name) { continue; }
 
                         let root_ident = Ident::new(tcx.crate_name(cnum), DUMMY_SP);
-                        let root_def_path = DefPath { segments: vec![DefPathSegment { def_id: visible_def_id, ident: root_ident, reexport: None }], global: true };
+                        let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: visible_def_id, ident: root_ident, reexport: None }], global: true };
                         break 'root (visible_def_id, root_def_path);
                     }
                 }
