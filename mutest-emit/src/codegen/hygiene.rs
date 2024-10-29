@@ -563,7 +563,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         // Short-circuit if self.
         if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
 
-        match (qself, self.def_res.node_res(path.segments.last().unwrap().id)) {
+        match (qself, self.def_res.node_res(node_id)) {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
             (None, Some(res)) => self.sanitize_path(path, res),
 
