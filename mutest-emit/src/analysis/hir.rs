@@ -137,6 +137,39 @@ impl<'hir> TyAliasItem<'hir> {
     }
 }
 
+pub trait NodeExt<'hir> {
+    fn qpath(&self) -> Option<&'hir hir::QPath<'hir>>;
+}
+
+impl<'hir> NodeExt<'hir> for hir::Node<'hir> {
+    fn qpath(&self) -> Option<&'hir hir::QPath<'hir>> {
+        match self {
+            hir::Node::Expr(expr_hir) => {
+                match &expr_hir.kind {
+                    hir::ExprKind::Path(qpath_hir) => Some(qpath_hir),
+                    hir::ExprKind::Struct(qpath_hir, _, _) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            hir::Node::Pat(pat_hir) => {
+                match &pat_hir.kind {
+                    hir::PatKind::Path(qpath_hir) => Some(qpath_hir),
+                    hir::PatKind::Struct(qpath_hir, _, _) => Some(qpath_hir),
+                    hir::PatKind::TupleStruct(qpath_hir, _, _) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            hir::Node::Ty(ty_hir) => {
+                match &ty_hir.kind {
+                    hir::TyKind::Path(qpath_hir) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum DefItem<'hir> {
     Item(&'hir hir::Item<'hir>),

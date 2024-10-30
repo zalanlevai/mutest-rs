@@ -1,4 +1,3 @@
-use std::assert_matches::assert_matches;
 use std::mem;
 use std::panic;
 
@@ -12,7 +11,7 @@ use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 
 use crate::analysis::ast_lowering;
-use crate::analysis::hir::{self, LOCAL_CRATE};
+use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};
 use crate::analysis::res;
 use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast::{self, AstDeref, P};
@@ -426,38 +425,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         icx.lower_ty(ty_hir)
     }
 
-    fn transform_path_root_into_sanitized_self_ty(&mut self, partial_path: &[ast::PathSegment], res: hir::Res<ast::NodeId>) -> P<ast::Ty> {
-        match res {
-            | hir::Res::SelfTyAlias { .. }
-            | hir::Res::SelfTyParam { .. }
-            => ast::mk::ty(DUMMY_SP, ast::TyKind::ImplicitSelf),
-
-            hir::Res::Def(_, _) => {
-                let mut path = ast::Path { span: DUMMY_SP, segments: ThinVec::from(partial_path), tokens: None };
-                self.adjust_path_from_expansion(&mut path, res);
-                ast::mk::ty(DUMMY_SP, ast::TyKind::Path(None, path))
-            }
-
-            hir::Res::PrimTy(prim_ty) => {
-                self.sanitize_self_ty(match prim_ty {
-                    hir::PrimTy::Bool => self.tcx.types.bool,
-                    hir::PrimTy::Char => self.tcx.types.char,
-                    hir::PrimTy::Int(int_ty) => Ty::new_int(self.tcx, ty::int_ty(int_ty)),
-                    hir::PrimTy::Uint(uint_ty) => Ty::new_uint(self.tcx, ty::uint_ty(uint_ty)),
-                    hir::PrimTy::Float(float_ty) => Ty::new_float(self.tcx, ty::float_ty(float_ty)),
-                    hir::PrimTy::Str => self.tcx.types.str_,
-                })
-            }
-
-            | hir::Res::Local(_)
-            | hir::Res::SelfCtor(..)
-            | hir::Res::ToolMod
-            | hir::Res::NonMacroAttr(..)
-            | hir::Res::Err
-            => unreachable!(),
-        }
-    }
-
     /// Extract lifetime bounds from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
@@ -567,151 +534,122 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
             (None, Some(res)) => self.sanitize_path(path, res),
 
-            // Non-qualified path reference to assoc item in inherent or trait impl.
-            (qself @ None, None) => {
+            // Otherwise, resolve it with the help of the corresponding HIR QPath.
+            (qself @ _, _) => {
                 let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return; };
+                let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { unreachable!() };
 
-                // NOTE: This returns the trait item definition, not the impl item definition.
-                let Some((def_kind, def_id)) = self.typeck_for(node_hir_id.owner).and_then(|typeck| typeck.type_dependent_def(node_hir_id)).or_else(|| {
-                    if let hir::Node::Ty(ty_hir) = self.tcx.hir_node(node_hir_id) {
-                        let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
-                        let ty = icx.lower_ty(ty_hir);
-                        let ty::TyKind::Alias(ty::AliasTyKind::Projection, alias_ty) = ty.kind() else { unreachable!() };
+                match qpath_hir {
+                    // NOTE: This corresponds to the already handled case where
+                    //       a non-qualified path has a concrete AST resolution.
+                    hir::QPath::Resolved(None, _) => unreachable!(),
 
-                        let trait_item_def_id = alias_ty.def_id;
-                        let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
-                        return Some((trait_item_def_kind, trait_item_def_id));
-                    }
-
-                    None
-                }) else { unreachable!() };
-
-                if let hir::DefKind::Ctor(..) = def_kind {
-                    return self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
-                }
-
-                // Only assoc items match this case: non-qualified paths with context-dependent resolution.
-                assert_matches!(def_kind, hir::DefKind::AssocTy | hir::DefKind::AssocConst | hir::DefKind::AssocFn);
-
-                match self.tcx.def_kind(self.tcx.parent(def_id)) {
-                    // Non-qualified path reference to assoc item in inherent impl.
-                    hir::DefKind::Impl { of_trait: false } => {
-                        self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
-                        *qself = None;
-                    }
-
-                    // Non-qualified path reference to assoc item in trait impl.
-                    hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                        let Some([parent_path_segment, _]) = path.segments.last_chunk::<2>() else { unreachable!() };
-                        let container_res = self.def_res.node_res(parent_path_segment.id);
-
-                        let self_ty_ast = match container_res {
-                            // `<$ty::$assoc_ty as $trait>::$assoc` path.
-                            Some(container_res) => {
-                                let self_ty_ast = self.transform_path_root_into_sanitized_self_ty(&path.segments[..(path.segments.len() - 1)], container_res);
-                                self_ty_ast
-                            }
-
-                            // `$ty::$assoc_ty::$assoc`path.
+                    | hir::QPath::Resolved(Some(qself_ty_hir), _)
+                    | hir::QPath::TypeRelative(qself_ty_hir, _) => {
+                        let mut qres = match self.typeck_for(node_hir_id.owner) {
+                            Some(typeck) => typeck.qpath_res(&qpath_hir, node_hir_id),
                             None => {
-                                let Some(node_hir) = self.body_res.hir_node(node_id) else { unreachable!() };
-
-                                let qpath = match self.tcx.hir_node(node_hir_id) {
-                                    hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
-                                    hir::Node::Pat(pat_hir) if let hir::PatKind::Path(qpath) = pat_hir.kind => qpath,
-                                    hir::Node::Ty(ty_hir) if let hir::TyKind::Path(qpath) = ty_hir.kind => qpath,
-                                    _ => unreachable!(),
-                                };
-
-                                let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
-                                let qself_ty = self.lookup_hir_node_ty(qself_hir_ty);
-
-                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
-
-                                qself_ty_ast
+                                match qpath_hir {
+                                    hir::QPath::Resolved(_, path_hir) => path_hir.res,
+                                    _ => hir::Res::Err,
+                                }
                             }
                         };
+                        if let hir::Res::Err = qres {
+                            match self.tcx.hir_node(node_hir_id) {
+                                hir::Node::Ty(ty_hir) => {
+                                    let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
+                                    let ty = icx.lower_ty(ty_hir);
+                                    let ty::TyKind::Alias(ty::AliasTyKind::Projection, alias_ty) = ty.kind() else { unreachable!() };
 
-                        self.sanitize_path(path, hir::Res::Def(def_kind, def_id));
-                        if let Some(container_res) = container_res {
-                            // Append lifetime bounds from local trait bounds corresponding to parameter types to the trait subpath.
-                            if let Some(generic_args_ast) = self.extract_local_lifetime_trait_bounds(self.tcx.parent(def_id), container_res) {
-                                let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
-                                segment.args = Some(generic_args_ast);
+                                    let trait_item_def_id = alias_ty.def_id;
+                                    let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
+
+                                    qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
+                                }
+
+                                _ => panic!("BUG: path resolved to `Err`"),
                             }
                         }
 
-                        *qself = Some(P(ast::QSelf {
-                            ty: self_ty_ast,
-                            path_span: DUMMY_SP,
-                            position: path.segments.len() - 1,
-                        }));
+                        let qself_ty = self.lookup_hir_node_ty(qself_ty_hir);
+
+                        // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
+                        match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
+                            hir::DefKind::Trait | hir::DefKind::TraitAlias => {
+                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+
+                                let parent_path_segment_res = match path.segments.last_chunk::<2>() {
+                                    Some([parent_path_segment, _]) => self.def_res.node_res(parent_path_segment.id),
+                                    None => None,
+                                };
+
+                                self.sanitize_path(path, qres.expect_non_local());
+                                // NOTE: There is no need to append lifetime bounds from local trait bounds corresponding to parameter types
+                                //       if the path is already qualified, since
+                                //       the necessary trait arguments should already be present in the corresponding path segment.
+                                if qself.is_none() {
+                                    if let Some(parent_path_segment_res) = parent_path_segment_res {
+                                        // Append lifetime bounds from local trait bounds corresponding to parameter types to the trait subpath.
+                                        if let Some(generic_args_ast) = self.extract_local_lifetime_trait_bounds(self.tcx.parent(qres.def_id()), parent_path_segment_res) {
+                                            let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
+                                            segment.args = Some(generic_args_ast);
+                                        }
+                                    }
+                                }
+
+                                *qself = Some(P(ast::QSelf {
+                                    ty: qself_ty_ast,
+                                    path_span: DUMMY_SP,
+                                    position: path.segments.len() - 1,
+                                }));
+                            }
+
+                            // `<[_]>::$assoc_item` path.
+                            // HACK: Paths to assoc items in inherent impls of slices and arrays use a special syntax based on qualified paths.
+                            //       This is handled in `adjust_path_from_expansion` by only creating a path relative to the slice and array types respectively
+                            //       (esentially just naming the assoc item itself), and
+                            //       here by appending the appropriate path qualification with the corresponding type.
+                            hir::DefKind::Impl { of_trait: false }
+                                if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
+                                && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
+                            => {
+                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+                                self.sanitize_path(path, qres.expect_non_local());
+                                // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
+                                *qself = Some(P(ast::QSelf {
+                                    ty: qself_ty_ast,
+                                    path_span: DUMMY_SP,
+                                    position: 0,
+                                }));
+                            }
+
+                            hir::DefKind::Impl { of_trait: false } => {
+                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+                                self.sanitize_path(path, qres.expect_non_local());
+
+                                // Remove the non-assoc part of the path and replace it with
+                                // a "dummy" qualified self using the type derived from the type system
+                                // corresponding to the HIR self type, like so:
+                                // `<$ty>::$assoc` (note the lack of the `as` qualifier).
+                                path.segments.splice(0..(path.segments.len() - 1), []);
+                                *qself = Some(P(ast::QSelf {
+                                    ty: qself_ty_ast,
+                                    path_span: DUMMY_SP,
+                                    position: 0,
+                                }));
+                            }
+
+                            // If the portion of the path within the qself does not refer to a trait or impl,
+                            // then the resolved path no longer needs a qualified self.
+                            _ => {
+                                self.sanitize_path(path, qres.expect_non_local());
+                                *qself = None;
+                            }
+                        }
                     }
 
-                    _ => unreachable!(),
-                }
-            }
-
-            // Qualified path reference to assoc item in inherent or trait impl.
-            (qself @ Some(_), _) => {
-                let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return; };
-                let qpath = match self.tcx.hir_node(node_hir_id) {
-                    hir::Node::Expr(expr_hir) if let hir::ExprKind::Path(qpath) = expr_hir.kind => qpath,
-                    hir::Node::Pat(pat_hir) if let hir::PatKind::Path(qpath) = pat_hir.kind => qpath,
-                    hir::Node::Ty(ty_hir) if let hir::TyKind::Path(qpath) = ty_hir.kind => qpath,
-                    _ => unreachable!(),
-                };
-
-                let qres = self.typeck_for(node_hir_id.owner).map(|typeck| typeck.qpath_res(&qpath, node_hir_id)).unwrap_or_else(|| {
-                    let hir::QPath::Resolved(_, path) = qpath else { unreachable!() };
-                    path.res
-                });
-
-                let (hir::QPath::Resolved(Some(qself_hir_ty), _) | hir::QPath::TypeRelative(qself_hir_ty, _))  = qpath else { unreachable!() };
-                let qself_ty = self.lookup_hir_node_ty(qself_hir_ty);
-
-                // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
-                match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
-                    hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                        let qself_ty_ast = self.sanitize_self_ty(qself_ty);
-
-                        self.sanitize_path(path, qres.expect_non_local());
-                        // NOTE: There is no need to append lifetime bounds from local trait bounds corresponding to parameter types,
-                        //       because the path is already qualified, so
-                        //       the necessary trait arguments should already be present in the corresponding path segment.
-
-                        *qself = Some(P(ast::QSelf {
-                            ty: qself_ty_ast,
-                            path_span: DUMMY_SP,
-                            position: path.segments.len() - 1,
-                        }));
-                    }
-
-                    // `<[_]>::$assoc_item` path.
-                    // HACK: Paths to assoc items in inherent impls of slices and arrays use a special syntax based on qualified paths.
-                    //       This is handled in `adjust_path_from_expansion` by only creating a path relative to the slice and array types respectively
-                    //       (esentially just naming the assoc item itself), and
-                    //       here by appending the appropriate path qualification with the corresponding type.
-                    hir::DefKind::Impl { of_trait: false }
-                        if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
-                        && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
-                    => {
-                        let qself_ty_ast = self.sanitize_self_ty(qself_ty);
-                        self.sanitize_path(path, qres.expect_non_local());
-                        // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
-                        *qself = Some(P(ast::QSelf {
-                            ty: qself_ty_ast,
-                            path_span: DUMMY_SP,
-                            position: 0,
-                        }));
-                    }
-
-                    // If the portion of the path within the qself does not refer to a trait,
-                    // then the resolved path no longer needs a qualified self.
-                    _ => {
-                        self.sanitize_path(path, qres.expect_non_local());
-                        *qself = None;
-                    }
+                    hir::QPath::LangItem(_, _) => unreachable!(),
                 }
             }
         }
