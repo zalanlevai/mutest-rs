@@ -425,10 +425,29 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         icx.lower_ty(ty_hir)
     }
 
-    /// Extract lifetime bounds from local trait bounds corresponding to the parameter,
+    fn sanitize_region(&self, region: ty::Region<'tcx>) -> Option<ast::Lifetime> {
+        let span = match ty::region_opt_param_def_id(region, self.tcx) {
+            Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
+            None => DUMMY_SP,
+        };
+        let mut ident = Ident::new(region.get_name()?, span);
+        sanitize_ident_if_from_expansion(&mut ident, IdentResKind::Def);
+
+        Some(ast::mk::lifetime(DUMMY_SP, ident))
+    }
+
+    fn sanitize_ty(&self, ty: Ty<'tcx>) -> P<ast::Ty> {
+        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
+        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
+        let Some(ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
+
+        ty_ast
+    }
+
+    /// Extract bound params from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
-    fn extract_local_lifetime_trait_bounds(&mut self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>) -> Option<P<ast::GenericArgs>> {
+    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>) -> Option<P<ast::GenericArgs>> {
         let (generic_predicates, param_index) = match param_res {
             hir::Res::SelfTyAlias { alias_to: impl_def_id, .. } => {
                 let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
@@ -472,18 +491,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             .filter_map(|generic_arg| {
                 match generic_arg.unpack() {
                     ty::GenericArgKind::Lifetime(region) => {
-                        let span = match ty::region_opt_param_def_id(region, self.tcx) {
-                            Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
-                            None => DUMMY_SP,
-                        };
-                        let mut ident = Ident::new(region.get_name()?, span);
-                        sanitize_ident_if_from_expansion(&mut ident, IdentResKind::Def);
-
-                        let lifetime = ast::mk::lifetime(DUMMY_SP, ident);
+                        let lifetime = self.sanitize_region(region)?;
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
                     }
-                    ty::GenericArgKind::Type(_) => None,
-                    ty::GenericArgKind::Const(_) => None,
+                    ty::GenericArgKind::Type(ty) => {
+                        let ty_ast = self.sanitize_ty(ty);
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
+                    }
+                    ty::GenericArgKind::Const(_) => {
+                        None // TODO
+                    }
                 }
             })
             .collect::<ThinVec<_>>();
@@ -491,14 +508,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         if args_ast.is_empty() { return None; }
 
         Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
-    }
-
-    fn sanitize_self_ty(&mut self, ty: Ty<'tcx>) -> P<ast::Ty> {
-        let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
-        let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
-
-        ty_ast
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) {
@@ -560,23 +569,23 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
                         match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
                             hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty);
 
-                                let parent_path_segment_res = match path.segments.last_chunk::<2>() {
-                                    Some([parent_path_segment, _]) => self.def_res.node_res(parent_path_segment.id),
-                                    None => None,
+                                let parent_path_segment_res = match &path.segments[..] {
+                                    [.., parent_path_segment, _] => self.def_res.node_res(parent_path_segment.id),
+                                    _ => None,
                                 };
 
                                 self.sanitize_path(path, qres.expect_non_local());
-                                // NOTE: There is no need to append lifetime bounds from local trait bounds corresponding to parameter types
+                                // NOTE: There is no need to append bound params from local trait bounds corresponding to parameter types
                                 //       if the path is already qualified, since
                                 //       the necessary trait arguments should already be present in the corresponding path segment.
                                 if qself.is_none() {
                                     if let Some(parent_path_segment_res) = parent_path_segment_res {
-                                        // Append lifetime bounds from local trait bounds corresponding to parameter types to the trait subpath.
-                                        if let Some(generic_args_ast) = self.extract_local_lifetime_trait_bounds(self.tcx.parent(qres.def_id()), parent_path_segment_res) {
-                                            let [.., segment, _] = &mut path.segments[..] else { unreachable!() };
-                                            segment.args = Some(generic_args_ast);
+                                        // Append bound params from local trait bounds corresponding to parameter types to the trait subpath.
+                                        if let Some(generic_args_ast) = self.extract_local_trait_bound_params(self.tcx.parent(qres.def_id()), parent_path_segment_res) {
+                                            let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
+                                            parent_path_segment.args = Some(generic_args_ast);
                                         }
                                     }
                                 }
@@ -597,7 +606,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
                                 && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
                             => {
-                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty);
                                 self.sanitize_path(path, qres.expect_non_local());
                                 // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
                                 *qself = Some(P(ast::QSelf {
@@ -608,7 +617,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             }
 
                             hir::DefKind::Impl { of_trait: false } => {
-                                let qself_ty_ast = self.sanitize_self_ty(qself_ty);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty);
                                 self.sanitize_path(path, qres.expect_non_local());
 
                                 // Remove the non-assoc part of the path and replace it with

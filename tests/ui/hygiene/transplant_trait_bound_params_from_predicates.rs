@@ -44,6 +44,20 @@ macro m() {
     impl<'deee, __D: Deserializer<'deee>> DeserializeWithDeserializer<'deee, __D> for () {
         fn deserialize() -> Result<(), __D::Error> { Ok(()) }
     }
+
+    // TEST: Transplant lifetimes from type parameter predicates in non-trait impl items.
+    struct __Deserializer<__D>(std::marker::PhantomData<__D>);
+    impl<'dee, __D: Deserializer<'dee>> __Deserializer<__D> {
+        fn deserialize() -> Result<(), __D::Error> { Ok(()) }
+    }
+
+    // TEST: Transplant type bounds from type parameter predicates.
+    struct Rgb(u8, u8, u8);
+    impl std::ops::Mul<f32> for Rgb {
+        type Output = Self;
+        fn mul(self, _other: f32) -> Self::Output { self }
+    }
+    fn mul_f32<T: std::ops::Mul<f32>>() -> Result<(), T::Output> { Ok(()) }
 }
 
 m!();
