@@ -1,4 +1,5 @@
 //@ build
+//@ stderr: empty
 //@ mutest-flags: --Zsanitize-macro-expns
 
 #![allow(unused)]

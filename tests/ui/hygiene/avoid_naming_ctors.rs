@@ -1,4 +1,3 @@
-//@ print-code
 //@ build
 //@ stderr: empty
 //@ mutest-flags: --Zsanitize-macro-expns

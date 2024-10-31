@@ -4,12 +4,13 @@
 
 #![feature(decl_macro)]
 
+#![allow(unused)]
+
 struct Resolution<const IDX: isize>;
 
 #[cfg(test)]
 mod tests {
     #[test]
-    #[allow(unused)]
     fn test_embed_non_macro_items() {
         macro embed_non_macro_items($($item:item)+) {
             fn f() -> crate::Resolution<-1> { crate::Resolution }

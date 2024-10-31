@@ -1,4 +1,3 @@
-//@ print-code
 //@ build
 //@ stderr: empty
 //@ mutest-flags: --Zsanitize-macro-expns
@@ -21,4 +20,7 @@ macro m() {
     }
 }
 
-m!();
+#[test]
+fn test() {
+    m!();
+}
