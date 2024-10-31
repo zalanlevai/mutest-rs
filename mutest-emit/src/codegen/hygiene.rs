@@ -485,7 +485,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             })
             .collect::<Vec<_>>();
 
-        let Some(trait_predicate) = predicates.iter().find(|trait_predicate| trait_predicate.def_id() == trait_def_id) else { unreachable!() };
+        let Some(trait_predicate) = predicates.iter().find(|trait_predicate| trait_predicate.def_id() == trait_def_id) else {
+            // No trait predicates for the trait, skip.
+            return None;
+        };
 
         let args_ast = trait_predicate.trait_ref.args[1..].iter()
             .filter_map(|generic_arg| {

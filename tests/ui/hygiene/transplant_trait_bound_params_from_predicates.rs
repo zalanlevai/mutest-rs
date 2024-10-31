@@ -58,6 +58,12 @@ macro m() {
         fn mul(self, _other: f32) -> Self::Output { self }
     }
     fn mul_f32<T: std::ops::Mul<f32>>() -> Result<(), T::Output> { Ok(()) }
+
+    // TEST: Do not transplant anything if no bounds are available for the trait.
+    trait DefaultWithIndirection<'de>: Default {
+        type Error;
+    }
+    fn deserialize_default<'dee, __D: DefaultWithIndirection<'dee>>() -> Result<__D, __D::Error> { Ok(__D::default()) }
 }
 
 m!();
