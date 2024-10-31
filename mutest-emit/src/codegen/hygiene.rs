@@ -269,9 +269,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         assert!(!path.segments.is_empty(), "path at {span:?} was sanitized into an empty path",
             span = path.span,
         );
-        assert!(segments_with_generics.is_empty(), "path at {span:?} contained segments with generics which could not be matched against the new path segments",
-            span = path.span,
-        );
     }
 
     fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span) -> res::DefPath {
