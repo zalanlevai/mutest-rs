@@ -292,8 +292,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
     fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
         match res {
-            hir::Res::Local(_) => {
+            hir::Res::Local(node_id) => {
+                let Some(hir_id) = self.body_res.hir_id(node_id) else { return; };
+                let def_ident = self.tcx.hir().ident(hir_id);
+
                 let Some(last_segment) = path.segments.last_mut() else { unreachable!() };
+                copy_def_span_ctxt(&mut last_segment.ident, def_ident.span);
                 sanitize_ident_if_from_expansion(&mut last_segment.ident, IdentResKind::Local);
             }
 
