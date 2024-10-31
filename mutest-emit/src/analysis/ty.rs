@@ -626,7 +626,19 @@ pub mod print {
                                 }
                             }
                         }
-                        ty::AliasTyKind::Projection | ty::AliasTyKind::Inherent | ty::AliasTyKind::Weak => {
+                        ty::AliasTyKind::Projection => {
+                            let def_path = self.print_def_path(alias_ty.def_id, alias_ty.args)?;
+
+                            let self_ty = self.print_ty(alias_ty.self_ty())?;
+                            let qself = P(ast::QSelf {
+                                ty: self_ty,
+                                path_span: DUMMY_SP,
+                                position: def_path.segments.len() - 1,
+                            });
+
+                            Ok(ast::mk::ty_path(Some(qself), def_path))
+                        }
+                        ty::AliasTyKind::Inherent | ty::AliasTyKind::Weak => {
                             let def_path = self.print_def_path(alias_ty.def_id, alias_ty.args)?;
                             Ok(ast::mk::ty_path(None, def_path))
                         }

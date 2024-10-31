@@ -496,24 +496,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn sanitize_self_ty(&mut self, ty: Ty<'tcx>) -> P<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(mut ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
-
-        match ty.kind() {
-            // `<Type as Trait>::AssocType`
-            // HACK: Attach qualified self to malformed path out of `ty::ast_repr`.
-            // TODO: Allow `ty::print::AstTyPrinter` to output qualified paths, and implement this behaviour directly.
-            ty::Alias(ty::Projection, alias_ty) => {
-                let ast::TyKind::Path(qpath, path) = &mut ty_ast.kind else { unreachable!() };
-
-                let Some(self_ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, alias_ty.self_ty(), def_path_handling, opaque_ty_handling, true) else { unreachable!() };
-                *qpath = Some(P(ast::QSelf {
-                    ty: self_ty_ast,
-                    path_span: DUMMY_SP,
-                    position: path.segments.len() - 1,
-                }));
-            }
-            _ => {}
-        }
+        let Some(ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
 
         ty_ast
     }
