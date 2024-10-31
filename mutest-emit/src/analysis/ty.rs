@@ -682,15 +682,16 @@ pub mod print {
                     }))))
                 }
 
+                // NOTE: These types cannot be represented directly in the AST, so we must replace them with inference holes.
+                ty::TyKind::FnDef(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                ty::TyKind::Closure(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                ty::TyKind::Coroutine(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                ty::TyKind::CoroutineClosure(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                ty::TyKind::CoroutineWitness(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+
                 ty::TyKind::Pat(_, _) => Err("encountered pat".to_owned()),
                 ty::TyKind::Bound(_, _) => Err("encountered bound type variable".to_owned()),
                 ty::TyKind::Infer(_) => Err("encountered type variable".to_owned()),
-
-                ty::TyKind::FnDef(_, _) => Err("encountered anonymous function declaration type".to_owned()),
-                ty::TyKind::Closure(_, _) => Err("encountered anonymous closure type".to_owned()),
-                ty::TyKind::Coroutine(_, _) => Err("encountered anonymous coroutine type".to_owned()),
-                ty::TyKind::CoroutineClosure(_, _) => Err("encountered anonymous coroutine closure type".to_owned()),
-                ty::TyKind::CoroutineWitness(_, _) => Err("encountered anonymous coroutine storage type".to_owned()),
 
                 ty::TyKind::Placeholder(_) => Err("encountered placeholder type".to_owned()),
                 ty::TyKind::Error(_) => Err("encountered type error".to_owned()),
