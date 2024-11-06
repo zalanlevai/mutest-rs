@@ -49,19 +49,26 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResK
 
     let syntax_ctxt = ident.span.ctxt();
 
-    let expn = syntax_ctxt.outer_expn_data();
-    if !is_macro_expn(&expn) { return; }
+    let mut res_ctxt_expn_id = None;
+    for (expn_id, transparency) in syntax_ctxt.marks().into_iter().rev() {
+        // Some identifiers produced by semi-transparent expansions (e.g. macro_rules macros)
+        // may be resolved at call-site, rather than at definition-site, meaning that
+        // they are not actually hygienic.
+        if let Transparency::SemiTransparent = transparency {
+            // Local variables and labels get resolved at definition-site (i.e. hygienic),
+            // everything else at call-site (i.e. not hygienic).
+            // NOTE: `$crate` also gets resolved at definition-site but is handled
+            //       before our sanitization step.
+            let (IdentResKind::Local | IdentResKind::Label) = ident_res_kind else { continue; };
+        }
 
-    // Some identifiers produced by semi-transparent expansions (e.g. macro_rules macros)
-    // may be resolved at call-site, rather than at definition-site, meaning that
-    // they are not actually hygienic.
-    if let Some((_, Transparency::SemiTransparent)) = syntax_ctxt.marks().last() {
-        // Local variables and labels get resolved at definition-site (i.e. hygienic),
-        // everything else at definition-site (i.e. not hygienic).
-        // NOTE: `$crate` also gets resolved at definition-site but is handled
-        //       before our sanitization step.
-        let (IdentResKind::Local | IdentResKind::Label) = ident_res_kind else { return; };
+        res_ctxt_expn_id = Some(expn_id);
+        break;
     }
+
+    let Some(res_ctxt_expn_id) = res_ctxt_expn_id else { return; };
+    let res_ctxt_expn = res_ctxt_expn_id.expn_data();
+    if !is_macro_expn(&res_ctxt_expn) { return; }
 
     let (is_label, bare_ident) = match ident.as_str().strip_prefix("'") {
         Some(bare_ident) => (true, bare_ident),
@@ -70,12 +77,10 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResK
 
     assert!(!bare_ident.starts_with("__rustc_expn_"), "encountered ident starting with `__rustc_expn_` at {:?}: the macro might have been sanitized twice", ident.span);
 
-    let expn_id = syntax_ctxt.outer_expn();
-
     ident.name = Symbol::intern(&format!("{prefix}__rustc_expn_{expn_crate_id}_{expn_local_id}_{bare_ident}",
         prefix = is_label.then(|| "'").unwrap_or(""),
-        expn_crate_id = expn_id.krate.index(),
-        expn_local_id = expn_id.local_id.index(),
+        expn_crate_id = res_ctxt_expn_id.krate.index(),
+        expn_local_id = res_ctxt_expn_id.local_id.index(),
     ));
 }
 
