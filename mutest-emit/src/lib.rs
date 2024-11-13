@@ -10,6 +10,7 @@
 #![feature(iterator_try_collect)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
+#![feature(never_type)]
 
 #![feature(rustc_private)]
 extern crate rustc_apfloat;

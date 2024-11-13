@@ -15,6 +15,7 @@ use crate::codegen::symbols::{DUMMY_SP, Span};
 pub struct DefResolutions {
     pub node_id_to_def_id: ast::node_id::NodeMap<hir::LocalDefId>,
     pub partial_res_map: ast::node_id::NodeMap<hir::PartialRes>,
+    pub import_res_map: ast::node_id::NodeMap<hir::PerNS<Option<hir::Res<ast::NodeId>>>>,
 }
 
 impl DefResolutions {
@@ -22,11 +23,16 @@ impl DefResolutions {
         Self {
             node_id_to_def_id: resolver.node_id_to_def_id.clone(),
             partial_res_map: resolver.partial_res_map.clone(),
+            import_res_map: resolver.import_res_map.clone(),
         }
     }
 
     pub fn node_res(&self, node_id: ast::NodeId) -> Option<hir::Res<ast::NodeId>> {
         self.partial_res_map.get(&node_id).and_then(|partial_res| partial_res.full_res())
+    }
+
+    pub fn import_res(&self, node_id: ast::NodeId) -> Option<hir::PerNS<Option<hir::Res<ast::NodeId>>>> {
+        self.import_res_map.get(&node_id).copied()
     }
 }
 

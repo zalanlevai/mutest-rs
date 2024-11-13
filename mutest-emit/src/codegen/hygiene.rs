@@ -1,6 +1,8 @@
+use std::iter;
 use std::mem;
 use std::panic;
 
+use itertools::Itertools;
 use rustc_data_structures::sync::Lrc;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_hash::FxHashSet;
@@ -8,7 +10,7 @@ use rustc_hir_analysis::collect::ItemCtxt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_span::edition::Edition;
 use smallvec::{SmallVec, smallvec};
-use thin_vec::ThinVec;
+use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::ast_lowering;
 use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};
@@ -17,7 +19,7 @@ use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast::{self, AstDeref, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
-use crate::codegen::symbols::hygiene::{ExpnData, Transparency};
+use crate::codegen::symbols::hygiene::{ExpnData, ExpnId, MacroKind, Transparency};
 
 fn is_macro_expn(expn: &ExpnData) -> bool {
     match expn.kind {
@@ -46,6 +48,8 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResK
     if ident.name == kw::Crate { return; }
     if ident.name == kw::Super { return; }
     if ident.name == kw::SelfLower || ident.name == kw::SelfUpper { return; }
+    // `_` is an ident but cannot be a raw identifier and cannot be used in paths.
+    if ident.name == kw::Underscore || ident.name == kw::UnderscoreLifetime { return; }
 
     let syntax_ctxt = ident.span.ctxt();
 
@@ -97,9 +101,7 @@ pub fn sanitize_ident_if_def_from_expansion(ident: &mut Ident, def_ident_span: S
 }
 
 fn sanitize_standalone_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResKind) {
-    if ident.name == kw::SelfLower { return; }
     if ident.name == kw::StaticLifetime { return; }
-    if ident.name == kw::Underscore || ident.name == kw::UnderscoreLifetime { return; }
 
     sanitize_ident_if_from_expansion(ident, ident_res_kind);
 }
@@ -108,6 +110,13 @@ fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attri
     syntax_extensions.iter().any(|syntax_extension| {
         syntax_extension.helper_attrs.iter().any(|&helper_attr| attr.has_name(helper_attr))
     })
+}
+
+#[derive(Clone, Copy)]
+enum Macros2_0TopLevelRelativePathResHack {
+    InTopLevelMacros2_0Scope { parent_module: hir::DefId },
+    InNestedMacros2_0Scope(ExpnId),
+    NotInMacros2_0Scope,
 }
 
 struct MacroExpansionSanitizer<'tcx, 'op> {
@@ -121,6 +130,16 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     current_scope: Option<hir::DefId>,
     /// Keep track of the current type checking context for type-dependent name resolution.
     current_typeck_ctx: Option<&'tcx ty::TypeckResults<'tcx>>,
+
+    /// In macros 2.0 scopes, relative paths get resolved in the scope of the macro definining module,
+    /// but only at the top-level within the macro expansion.
+    /// HACK: We use a marker to determine whether we are in a macros 2.0 scope, but not in a module nested inside.
+    /// NOTE: This is because rustc currently does not accept (and correctly resolve) relative paths
+    ///       in nested modules within macros 2.0 macro expansion scopes.
+    ///       See `tests/ui/hygiene/rustc_res/relative_use_imports_do_not_work_in_nested_mod_within_macros_2_0`
+    ///       to test whether this expectation is still met.
+    macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack,
+
     /// We do not want to sanitize some idents (mostly temporarily) in the AST.
     /// During the visit we keep track of these so that they can be exluded from sanitization.
     protected_idents: FxHashSet<Ident>,
@@ -276,8 +295,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         );
     }
 
-    fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span) -> res::DefPath {
-        let mut visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope);
+    fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath {
+        let mut visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope, ignore_reexport);
         if let Some(visible_path) = visible_paths.drain(..).next() { return visible_path; }
 
         // Ensure that the def is in the current scope, otherwise it really is not visible from here.
@@ -292,7 +311,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         }
     }
 
-    fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
+    fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) {
         match res {
             hir::Res::Local(node_id) => {
                 let Some(hir_id) = self.body_res.hir_id(node_id) else { return; };
@@ -322,6 +341,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::AssocTy
                     | hir::DefKind::AssocFn
                     | hir::DefKind::AssocConst
+                    | hir::DefKind::Macro(..)
                     => {
                         if let hir::DefKind::Ctor(..) = def_kind {
                             // Adjust target definition to the parent to avoid naming the unnamed constructors.
@@ -357,7 +377,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             None => {}
                         }
 
-                        let visible_def_path = self.expect_visible_def_path(def_id, path.span);
+                        let visible_def_path = self.expect_visible_def_path(def_id, path.span, ignore_reexport);
                         self.overwrite_path_with_def_path(path, &visible_def_path);
                     }
 
@@ -373,7 +393,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         // TODO
                     }
 
-                    | hir::DefKind::Macro(..)
                     | hir::DefKind::ExternCrate
                     | hir::DefKind::Use
                     | hir::DefKind::AnonConst
@@ -397,7 +416,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         }
     }
 
-    fn sanitize_path(&mut self, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
+    fn sanitize_path(&mut self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) {
         // NOTE: We explicitly only visit the generic arguments, as we will
         //       sanitize the ident segments afterwards.
         for segment in &mut path.segments {
@@ -406,14 +425,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        // Short-circuit if not in a macro expansion, as there is no
-        // other child node which could be from a macro expansion.
-        if !is_macro_expn_span(path.span) { return; }
-
         // Short-circuit if self.
         if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
 
-        self.adjust_path_from_expansion(path, res);
+        self.adjust_path_from_expansion(path, res, ignore_reexport);
     }
 
     fn typeck_for(&self, owner_id: hir::OwnerId) -> Option<&'tcx ty::TypeckResults<'tcx>> {
@@ -524,7 +539,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         if !is_macro_expn_span(path.span) {
             // HACK: The non-macro path will not be adjusted by `sanitize_path`,
             //       so the resolution argument will not be used.
-            self.sanitize_path(path, hir::Res::Err);
+            self.sanitize_path(path, hir::Res::Err, None);
             return;
         }
 
@@ -533,7 +548,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         match (qself, self.def_res.node_res(node_id)) {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
-            (None, Some(res)) => self.sanitize_path(path, res),
+            (None, Some(res)) => self.sanitize_path(path, res, None),
 
             // Otherwise, resolve it with the help of the corresponding HIR QPath.
             (qself @ _, _) => {
@@ -585,7 +600,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     _ => None,
                                 };
 
-                                self.sanitize_path(path, qres.expect_non_local());
+                                self.sanitize_path(path, qres.expect_non_local(), None);
                                 // NOTE: There is no need to append bound params from local trait bounds corresponding to parameter types
                                 //       if the path is already qualified, since
                                 //       the necessary trait arguments should already be present in the corresponding path segment.
@@ -616,7 +631,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
                             => {
                                 let qself_ty_ast = self.sanitize_ty(qself_ty);
-                                self.sanitize_path(path, qres.expect_non_local());
+                                self.sanitize_path(path, qres.expect_non_local(), None);
                                 // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
                                 *qself = Some(P(ast::QSelf {
                                     ty: qself_ty_ast,
@@ -627,7 +642,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                             hir::DefKind::Impl { of_trait: false } => {
                                 let qself_ty_ast = self.sanitize_ty(qself_ty);
-                                self.sanitize_path(path, qres.expect_non_local());
+                                self.sanitize_path(path, qres.expect_non_local(), None);
 
                                 // Remove the non-assoc part of the path and replace it with
                                 // a "dummy" qualified self using the type derived from the type system
@@ -644,7 +659,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             // If the portion of the path within the qself does not refer to a trait or impl,
                             // then the resolved path no longer needs a qualified self.
                             _ => {
-                                self.sanitize_path(path, qres.expect_non_local());
+                                self.sanitize_path(path, qres.expect_non_local(), None);
                                 *qself = None;
                             }
                         }
@@ -654,6 +669,217 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 }
             }
         }
+    }
+
+    fn sanitize_import_path(&mut self, scope: hir::HirId, import_node_id: ast::NodeId, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
+        let Some(&import_def_id) = self.def_res.node_id_to_def_id.get(&import_node_id) else { unreachable!() };
+
+        let hir::Res::Def(def_kind, def_id) = res else { panic!("import path has non-def last segment") };
+        // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
+        // and we can simply sanitize the whole path in one go.
+        if let hir::DefKind::Mod = def_kind {
+            self.sanitize_path(path, res, Some(import_def_id.to_def_id()));
+            return;
+        }
+
+        let [mod_path_segments @ .., item_path_segment] = &mut path.segments[..] else { panic!("empty import path") };
+
+        let mod_scope = self.tcx.parent_module(scope).to_def_id();
+        let overlay_mod_scope = match self.macros_2_0_top_level_relative_path_res_hack {
+            Macros2_0TopLevelRelativePathResHack::InTopLevelMacros2_0Scope { parent_module: macros_2_0_def_parent_mod } => Some(macros_2_0_def_parent_mod),
+            _ => None,
+        };
+
+        let (parent_mod_def_id, referenced_mod_child) = match mod_path_segments {
+            [.., parent_mod_path_segment] if let Some(parent_mod_res) = self.def_res.node_res(parent_mod_path_segment.id) => {
+                let hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id) = parent_mod_res else { panic!("import path has non-mod prefix segment") };
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                (parent_mod_def_id, referenced_mod_child)
+            }
+
+            // `$crate::Item` paths.
+            [dollar_crate_segment]  if dollar_crate_segment.ident.name == kw::DollarCrate => {
+                let crate_num = dollar_crate_segment.ident.span.ctxt().outer_expn_data().macro_def_id.unwrap().krate;
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, crate_num.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                (crate_num.as_def_id(), referenced_mod_child)
+            }
+
+            // `crate::Item` paths.
+            [crate_segment] if crate_segment.ident.name == kw::Crate => {
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, def_id.krate.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                (def_id.krate.as_def_id(), referenced_mod_child)
+            }
+
+            // `super{::super}*::Item` paths.
+            [super_segments @ ..] if !super_segments.is_empty() && super_segments.iter().all(|segment| segment.ident.name == kw::Super) => {
+                let mut parent_mod_def_id = overlay_mod_scope.unwrap_or(mod_scope);
+                for _ in 0..super_segments.len() {
+                    parent_mod_def_id = self.tcx.parent_module_from_def_id(parent_mod_def_id.expect_local()).to_def_id();
+                }
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                (parent_mod_def_id, referenced_mod_child)
+            }
+
+            // `{self::}?Item` paths.
+            [] | [ast::PathSegment { ident: Ident { name: kw::SelfLower, .. }, .. }] => {
+                let Some((parent_mod_def_id, referenced_mod_child)) = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten().find_map(|scope| {
+                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, res.expect_non_local(), item_path_segment.ident.name)?;
+                    Some((scope, referenced_mod_child))
+                }) else { unreachable!() };
+
+                (parent_mod_def_id, referenced_mod_child)
+            }
+
+            _ => unreachable!("unhandled import path root with missing parent mod resolutions: {}", ast::print::path_to_string(path)),
+        };
+
+        if def_id.is_local() {
+            let mut def_ident = referenced_mod_child.ident;
+            sanitize_ident_if_from_expansion(&mut def_ident, IdentResKind::Def);
+            item_path_segment.ident = def_ident.with_span_pos(item_path_segment.ident.span);
+        }
+
+        let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
+        self.sanitize_path(&mut parent_mod_path, hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id), Some(import_def_id.to_def_id()));
+        path.segments.splice(0..(path.segments.len() - 1), parent_mod_path.segments);
+    }
+
+    fn sanitize_use_tree(&mut self, use_tree: &mut ast::UseTree, node_id: ast::NodeId, span: Span) {
+        #[derive(PartialEq, Eq)]
+        enum UseKind {
+            Glob,
+            Single {
+                /// Name originally introduced by this use import, before import path sanitization.
+                /// Either the last path segment, or the name alias.
+                ident: Ident,
+                /// Namespace in which the name is introduced by this use import.
+                namespace: hir::Namespace,
+                rename: Option<Ident>,
+            }
+        }
+
+        struct Import {
+            res: hir::Res<ast::NodeId>,
+            /// Path segments of the import item, assembled from the nested use tree prefixes that lead to this import item.
+            path_segments: ThinVec<ast::PathSegment>,
+            node_id: ast::NodeId,
+            use_kind: UseKind,
+        }
+
+        fn extract_imports_from_use_tree<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, imports: &mut Vec<Import>, mut root_path_segments: ThinVec<ast::PathSegment>, use_tree: &ast::UseTree, node_id: ast::NodeId) {
+            root_path_segments.extend(use_tree.prefix.segments.iter().cloned());
+            let mut path_segments = root_path_segments;
+
+            // NOTE: `*::self` paths are only valid when the self appears in a nested use tree, and
+            //       refer to the same item as the path segment before.
+            //       Since they complicate path segment resolution and printing of valid paths,
+            //       it is easiest to just strip these no-op suffix segments here.
+            if let [.., last_path_segment] = &path_segments[..] && last_path_segment.ident.name == kw::SelfLower {
+                path_segments.pop();
+            }
+
+            match &use_tree.kind {
+                ast::UseTreeKind::Glob => {
+                    let Some(res) = def_res.node_res(node_id).or_else(|| {
+                        let [.., last_prefix_segment] = &use_tree.prefix.segments[..] else { return None; };
+                        def_res.node_res(last_prefix_segment.id)
+                    }) else { unreachable!() };
+
+                    imports.push(Import { res, path_segments, node_id, use_kind: UseKind::Glob });
+                }
+
+                ast::UseTreeKind::Simple(rename) => {
+                    let Some(import_res) = def_res.import_res(node_id) else { unreachable!() };
+
+                    let import_res_with_ns = [
+                        (import_res.type_ns.map(|res| (hir::Namespace::TypeNS, res))),
+                        (import_res.value_ns.map(|res| (hir::Namespace::ValueNS, res))),
+                        (import_res.macro_ns.map(|res| (hir::Namespace::MacroNS, res))),
+                    ].into_iter().flatten();
+
+                    let ident = rename.unwrap_or_else(|| path_segments.last().unwrap().ident);
+                    import_res_with_ns
+                        .map(|(namespace, res)| Import { res, path_segments: path_segments.clone(), node_id, use_kind: UseKind::Single { ident, namespace, rename: *rename } })
+                        .collect_into(imports);
+                }
+
+                ast::UseTreeKind::Nested { items, span: _ } => {
+                    for (nested_use_tree, inner_node_id) in items {
+                        extract_imports_from_use_tree(tcx, def_res, imports, path_segments.clone(), nested_use_tree, *inner_node_id);
+                    }
+                }
+            }
+        }
+
+        let Some(&scope_def_id) = self.def_res.node_id_to_def_id.get(&node_id) else { unreachable!() };
+        let scope = self.tcx.local_def_id_to_hir_id(scope_def_id);
+
+        let mut imports = vec![];
+        extract_imports_from_use_tree(self.tcx, self.def_res, &mut imports, thin_vec![], &use_tree, node_id);
+
+        let import_paths = imports.into_iter()
+            .map(|import| {
+                let mut path = ast::Path { span: DUMMY_SP, segments: import.path_segments, tokens: None };
+                self.sanitize_import_path(scope, import.node_id, &mut path, import.res);
+
+                let mut use_kind = import.use_kind;
+                if let UseKind::Single { ident, rename, .. } = &mut use_kind {
+                    // Retain name introduced by the original import, but sanitize the name.
+                    match rename {
+                        Some(rename) => sanitize_ident_if_from_expansion(rename, IdentResKind::Def),
+                        None => {
+                            let [.., last_path_segment] = &path.segments[..] else { unreachable!() };
+                            sanitize_ident_if_from_expansion(ident, IdentResKind::Def);
+                            if last_path_segment.ident.name != ident.name {
+                                *rename = Some(*ident);
+                            }
+                        }
+                    }
+                }
+
+                (path, use_kind)
+            })
+            // Dedupe imports based on idents introduced into namespaces.
+            .dedup_by(|a, b| {
+                match (a, b) {
+                    // NOTE: Dublicate glob imports of the same module are already invalid before sanitization.
+                    ((_, UseKind::Glob), (_, UseKind::Glob)) => false,
+
+                    ((path, UseKind::Single { ident, namespace, .. }), (next_path, UseKind::Single{ ident: next_ident, namespace: next_namespace, .. })) => {
+                        #[inline]
+                        fn matching_paths(path: &ast::Path, next_path: &ast::Path) -> bool {
+                            path.segments.len() == next_path.segments.len()
+                                && iter::zip(&path.segments, &next_path.segments).all(|(segment, next_segment)| segment.ident.name == next_segment.ident.name)
+                        }
+
+                        // NOTE: If we encounter the same name relating to two different namespaces,
+                        //       then the paths must be different, otherwise
+                        //       the two imports will refer to the same names in the same namespaces.
+                        ident == next_ident && (namespace == next_namespace || matching_paths(path, next_path))
+                    }
+
+                    _ => false,
+                }
+            });
+
+        // Convert the top-level use tree into a prefixless group of resolved import paths,
+        // i.e. `use {crate::$path::$to::$item, $relative::$path::$to::$local::$item, ...}`.
+        use_tree.prefix.segments = thin_vec![];
+        let use_tree_items = import_paths
+            .map(|(path, use_kind)| {
+                let nested_use_tree = ast::UseTree {
+                    prefix: path,
+                    kind: match use_kind {
+                        UseKind::Glob => ast::UseTreeKind::Glob,
+                        UseKind::Single { rename, .. } => ast::UseTreeKind::Simple(rename),
+                    },
+                    span: DUMMY_SP,
+                };
+
+                (nested_use_tree, ast::DUMMY_NODE_ID)
+            })
+            .collect::<ThinVec<_>>();
+        use_tree.kind = ast::UseTreeKind::Nested { items: use_tree_items, span };
     }
 }
 
@@ -665,6 +891,7 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
         syntax_extensions: vec![],
         current_scope: scope,
         current_typeck_ctx: None,
+        macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
         protected_idents: Default::default(),
     };
 
@@ -678,7 +905,7 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
         }
     }
 
-    sanitizer.adjust_path_from_expansion(path, res);
+    sanitizer.adjust_path_from_expansion(path, res, None);
 }
 
 macro def_flat_map_item_fns(
@@ -741,7 +968,26 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     def_flat_map_item_fns! {
         fn flat_map_item: ItemKind |self, item| {
             check {
+                let id = item.id;
                 let name = item.ident.name;
+                let span = item.span;
+
+                let macros_2_0_ctxt = item.span.ctxt().normalize_to_macros_2_0();
+                let macros_2_0_expn_id = macros_2_0_ctxt.outer_expn();
+                let macros_2_0_expn = macros_2_0_ctxt.outer_expn_data();
+                if let ExpnKind::Macro(MacroKind::Bang, _) = macros_2_0_expn.kind {
+                    match (self.macros_2_0_top_level_relative_path_res_hack, &item.kind) {
+                        (Macros2_0TopLevelRelativePathResHack::InNestedMacros2_0Scope(expn_id), _) if expn_id == macros_2_0_expn_id => {}
+                        (_, ast::ItemKind::Mod(_, _)) => {
+                            self.macros_2_0_top_level_relative_path_res_hack = Macros2_0TopLevelRelativePathResHack::InNestedMacros2_0Scope(macros_2_0_expn_id);
+                        }
+                        _ => {
+                            self.macros_2_0_top_level_relative_path_res_hack = Macros2_0TopLevelRelativePathResHack::InTopLevelMacros2_0Scope {
+                                parent_module: macros_2_0_expn.parent_module.unwrap(),
+                            };
+                        }
+                    }
+                }
 
                 if let ast::ItemKind::ExternCrate(symbol) = &mut item.kind {
                     // Retain original crate name if not already aliased.
@@ -750,6 +996,11 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     // Sanitize local name of extern.
                     sanitize_ident_if_from_expansion(&mut item.ident, IdentResKind::Def);
 
+                    return smallvec![item];
+                }
+
+                if let ast::ItemKind::Use(use_tree) = &mut item.kind {
+                    self.sanitize_use_tree(use_tree, id, span);
                     return smallvec![item];
                 }
             }
@@ -938,7 +1189,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     fn visit_path(&mut self, path: &mut ast::Path) {
         let Some(last_segment) = path.segments.last() else { return; };
         let Some(res) = self.def_res.node_res(last_segment.id) else { return; };
-        self.sanitize_path(path, res);
+        self.sanitize_path(path, res, None);
     }
 
     fn visit_label(&mut self, label: &mut ast::Label) {
@@ -958,7 +1209,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         match &mut vis.kind {
             ast::VisibilityKind::Restricted { path, id, .. } => {
                 let Some(res) = self.def_res.node_res(*id) else { return; };
-                self.adjust_path_from_expansion(path, res);
+                self.adjust_path_from_expansion(path, res, None);
             }
             _ => ast::mut_visit::noop_visit_vis(vis, self),
         }
@@ -1039,6 +1290,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
         syntax_extensions,
         current_scope: Some(LOCAL_CRATE.as_def_id()),
         current_typeck_ctx: None,
+        macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
         protected_idents: Default::default(),
     };
     sanitizer.visit_crate(krate);

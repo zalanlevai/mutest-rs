@@ -1,0 +1,17 @@
+error[E0432]: unresolved import `super::super::f`
+  --> tests/ui/hygiene/rustc_res/relative_use_imports_do_not_work_in_nested_mod_within_macros_2_0.rs:19:25
+   |
+19 |                     use super::super::f;
+   |                         ^^^^^^^^^^^^^^-
+   |                         |             |
+   |                         |             help: a similar name exists in the module: `m`
+   |                         no `f` in `def::inner`
+...
+29 | m!();
+   | ---- in this macro invocation
+   |
+   = note: this error originates in the macro `def::inner::m` which comes from the expansion of the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0432`.

@@ -1,9 +1,9 @@
 use std::hash::Hash;
 
 use rustc_hash::FxHashSet;
-use rustc_middle::metadata::Reexport;
+use rustc_middle::metadata::{ModChild, Reexport};
 use smallvec::{SmallVec, smallvec};
-use thin_vec::{ThinVec, thin_vec};
+use thin_vec::ThinVec;
 
 use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
@@ -11,6 +11,18 @@ use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
+
+pub fn module_children<'tcx>(tcx: TyCtxt<'tcx>, mod_def_id: hir::DefId) -> &'tcx [ModChild] {
+    match mod_def_id.as_local() {
+        Some(mod_local_def_id) => tcx.module_children_local(mod_local_def_id),
+        None => tcx.module_children(mod_def_id),
+    }
+}
+
+pub fn lookup_mod_child<'tcx>(tcx: TyCtxt<'tcx>, mod_def_id: hir::DefId, res: hir::Res<!>, name: Symbol) -> Option<&'tcx ModChild> {
+    module_children(tcx, mod_def_id).into_iter()
+        .find(|mod_child| mod_child.res == res && mod_child.ident.name == name)
+}
 
 #[derive(Clone, Debug)]
 pub struct ItemChild {
@@ -453,7 +465,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     Ok(def_path)
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
@@ -469,7 +481,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                 Some(type_root) => smallvec![DefPath { type_root: Some(type_root), segments: vec![], global: false }],
                 None => {
                     let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
-                    visible_def_paths(tcx, implementer_def_id, scope)
+                    visible_def_paths(tcx, implementer_def_id, scope, ignore_reexport)
                 }
             };
 
@@ -582,6 +594,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
 
                 if !visible { continue; }
                 if child.ident.name == kw::Underscore { continue; }
+                if let Some(reexport) = child.reexport && reexport.id() == ignore_reexport { continue; }
 
                 if child.res.opt_def_id() == Some(def_id) {
                     let mut path = container_def_path.clone();
@@ -609,8 +622,8 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
     paths
 }
 
-pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>) -> SmallVec<[ast::Path; 1]> {
-    visible_def_paths(tcx, def_id, scope).into_iter().map(|path| path.ast_path()).collect::<SmallVec<_>>()
+pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[ast::Path; 1]> {
+    visible_def_paths(tcx, def_id, scope, ignore_reexport).into_iter().map(|path| path.ast_path()).collect::<SmallVec<_>>()
 }
 
 macro interned {

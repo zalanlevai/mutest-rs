@@ -117,7 +117,7 @@ pub mod print {
                     }
                 }
 
-                let visible_def_paths = res::visible_def_paths(printer.tcx(), def_id, scope);
+                let visible_def_paths = res::visible_def_paths(printer.tcx(), def_id, scope, None);
                 if let Some(visible_def_path) = visible_def_paths.into_iter().next() {
                     return Some(printer.print_res_def_path(visible_def_path)).transpose();
                 }
