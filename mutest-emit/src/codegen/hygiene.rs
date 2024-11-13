@@ -296,6 +296,23 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath {
+        // Prefer using a direct, local path to local items within the same module as the enclosing module of the current scope.
+        // NOTE: This helps avoid visibility-related resolution issues in local items, see
+        //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport.rs`.
+        if let Some(current_scope) = self.current_scope && let Some(local_def_id) = def_id.as_local() && def_id != current_scope {
+            let mod_scope = match self.tcx.def_kind(current_scope) {
+                hir::DefKind::Mod => current_scope,
+                _ => self.tcx.parent_module_from_def_id(current_scope.expect_local()).to_def_id(),
+            };
+            let containing_mod = self.tcx.parent_module_from_def_id(local_def_id).to_def_id();
+
+            if containing_mod == mod_scope {
+                if let Ok(visible_path) = res::locally_visible_def_path(self.tcx, def_id, current_scope) {
+                    return visible_path;
+                }
+            }
+        }
+
         let mut visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope, ignore_reexport);
         if let Some(visible_path) = visible_paths.drain(..).next() { return visible_path; }
 

@@ -455,6 +455,11 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
         }
     }
 
+    // Ensure that traits are still named when referring to assoc items.
+    if let hir::DefKind::Trait | hir::DefKind::TraitAlias | hir::DefKind::Impl { .. } = tcx.def_kind(scope) {
+        scope = tcx.parent(scope);
+    }
+
     let mut def_path = relative_def_path(tcx, def_id, scope).unwrap();
 
     if let hir::DefKind::Impl { of_trait: _ } = tcx.def_kind(scope) {
