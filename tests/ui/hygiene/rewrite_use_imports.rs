@@ -288,6 +288,12 @@ macro m() {
         use dummy_crate::{foo, bar};
         use ::dummy_crate::{foo as foo_renamed, bar as bar_renamed};
     }
+
+    // TEST: Reexport of local macro_rules macro item.
+    mod test_macro_rules_reexports {
+        macro_rules! cstr { () => {}; }
+        pub(crate) use cstr;
+    }
 }
 
 m!();

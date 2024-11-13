@@ -739,6 +739,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             item_path_segment.ident = def_ident.with_span_pos(item_path_segment.ident.span);
         }
 
+        if parent_mod_def_id == mod_scope {
+            path.segments.splice(0..(path.segments.len() - 1), []);
+            return;
+        }
+
         let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
         self.sanitize_path(&mut parent_mod_path, hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id), Some(import_def_id.to_def_id()));
         path.segments.splice(0..(path.segments.len() - 1), parent_mod_path.segments);
