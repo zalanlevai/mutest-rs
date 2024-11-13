@@ -64,6 +64,18 @@ macro m() {
         type Error;
     }
     fn deserialize_default<'dee, __D: DefaultWithIndirection<'dee>>() -> Result<__D, __D::Error> { Ok(__D::default()) }
+
+    // TEST: Handle non-trait Self references.
+    trait Parser<'a> {
+        fn parse() -> Self;
+    }
+    struct Options;
+    impl<'a> Parser<'a> for Options {
+        fn parse() -> Self { Self }
+    }
+    impl Options {
+        fn new() -> Self { Self::parse() }
+    }
 }
 
 m!();

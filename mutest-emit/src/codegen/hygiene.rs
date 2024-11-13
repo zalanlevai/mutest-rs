@@ -487,7 +487,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
     fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>) -> Option<P<ast::GenericArgs>> {
         let (generic_predicates, param_index) = match param_res {
-            hir::Res::SelfTyAlias { alias_to: impl_def_id, .. } => {
+            hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
                 let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
 
                 // We instantiate the trait predicates with the impl's trait arguments
@@ -502,7 +502,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                 (generic_predicates, 0)
             }
-            hir::Res::SelfTyParam { trait_: trait_def_id } => {
+            | hir::Res::SelfTyAlias { alias_to: trait_def_id, is_trait_impl: false, .. }
+            | hir::Res::SelfTyParam { trait_: trait_def_id } => {
                 let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx);
                 (generic_predicates, 0)
             }
