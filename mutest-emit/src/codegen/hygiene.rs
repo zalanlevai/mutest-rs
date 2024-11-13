@@ -464,7 +464,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn sanitize_region(&self, region: ty::Region<'tcx>) -> Option<ast::Lifetime> {
-        let span = match ty::region_opt_param_def_id(region, self.tcx) {
+        let span = match ty::region_opt_param_def_id(region) {
             Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
             None => DUMMY_SP,
         };
@@ -932,7 +932,7 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolut
 
 macro def_flat_map_item_fns(
     $(fn $ident:ident: $item_kind:ident |$self:ident, $item:ident| {
-        $(check { $($check_stmt:stmt)+ })?
+        $(check $check:block)?
     });+;
 ) {
     $(
@@ -940,7 +940,7 @@ macro def_flat_map_item_fns(
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
             if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
-            $($($check_stmt)+)?
+            $($check)?
 
             let Some(&def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
 
@@ -1124,7 +1124,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
                 let field_idx = typeck.field_index(expr_hir.hir_id);
 
-                let mut base_ty = typeck.expr_ty_adjusted(base_expr_hir);
+                let base_ty = typeck.expr_ty_adjusted(base_expr_hir);
                 let ty::TyKind::Adt(adt_def, _) = base_ty.kind() else { unreachable!() };
                 let field_def = &adt_def.non_enum_variant().fields[field_idx];
 

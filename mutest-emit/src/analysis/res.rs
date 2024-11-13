@@ -360,7 +360,6 @@ impl DefPath {
     }
 
     pub fn ast_path(&self) -> ast::Path {
-        let Some(first_segment) = self.segments.first() else { panic!("empty def path") };
         let mut global = self.global;
 
         let mut segments = self.segments.iter().map(|segment| {

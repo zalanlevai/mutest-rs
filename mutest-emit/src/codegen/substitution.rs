@@ -263,8 +263,8 @@ pub fn write_substitutions<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate
 }
 
 struct SyntaxAmbiguityResolver<'tcx> {
-    sess: &'tcx Session,
-    def_site: Span,
+    _sess: &'tcx Session,
+    _def_site: Span,
 }
 
 impl<'tcx> ast::mut_visit::MutVisitor for SyntaxAmbiguityResolver<'tcx> {
@@ -290,6 +290,6 @@ pub fn resolve_syntax_ambiguities<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crat
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut syntax_amiguity_resolver = SyntaxAmbiguityResolver { sess: tcx.sess, def_site };
+    let mut syntax_amiguity_resolver = SyntaxAmbiguityResolver { _sess: tcx.sess, _def_site: def_site };
     syntax_amiguity_resolver.visit_crate(krate);
 }

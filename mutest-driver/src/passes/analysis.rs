@@ -290,7 +290,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx, &tests).count();
 
                 let t_target_analysis_start = Instant::now();
-                let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, opts.call_graph_depth);
+                let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, opts.call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
@@ -442,7 +442,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     for error in &errors {
                         use mutest_emit::codegen::mutation::MutationBatchesValidationError::*;
                         match error {
-                            ConflictingMutationsInBatch(mutant, mutations) => {
+                            ConflictingMutationsInBatch(_mutant, mutations) => {
                                 let mut diagnostic = tcx.dcx().struct_err("mutant contains conflicting mutations");
                                 for mutation in mutations {
                                     diagnostic.span_warn(mutation.span, format!("incompatible mutation: {}", mutation.mutation.span_label()));

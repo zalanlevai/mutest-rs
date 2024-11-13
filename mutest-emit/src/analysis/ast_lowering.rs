@@ -456,7 +456,7 @@ pub mod visit {
                 }
             }
             (ast::GenericParamKind::Lifetime, hir::GenericParamKind::Lifetime { .. }) => {}
-            (ast::GenericParamKind::Const { ty: ty_ast, default: default_ast, .. }, hir::GenericParamKind::Const { ty: ty_hir, default: default_hir, .. }) => {
+            (ast::GenericParamKind::Const { ty: ty_ast, default: _default_ast, .. }, hir::GenericParamKind::Const { ty: ty_hir, default: _default_hir, .. }) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir);
                 // TODO: Visit anonymous const
             }

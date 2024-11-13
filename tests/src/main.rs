@@ -1,6 +1,7 @@
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
+#![feature(lint_reasons)]
 #![feature(round_char_boundary)]
 
 use std::collections::BTreeSet;
@@ -52,6 +53,7 @@ impl Expectation {
                 let (out_name, out, out_path) = match self {
                     Expectation::StdOut { .. } => ("stdout", stdout, path.with_extension("stdout")),
                     Expectation::StdErr { .. } => ("stderr", stderr, path.with_extension("stderr")),
+                    #[expect(unreachable_patterns)]
                     _ => unreachable!(),
                 };
 
@@ -87,9 +89,10 @@ impl Expectation {
             &Expectation::StdOut { empty: expect_empty } | &Expectation::StdErr { empty: expect_empty } => {
                 if expect_empty { return BlessVerdict::UpToDate; }
 
-                let (out_name, out, out_path) = match self {
+                let (_out_name, out, out_path) = match self {
                     Expectation::StdOut { .. } => ("stdout", stdout, path.with_extension("stdout")),
                     Expectation::StdErr { .. } => ("stderr", stderr, path.with_extension("stderr")),
+                    #[expect(unreachable_patterns)]
                     _ => unreachable!(),
                 };
 
@@ -241,7 +244,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                 }
 
                 "fail" => {
-                    if let Some(previous_subcommand) = mutest_subcommand {
+                    if let Some(_previous_subcommand) = mutest_subcommand {
                         results.ignored_tests_count += 1;
                         log_test(&name, TestResult::Ignored, Some("invalid directives"));
                         return;

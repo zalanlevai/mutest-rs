@@ -644,7 +644,6 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
 
 pub fn reachable_fns<'ast, 'tcx, 'tst>(
     tcx: TyCtxt<'tcx>,
-    def_res: &ast_lowering::DefResolutions,
     krate: &'ast ast::Crate,
     tests: &'tst [Test],
     depth: usize,

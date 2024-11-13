@@ -29,7 +29,7 @@ pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, cal
         })
 }
 
-pub fn region_opt_param_def_id<'tcx>(region: ty::Region<'tcx>, tcx: TyCtxt<'tcx>) -> Option<hir::DefId> {
+pub fn region_opt_param_def_id<'tcx>(region: ty::Region<'tcx>) -> Option<hir::DefId> {
     match region.kind() {
         ty::ReEarlyParam(ebr) => Some(ebr.def_id),
         ty::ReLateParam(ty::LateParamRegion { bound_region: ty::BoundRegionKind::BrNamed(def_id, _), .. }) => Some(def_id),
