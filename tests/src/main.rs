@@ -208,6 +208,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         return;
     }
 
+    let mut expect_command_fail = false;
     let mut expectations = BTreeSet::new();
     let mut mutest_prints = BTreeSet::new();
     let mutest_subcommand = {
@@ -237,6 +238,16 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                         }
                         subcommand => mutest_subcommand = Some(subcommand),
                     };
+                }
+
+                "fail" => {
+                    if let Some(previous_subcommand) = mutest_subcommand {
+                        results.ignored_tests_count += 1;
+                        log_test(&name, TestResult::Ignored, Some("invalid directives"));
+                        return;
+                    }
+                    expect_command_fail = true;
+                    mutest_subcommand = Some("build");
                 }
 
                 "stdout" => { expectations.insert(Expectation::StdOut { empty: false }); }
@@ -401,17 +412,17 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         eprintln!("stderr:\n{}", stderr);
     }
 
-    let expected_exit_code = match mutest_subcommand {
-        "run" => 101,
-        _ => 0,
+    let expected_exit_code = match (expect_command_fail, mutest_subcommand) {
+        (true, _) => 1,
+        (_, "run") => 101,
+        (false, _) => 0,
     };
 
-    // TODO: Some tests may expect to fail
     if output.status.code() != Some(expected_exit_code) {
         results.failed_tests_count += 1;
         log_test(&name, TestResult::Failed, Some(&match output.status.code() {
-            Some(exit_code) => format!("process exited with code {exit_code}"),
-            None => "process exited without exit code".to_owned(),
+            Some(exit_code) => format!("process exited with code {exit_code}, expected {expected_exit_code}"),
+            None => format!("process exited without exit code, expected {expected_exit_code}"),
         }));
         eprintln!("stdout:\n{}", stdout);
         eprintln!("stderr:\n{}", stderr);
