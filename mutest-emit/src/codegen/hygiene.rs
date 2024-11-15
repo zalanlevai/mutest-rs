@@ -3,12 +3,15 @@ use std::mem;
 use std::panic;
 
 use itertools::Itertools;
+use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
 use rustc_data_structures::sync::Lrc;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_hash::FxHashSet;
 use rustc_hir_analysis::collect::ItemCtxt;
+use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_span::edition::Edition;
+use rustc_trait_selection::traits::{ImplSource, Obligation, ObligationCause, SelectionContext};
 use smallvec::{SmallVec, smallvec};
 use thin_vec::{ThinVec, thin_vec};
 
@@ -552,25 +555,28 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
     }
 
-    fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) {
+    fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
         // Short-circuit if not in a macro expansion.
         if !is_macro_expn_span(path.span) {
             // HACK: The non-macro path will not be adjusted by `sanitize_path`,
             //       so the resolution argument will not be used.
             self.sanitize_path(path, hir::Res::Err, None);
-            return;
+            return hir::Res::Err;
         }
 
         // Short-circuit if self.
-        if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
+        if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return hir::Res::Err; }
 
         match (qself, self.def_res.node_res(node_id)) {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
-            (None, Some(res)) => self.sanitize_path(path, res, None),
+            (None, Some(res)) => {
+                self.sanitize_path(path, res, None);
+                res
+            }
 
             // Otherwise, resolve it with the help of the corresponding HIR QPath.
             (qself @ _, _) => {
-                let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return; };
+                let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return hir::Res::Err; };
                 let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { unreachable!() };
 
                 match qpath_hir {
@@ -637,6 +643,104 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     path_span: DUMMY_SP,
                                     position: path.segments.len() - 1,
                                 }));
+
+                                // NOTE: For field lookups, we keep using the Res after path resolution.
+                                //       To do so, we must reformulate resolutions to trait associated types
+                                //       to incorporate the definition's Self type.
+                                if let hir::Res::Def(hir::DefKind::AssocTy, trait_item_def_id) = qres {
+                                    // NOTE: We only need to do this if we are in a body, which means that
+                                    //       typecheck results must be available.
+                                    let Some(typeck) = self.typeck_for(node_hir_id.owner) else { return qres.expect_non_local(); };
+
+                                    match parent_path_segment_res {
+                                        None => unreachable!(),
+
+                                        // `T:Assoc` items cannot be directly resolved to any one impl assoc item.
+                                        Some(hir::Res::Def(hir::DefKind::TyParam, _)) => {}
+
+                                        // Qualifed path with explicit trait qualification.
+                                        Some(hir::Res::Def(hir::DefKind::Trait, _)) => {
+                                            // let user_provided_ty = typeck.user_provided_types().get(node_hir_id);
+                                            // println!("  user_provided_ty = {user_provided_ty:?}");
+
+                                            let Some(canonical_user_ty) = typeck.user_provided_types().get(node_hir_id) else {
+                                                // NOTE: This only happens if the path is not in a body.
+                                                //       In this case, we do not need to make adjustments to the res
+                                                //       as it will not be used, see above.
+                                                return qres.expect_non_local();
+                                            };
+
+                                            // Retrieve explicit arguments to trait.
+                                            let user_args = match canonical_user_ty.value {
+                                                ty::UserType::TypeOf(_, user_args) => user_args,
+
+                                                // Ignore type annotations (i.e. `: $ty`), as their res is never used, see above.
+                                                ty::UserType::Ty(_) => { return qres.expect_non_local(); }
+                                            };
+                                            let Some(user_self_ty) = user_args.user_self_ty else { unreachable!() };
+                                            let ty::TyKind::Alias(_, alias_ty) = user_self_ty.self_ty.kind() else { unreachable!() };
+
+                                            let assoc_item_trait_def_id = self.tcx.parent(trait_item_def_id);
+
+                                            let assoc_item_trait_ref = ty::TraitRef::new(self.tcx, assoc_item_trait_def_id, alias_ty.args);
+                                            let assoc_item_trait_predicate = ty::TraitPredicate { trait_ref: assoc_item_trait_ref, polarity: ty::PredicatePolarity::Positive };
+
+                                            let param_env = self.tcx.param_env(node_hir_id.owner.to_def_id());
+                                            let infcx = self.tcx.infer_ctxt().build();
+                                            let mut selcx = SelectionContext::new(&infcx);
+                                            let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else { unreachable!() };
+                                            let assoc_item_impl_def_id = data.impl_def_id;
+
+                                            let Some(&impl_item_def_id) = self.tcx.impl_item_implementor_ids(assoc_item_impl_def_id).get(&trait_item_def_id) else { unreachable!() };
+
+                                            return hir::Res::Def(hir::DefKind::AssocTy, impl_item_def_id);
+                                        }
+
+                                        // Reference to a trait item; leave as-is.
+                                        Some(hir::Res::SelfTyParam { trait_: _ }) => {}
+
+                                        // Impossible case for trait items: cannot refer to trait associated type through `Self`
+                                        // without fully qualified syntax in an inherent impl context.
+                                        // See `tests/ui/hygiene/rustc_res/implicit_trait_assoc_ty_not_available_in_inherent_impl`.
+                                        // Possible for inherent impl items, but in that case the res already points to the impl's assoc item.
+                                        Some(hir::Res::SelfTyAlias { alias_to: _trait_def_id, is_trait_impl: false, .. }) => {}
+
+                                        // `Self::Assoc` paths.
+                                        // NOTE: We have to resolve the trait impl through the generic predicates in context,
+                                        //       as the trait arguments are inferred in this case.
+                                        Some(hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. }) => {
+                                            if let Some(&impl_item_def_id) = self.tcx.impl_item_implementor_ids(impl_def_id).get(&trait_item_def_id) {
+                                                return hir::Res::Def(hir::DefKind::AssocTy, impl_item_def_id);
+                                            }
+
+                                            let assoc_item_trait_def_id = self.tcx.parent(trait_item_def_id);
+
+                                            let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
+                                            let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, trait_ref.skip_binder().args);
+
+                                            // Extract impl predicate related to the trait of the assoc item.
+                                            let Some(assoc_item_trait_predicate) = generic_predicates.predicates.iter()
+                                                .filter_map(|&clause| clause.as_trait_clause().map(|p| p.skip_binder()))
+                                                .find(|trait_predicate| {
+                                                    trait_predicate.trait_ref.def_id == assoc_item_trait_def_id
+                                                        && trait_predicate.self_ty() == trait_ref.skip_binder().self_ty()
+                                                })
+                                            else { unreachable!() };
+
+                                            let param_env = self.tcx.param_env(impl_def_id);
+                                            let infcx = self.tcx.infer_ctxt().build();
+                                            let mut selcx = SelectionContext::new(&infcx);
+                                            let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else { unreachable!() };
+                                            let assoc_item_impl_def_id = data.impl_def_id;
+
+                                            let Some(&impl_item_def_id) = self.tcx.impl_item_implementor_ids(assoc_item_impl_def_id).get(&trait_item_def_id) else { unreachable!() };
+
+                                            return hir::Res::Def(hir::DefKind::AssocTy, impl_item_def_id);
+                                        }
+
+                                        _ => unreachable!(),
+                                    }
+                                }
                             }
 
                             // `<[_]>::$assoc_item` path.
@@ -681,6 +785,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 *qself = None;
                             }
                         }
+
+                        qres.expect_non_local()
                     }
 
                     hir::QPath::LangItem(_, _) => unreachable!(),
@@ -1050,7 +1156,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
         match &mut ty.kind {
             ast::TyKind::Path(qself, path) => {
-                return self.sanitize_qualified_path(qself, path, ty_id);
+                let _res = self.sanitize_qualified_path(qself, path, ty_id);
+                return;
             }
             _ => {}
         }
@@ -1076,14 +1183,17 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
         match &mut expr.kind {
             ast::ExprKind::Path(qself, path) => {
-                return self.sanitize_qualified_path(qself, path, expr_id);
+                let _res = self.sanitize_qualified_path(qself, path, expr_id);
+                return;
             }
-            ast::ExprKind::Struct(struct_expr) => 'arm: {
-                let Some(res) = self.def_res.node_res(struct_expr.path.segments.last().unwrap().id) else { break 'arm; };
+            ast::ExprKind::Struct(struct_expr) => {
+                let struct_expr = struct_expr.ast_deref_mut();
+                let res = self.sanitize_qualified_path(&mut struct_expr.qself, &mut struct_expr.path, expr_id);
 
                 let variant_def = match res {
                     | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
-                    | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id) => {
+                    | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id)
+                    | hir::Res::Def(hir::DefKind::AssocTy, alias_def_id) => {
                         let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
@@ -1106,6 +1216,16 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     //       the correct field ident appears in printed code.
                     field.is_shorthand = false;
                 }
+
+                struct_expr.fields.flat_map_in_place(|field| self.flat_map_expr_field(field));
+
+                match &mut struct_expr.rest {
+                    ast::StructRest::Base(base_expr) => self.visit_expr(base_expr),
+                    ast::StructRest::Rest(_span) => {}
+                    ast::StructRest::None => {}
+                }
+
+                return;
             }
             ast::ExprKind::Field(base_expr, field_ident) => 'arm: {
                 // Idents cannot start with a digit, therefore they must correspond
@@ -1170,14 +1290,16 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
             }
             ast::PatKind::Path(qself, path) => {
-                return self.sanitize_qualified_path(qself, path, pat_id);
+                let _res = self.sanitize_qualified_path(qself, path, pat_id);
+                return;
             }
-            ast::PatKind::Struct(_, path, fields, _) => 'arm: {
-                let Some(res) = self.def_res.node_res(path.segments.last().unwrap().id) else { break 'arm; };
+            ast::PatKind::Struct(qself, path, fields, _) => {
+                let res = self.sanitize_qualified_path(qself, path, pat_id);
 
                 let variant_def = match res {
                     | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
-                    | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id) => {
+                    | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id)
+                    | hir::Res::Def(hir::DefKind::AssocTy, alias_def_id) => {
                         let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
@@ -1186,7 +1308,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     _ => self.tcx.expect_variant_res(res.expect_non_local()),
                 };
 
-                for field in fields {
+                for field in &mut *fields {
                     let Some(field_def) = variant_def.fields.iter().find(|field_def| self.tcx.hygienic_eq(field.ident, field_def.ident(self.tcx), variant_def.def_id)) else {
                         panic!("field {ident} at {span:?} does not match any field of {variant_def_id:?}",
                             ident = field.ident,
@@ -1200,6 +1322,18 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     //       the correct field ident appears in printed code.
                     field.is_shorthand = false;
                 }
+
+                fields.flat_map_in_place(|field| self.flat_map_pat_field(field));
+
+                return;
+            }
+            ast::PatKind::TupleStruct(qself, path, pats) => {
+                let _res = self.sanitize_qualified_path(qself, path, pat_id);
+                for pat in pats {
+                    self.visit_pat(pat);
+                }
+
+                return;
             }
             _ => {}
         }
@@ -1317,4 +1451,21 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
         protected_idents: Default::default(),
     };
     sanitizer.visit_crate(krate);
+
+    let g = &tcx.sess.psess.attr_id_generator;
+
+    // NOTE: Sanitization of paths may cause paths in struct expressions and patterns
+    //       to become fully qualified paths, which are currently only supported with
+    //       the `more_qualified_paths` feature.
+    //       See https://github.com/rust-lang/rust/issues/86935.
+    // #![feature(more_qualified_paths)]
+    if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, sym::more_qualified_paths)) {
+        let feature_more_qualified_paths_attr = ast::mk::attr_inner(g, DUMMY_SP,
+            Ident::new(sym::feature, DUMMY_SP),
+            ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(sym::more_qualified_paths, ast::token::IdentIsRaw::No)),
+            ])),
+        );
+        krate.attrs.push(feature_more_qualified_paths_attr);
+    }
 }
