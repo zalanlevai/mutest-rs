@@ -35,10 +35,6 @@ fn is_macro_expn(expn: &ExpnData) -> bool {
     }
 }
 
-fn is_macro_expn_span(span: Span) -> bool {
-    is_macro_expn(&span.ctxt().outer_expn_data())
-}
-
 enum IdentResKind {
     Local,
     Label,
@@ -473,7 +469,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        // Short-circuit if self.
+        // Short-circuit if `self`.
         if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
 
         self.adjust_path_from_expansion(path, res, ignore_reexport);
@@ -586,15 +582,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
-        // Short-circuit if not in a macro expansion.
-        if !is_macro_expn_span(path.span) {
-            // HACK: The non-macro path will not be adjusted by `sanitize_path`,
-            //       so the resolution argument will not be used.
-            self.sanitize_path(path, hir::Res::Err, None);
-            return hir::Res::Err;
-        }
-
-        // Short-circuit if self.
+        // Short-circuit if `self`.
         if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return hir::Res::Err; }
 
         match (qself, self.def_res.node_res(node_id)) {
@@ -1412,10 +1400,6 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_vis(&mut self, vis: &mut ast::Visibility) {
-        // Short-circuit if not in a macro expansion, as there is no
-        // other child node which could be from a macro expansion.
-        if !is_macro_expn_span(vis.span) { return; }
-
         match &mut vis.kind {
             ast::VisibilityKind::Restricted { path, id, .. } => {
                 let Some(res) = self.def_res.node_res(*id) else {
