@@ -2,7 +2,6 @@ use std::iter;
 use std::mem;
 use std::panic;
 
-use itertools::Itertools;
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
 use rustc_data_structures::sync::Lrc;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
@@ -10,6 +9,7 @@ use rustc_hash::FxHashSet;
 use rustc_hir_analysis::collect::ItemCtxt;
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
+use rustc_middle::span_bug;
 use rustc_span::edition::Edition;
 use rustc_trait_selection::traits::{ImplSource, Obligation, ObligationCause, SelectionContext};
 use smallvec::{SmallVec, smallvec};
@@ -82,7 +82,9 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResK
         None => (false, ident.as_str()),
     };
 
-    assert!(!bare_ident.starts_with("__rustc_expn_"), "encountered ident starting with `__rustc_expn_` at {:?}: the macro might have been sanitized twice", ident.span);
+    if bare_ident.starts_with("__rustc_expn_") {
+        span_bug!(ident.span, "encountered ident starting with `__rustc_expn`: the ident might have been sanitized twice");
+    }
 
     ident.name = Symbol::intern(&format!("{prefix}__rustc_expn_{expn_crate_id}_{expn_local_id}_{bare_ident}",
         prefix = is_label.then(|| "'").unwrap_or(""),
@@ -293,15 +295,15 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         *path = ast::Path { span: path.span, segments, tokens: None };
 
-        assert!(!path.segments.is_empty(), "path at {span:?} was sanitized into an empty path",
-            span = path.span,
-        );
+        if path.segments.is_empty() {
+            span_bug!(path.span, "path was sanitized into an empty path");
+        }
     }
 
     fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath {
         // Prefer using a direct, local path to local items within the same module as the enclosing module of the current scope.
         // NOTE: This helps avoid visibility-related resolution issues in local items, see
-        //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport.rs`.
+        //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`.
         if let Some(current_scope) = self.current_scope && let Some(local_def_id) = def_id.as_local() && def_id != current_scope {
             let mod_scope = match self.tcx.def_kind(current_scope) {
                 hir::DefKind::Mod => current_scope,
@@ -321,25 +323,51 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         // Ensure that the def is in the current scope, otherwise it really is not visible from here.
         let Some(current_scope) = self.current_scope else {
-            panic!("{def_id:?} is not accessible in this crate at {span:?}");
+            span_bug!(span, "{} is not accessible in this crate", self.tcx.def_path_str(def_id));
         };
         match res::locally_visible_def_path(self.tcx, def_id, current_scope) {
             Ok(visible_path) => { return visible_path; }
             Err(adjusted_scope) => {
-                panic!("{def_id:?} is not defined in the scope {adjusted_scope:?} and is not otherwise accessible at {span:?}");
+                span_bug!(span, "{def} is not defined in the scope {scope} and is not otherwise accessible here",
+                    def = self.tcx.def_path_str(def_id),
+                    scope = self.tcx.def_path_str(adjusted_scope),
+                );
             }
         }
+    }
+
+    #[track_caller]
+    fn report_unmatched_ast_node<S, F>(&self, span: Span, msg: F)
+    where
+        S: Into<String>,
+        F: FnOnce() -> S,
+    {
+        let mut diagnostic = self.tcx.dcx().struct_warn(msg().into());
+        diagnostic.span(span);
+        diagnostic.span_label(span, "no corresponding HIR node found");
+        diagnostic.note(format!("body resolutions from {scope}",
+            scope = match self.current_scope {
+                Some(scope) =>  self.tcx.def_path_debug_str(scope),
+                None => "<unknown scope>".to_owned(),
+            },
+        ));
+        diagnostic.note(format!("expected at {}", std::panic::Location::caller()));
+        diagnostic.emit();
     }
 
     fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) {
         match res {
             hir::Res::Local(node_id) => {
-                let Some(hir_id) = self.body_res.hir_id(node_id) else { return; };
+                let Some(hir_id) = self.body_res.hir_id(node_id) else {
+                    self.report_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", ast::print::path_to_string(path)));
+                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
+                    panic!("expected resolution");
+                };
                 let def_ident = self.tcx.hir().ident(hir_id);
 
-                let Some(last_segment) = path.segments.last_mut() else { unreachable!() };
-                copy_def_span_ctxt(&mut last_segment.ident, def_ident.span);
-                sanitize_ident_if_from_expansion(&mut last_segment.ident, IdentResKind::Local);
+                let [ident_segment] = &mut path.segments[..] else { unreachable!() };
+                copy_def_span_ctxt(&mut ident_segment.ident, def_ident.span);
+                sanitize_ident_if_from_expansion(&mut ident_segment.ident, IdentResKind::Local);
             }
 
             hir::Res::Def(def_kind, mut def_id) => {
@@ -375,7 +403,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 let impl_subject = self.tcx.impl_subject(impl_parent_def_id);
                                 if let ty::ImplSubject::Inherent(ty) = impl_subject.instantiate_identity() {
                                     if let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind() {
-                                        unreachable!("encountered def path with impl at unexpected position: {def_id:?}")
+                                        span_bug!(path.span, "{} has impl parent at unexpected position", self.tcx.def_path_str(def_id));
                                     }
                                 }
                             }
@@ -405,8 +433,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::LifetimeParam
                     | hir::DefKind::ConstParam
                     => {
-                        let Some(last_segment) = path.segments.last_mut() else { unreachable!() };
-                        sanitize_ident_if_from_expansion(&mut last_segment.ident, IdentResKind::Def);
+                        let [param_segment] = &mut path.segments[..] else { unreachable!() };
+                        sanitize_ident_if_from_expansion(&mut param_segment.ident, IdentResKind::Def);
                     }
 
                     hir::DefKind::Field => {
@@ -477,10 +505,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         Some(ast::mk::lifetime(DUMMY_SP, ident))
     }
 
-    fn sanitize_ty(&self, ty: Ty<'tcx>) -> P<ast::Ty> {
+    fn sanitize_ty(&self, ty: Ty<'tcx>, span: Span) -> P<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else { unreachable!() };
+        let Some(ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else {
+            span_bug!(span, "cannot construct AST representation of type `{ty:?}`");
+        };
 
         ty_ast
     }
@@ -488,7 +518,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     /// Extract bound params from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
-    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>) -> Option<P<ast::GenericArgs>> {
+    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, span: Span) -> Option<P<ast::GenericArgs>> {
         let (generic_predicates, param_index) = match param_res {
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
                 let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
@@ -540,7 +570,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
                     }
                     ty::GenericArgKind::Type(ty) => {
-                        let ty_ast = self.sanitize_ty(ty);
+                        let ty_ast = self.sanitize_ty(ty, span);
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
                     }
                     ty::GenericArgKind::Const(_) => {
@@ -576,13 +606,18 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // Otherwise, resolve it with the help of the corresponding HIR QPath.
             (qself @ _, _) => {
-                let Some(node_hir_id) = self.body_res.hir_id(node_id) else { return hir::Res::Err; };
-                let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { unreachable!() };
+                let Some(node_hir_id) = self.body_res.hir_id(node_id) else {
+                    self.report_unmatched_ast_node(path.span, || format!("unable to resolve path `{}` for sanitization", ast::print::qpath_to_string(qself.as_deref(), path)));
+                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return hir::Res::Err; }
+                    panic!("expected resolution");
+                };
+
+                let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { span_bug!(path.span, "no corresponding qualified path in HIR") };
 
                 match qpath_hir {
                     // NOTE: This corresponds to the already handled case where
                     //       a non-qualified path has a concrete AST resolution.
-                    hir::QPath::Resolved(None, _) => unreachable!(),
+                    hir::QPath::Resolved(None, _) => span_bug!(path.span, "encountered unexpected resolved, non-qualified HIR path"),
 
                     | hir::QPath::Resolved(Some(qself_ty_hir), _)
                     | hir::QPath::TypeRelative(qself_ty_hir, _) => {
@@ -608,7 +643,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
                                 }
 
-                                _ => panic!("BUG: path resolved to `Err`"),
+                                _ => span_bug!(path.span, "path `{}` cannot be resolved", ast::print::qpath_to_string(qself.as_deref(), path)),
                             }
                         }
 
@@ -617,7 +652,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
                         match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
                             hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
 
                                 let parent_path_segment_res = match &path.segments[..] {
                                     [.., parent_path_segment, _] => self.def_res.node_res(parent_path_segment.id),
@@ -631,7 +666,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 if qself.is_none() {
                                     if let Some(parent_path_segment_res) = parent_path_segment_res {
                                         // Append bound params from local trait bounds corresponding to parameter types to the trait subpath.
-                                        if let Some(generic_args_ast) = self.extract_local_trait_bound_params(self.tcx.parent(qres.def_id()), parent_path_segment_res) {
+                                        if let Some(generic_args_ast) = self.extract_local_trait_bound_params(self.tcx.parent(qres.def_id()), parent_path_segment_res, qself_ty_hir.span) {
                                             let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
                                             parent_path_segment.args = Some(generic_args_ast);
                                         }
@@ -688,7 +723,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             let param_env = self.tcx.param_env(node_hir_id.owner.to_def_id());
                                             let infcx = self.tcx.infer_ctxt().build();
                                             let mut selcx = SelectionContext::new(&infcx);
-                                            let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else { unreachable!() };
+                                            let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else {
+                                                span_bug!(path.span, "cannot resolve impl for `{qself_ty}` of the trait of the associated item {}", self.tcx.def_path_str(trait_item_def_id))
+                                            };
                                             let assoc_item_impl_def_id = data.impl_def_id;
 
                                             let Some(&impl_item_def_id) = self.tcx.impl_item_implementor_ids(assoc_item_impl_def_id).get(&trait_item_def_id) else { unreachable!() };
@@ -725,12 +762,14 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                                     trait_predicate.trait_ref.def_id == assoc_item_trait_def_id
                                                         && trait_predicate.self_ty() == trait_ref.skip_binder().self_ty()
                                                 })
-                                            else { unreachable!() };
+                                            else { span_bug!(path.span, "cannot find trait predicate related to the trait of associated item {}", self.tcx.def_path_str(trait_item_def_id)) };
 
                                             let param_env = self.tcx.param_env(impl_def_id);
                                             let infcx = self.tcx.infer_ctxt().build();
                                             let mut selcx = SelectionContext::new(&infcx);
-                                            let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else { unreachable!() };
+                                            let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else {
+                                                span_bug!(path.span, "cannot resolve impl for `Self` of the trait of the associated item {}", self.tcx.def_path_str(trait_item_def_id))
+                                            };
                                             let assoc_item_impl_def_id = data.impl_def_id;
 
                                             let Some(&impl_item_def_id) = self.tcx.impl_item_implementor_ids(assoc_item_impl_def_id).get(&trait_item_def_id) else { unreachable!() };
@@ -738,7 +777,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             return hir::Res::Def(hir::DefKind::AssocTy, impl_item_def_id);
                                         }
 
-                                        _ => unreachable!(),
+                                        _ => span_bug!(path.span, "unhandled associated item root resolution: {parent_path_segment_res:?}"),
                                     }
                                 }
                             }
@@ -752,7 +791,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
                                 && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
                             => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
                                 self.sanitize_path(path, qres.expect_non_local(), None);
                                 // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
                                 *qself = Some(P(ast::QSelf {
@@ -763,7 +802,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             }
 
                             hir::DefKind::Impl { of_trait: false } => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
                                 self.sanitize_path(path, qres.expect_non_local(), None);
 
                                 // Remove the non-assoc part of the path and replace it with
@@ -789,7 +828,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         qres.expect_non_local()
                     }
 
-                    hir::QPath::LangItem(_, _) => unreachable!(),
+                    hir::QPath::LangItem(_, _) => span_bug!(path.span, "encountered #[lang] item path"),
                 }
             }
         }
@@ -798,7 +837,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn sanitize_import_path(&mut self, scope: hir::HirId, import_node_id: ast::NodeId, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
         let Some(&import_def_id) = self.def_res.node_id_to_def_id.get(&import_node_id) else { unreachable!() };
 
-        let hir::Res::Def(def_kind, def_id) = res else { panic!("import path has non-def last segment") };
+        let hir::Res::Def(def_kind, def_id) = res else { span_bug!(path.span, "import path has non-def last segment") };
         // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
         // and we can simply sanitize the whole path in one go.
         if let hir::DefKind::Mod = def_kind {
@@ -806,7 +845,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return;
         }
 
-        let [mod_path_segments @ .., item_path_segment] = &mut path.segments[..] else { panic!("empty import path") };
+        let [mod_path_segments @ .., item_path_segment] = &mut path.segments[..] else { span_bug!(path.span, "empty import path") };
 
         let mod_scope = self.tcx.parent_module(scope).to_def_id();
         let overlay_mod_scope = match self.macros_2_0_top_level_relative_path_res_hack {
@@ -816,21 +855,27 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         let (parent_mod_def_id, referenced_mod_child) = match mod_path_segments {
             [.., parent_mod_path_segment] if let Some(parent_mod_res) = self.def_res.node_res(parent_mod_path_segment.id) => {
-                let hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id) = parent_mod_res else { panic!("import path has non-mod prefix segment") };
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                let hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id) = parent_mod_res else { span_bug!(path.span, "import path has non-mod prefix segment") };
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(parent_mod_def_id))
+                };
                 (parent_mod_def_id, referenced_mod_child)
             }
 
             // `$crate::Item` paths.
             [dollar_crate_segment]  if dollar_crate_segment.ident.name == kw::DollarCrate => {
                 let crate_num = dollar_crate_segment.ident.span.ctxt().outer_expn_data().macro_def_id.unwrap().krate;
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, crate_num.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, crate_num.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(crate_num.as_def_id()))
+                };
                 (crate_num.as_def_id(), referenced_mod_child)
             }
 
             // `crate::Item` paths.
             [crate_segment] if crate_segment.ident.name == kw::Crate => {
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, def_id.krate.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, def_id.krate.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(def_id.krate.as_def_id()))
+                };
                 (def_id.krate.as_def_id(), referenced_mod_child)
             }
 
@@ -840,7 +885,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 for _ in 0..super_segments.len() {
                     parent_mod_def_id = self.tcx.parent_module_from_def_id(parent_mod_def_id.expect_local()).to_def_id();
                 }
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else { unreachable!() };
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(parent_mod_def_id))
+                };
                 (parent_mod_def_id, referenced_mod_child)
             }
 
@@ -849,12 +896,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let Some((parent_mod_def_id, referenced_mod_child)) = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten().find_map(|scope| {
                     let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, res.expect_non_local(), item_path_segment.ident.name)?;
                     Some((scope, referenced_mod_child))
-                }) else { unreachable!() };
+                }) else {
+                    let searched_mods = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten()
+                        .map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
+                    span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
+                };
 
                 (parent_mod_def_id, referenced_mod_child)
             }
 
-            _ => unreachable!("unhandled import path root with missing parent mod resolutions: {}", ast::print::path_to_string(path)),
+            _ => span_bug!(path.span, "unhandled import path root with missing parent mod resolutions"),
         };
 
         if def_id.is_local() {
@@ -874,7 +925,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn sanitize_use_tree(&mut self, use_tree: &mut ast::UseTree, node_id: ast::NodeId, span: Span) {
-        #[derive(PartialEq, Eq)]
+        use itertools::Itertools;
+
         enum UseKind {
             Glob,
             Single {
@@ -912,13 +964,15 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     let Some(res) = def_res.node_res(node_id).or_else(|| {
                         let [.., last_prefix_segment] = &use_tree.prefix.segments[..] else { return None; };
                         def_res.node_res(last_prefix_segment.id)
-                    }) else { unreachable!() };
+                    }) else { span_bug!(path_segments.last().unwrap().ident.span, "import path cannot be resolved") };
 
                     imports.push(Import { res, path_segments, node_id, use_kind: UseKind::Glob });
                 }
 
                 ast::UseTreeKind::Simple(rename) => {
-                    let Some(import_res) = def_res.import_res(node_id) else { unreachable!() };
+                    let Some(import_res) = def_res.import_res(node_id) else {
+                        span_bug!(path_segments.last().unwrap().ident.span, "import path cannot be resolved")
+                    };
 
                     let import_res_with_ns = [
                         (import_res.type_ns.map(|res| (hir::Namespace::TypeNS, res))),
@@ -948,7 +1002,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         let import_paths = imports.into_iter()
             .map(|import| {
-                let mut path = ast::Path { span: DUMMY_SP, segments: import.path_segments, tokens: None };
+                let span = import.path_segments.last().unwrap().ident.span;
+                let mut path = ast::Path { span, segments: import.path_segments, tokens: None };
                 self.sanitize_import_path(scope, import.node_id, &mut path, import.res);
 
                 let mut use_kind = import.use_kind;
@@ -1149,9 +1204,6 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_ty(&mut self, ty: &mut P<ast::Ty>) {
-        // HACK: Even though NodeId is a Copy type, the copy itself
-        //       counts as an immutable borrow, so we have to do it
-        //       before `&mut ty.kind`.
         let ty_id = ty.id;
 
         match &mut ty.kind {
@@ -1176,10 +1228,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
         let mut protected_ident = None;
 
-        // HACK: Even though NodeId is a Copy type, the copy itself
-        //       counts as an immutable borrow, so we have to do it
-        //       before `&mut expr.kind`.
         let expr_id = expr.id;
+        let expr_span = expr.span;
 
         match &mut expr.kind {
             ast::ExprKind::Path(qself, path) => {
@@ -1204,11 +1254,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
                 for field in &mut struct_expr.fields {
                     let Some(field_def) = variant_def.fields.iter().find(|field_def| self.tcx.hygienic_eq(field.ident, field_def.ident(self.tcx), variant_def.def_id)) else {
-                        panic!("field {ident} at {span:?} does not match any field of {variant_def_id:?}",
-                            ident = field.ident,
-                            span = field.span,
-                            variant_def_id = variant_def.def_id,
-                        );
+                        span_bug!(field.span, "field `{}` does not match any field of {}", field.ident, self.tcx.def_path_str(variant_def.def_id));
                     };
                     // HACK: Copy ident syntax context from definition for correct sanitization later.
                     copy_def_span_ctxt(&mut field.ident, field_def.ident(self.tcx).span);
@@ -1235,11 +1281,18 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     break 'arm;
                 }
 
-                let Some(base_expr_hir) = self.body_res.hir_expr(&base_expr) else { break 'arm; };
-                // HACK: The borrow checker does not allow for immutably referencing
-                //       the expression for the `hir_expr` call because of
-                //       the `&mut expr.kind` partial borrow above.
-                let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+                let Some(base_expr_hir) = self.body_res.hir_expr(&base_expr) else {
+                    self.report_unmatched_ast_node(base_expr.span, || format!("unable to resolve field base expr `{}` for sanitization", ast::print::expr_to_string(expr)));
+                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
+                    panic!("expected resolution");
+                };
+                // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_expr` call
+                //       because of the `&mut expr.kind` partial borrow above.
+                let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else {
+                    self.report_unmatched_ast_node(expr_span, || format!("unable to resolve field expr `{}` for sanitization", ast::print::expr_to_string(expr)));
+                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
+                    panic!("expected_resolution");
+                };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
 
@@ -1252,15 +1305,20 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 // HACK: Copy ident syntax context from definition for correct sanitization later.
                 copy_def_span_ctxt(field_ident, field_def.ident(self.tcx).span);
             }
-            ast::ExprKind::MethodCall(call) => 'arm: {
-                // HACK: The borrow checker does not allow for immutably referencing
-                //       the expression for the `hir_expr` call because of
-                //       the `&mut expr.kind` partial borrow above.
-                let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else { break 'arm; };
+            ast::ExprKind::MethodCall(call) => {
+                // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_expr` call
+                //       because of the `&mut expr.kind` partial borrow above.
+                let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else {
+                    self.report_unmatched_ast_node(expr_span, || format!("unable to resolve method call expr `{}` for sanitization", ast::print::expr_to_string(expr)));
+                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
+                    panic!("expected resolution");
+                };
 
-                let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
+                let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { unreachable!() };
 
-                let Some(call_def_id) = typeck.type_dependent_def_id(expr_hir.hir_id) else { unreachable!() };
+                let Some(call_def_id) = typeck.type_dependent_def_id(expr_hir.hir_id) else {
+                    span_bug!(expr_span, "cannot resolve type dependent def of method call")
+                };
 
                 // HACK: Copy ident syntax context from definition for correct sanitization later.
                 let Some(call_item_ident_span) = self.tcx.def_ident_span(call_def_id) else { unreachable!() };
@@ -1277,9 +1335,6 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     fn visit_pat(&mut self, pat: &mut P<ast::Pat>) {
         let mut protected_ident = None;
 
-        // HACK: Even though NodeId is a Copy type, the copy itself
-        //       counts as an immutable borrow, so we have to do it
-        //       before `&mut pat.kind`.
         let pat_id = pat.id;
 
         match &mut pat.kind {
@@ -1310,11 +1365,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
                 for field in &mut *fields {
                     let Some(field_def) = variant_def.fields.iter().find(|field_def| self.tcx.hygienic_eq(field.ident, field_def.ident(self.tcx), variant_def.def_id)) else {
-                        panic!("field {ident} at {span:?} does not match any field of {variant_def_id:?}",
-                            ident = field.ident,
-                            span = field.span,
-                            variant_def_id = variant_def.def_id,
-                        );
+                        span_bug!(field.span, "field `{}` does not match any field of {}", field.ident, self.tcx.def_path_str(variant_def.def_id));
                     };
                     // HACK: Copy ident syntax context from definition for correct sanitization later.
                     copy_def_span_ctxt(&mut field.ident, field_def.ident(self.tcx).span);
@@ -1344,8 +1395,10 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_path(&mut self, path: &mut ast::Path) {
-        let Some(last_segment) = path.segments.last() else { return; };
-        let Some(res) = self.def_res.node_res(last_segment.id) else { return; };
+        let Some(last_segment) = path.segments.last() else { unreachable!(); };
+        let Some(res) = self.def_res.node_res(last_segment.id) else {
+            span_bug!(path.span, "path `{}` cannot be resolved by generic path handler", ast::print::path_to_string(path));
+        };
         self.sanitize_path(path, res, None);
     }
 
@@ -1365,7 +1418,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
         match &mut vis.kind {
             ast::VisibilityKind::Restricted { path, id, .. } => {
-                let Some(res) = self.def_res.node_res(*id) else { return; };
+                let Some(res) = self.def_res.node_res(*id) else {
+                    span_bug!(vis.span, "restricted visibility path `{}` cannot be resolved", ast::print::path_to_string(path));
+                };
                 self.adjust_path_from_expansion(path, res, None);
             }
             _ => ast::mut_visit::noop_visit_vis(vis, self),

@@ -1053,9 +1053,23 @@ pub mod print {
     pub use rustc_ast_pretty::pprust::*;
 
     use rustc_ast as ast;
+    use rustc_ast::DUMMY_NODE_ID;
+    use rustc_ast::ptr::P;
+    use rustc_span::DUMMY_SP;
 
     pub fn stmt_to_string(stmt: &ast::Stmt) -> String {
         State::new().stmt_to_string(stmt)
+    }
+
+    pub fn qpath_to_string(qself: Option<&ast::QSelf>, path: &ast::Path) -> String {
+        match qself {
+            Some(qself) => {
+                // HACK: Workaround, because `print_qpath` is private.
+                let dummy_ty = ast::Ty { id: DUMMY_NODE_ID, span: DUMMY_SP, kind: ast::TyKind::Path(Some(P(qself.clone())), path.clone()), tokens: None };
+                ty_to_string(&dummy_ty)
+            },
+            None => path_to_string(path),
+        }
     }
 }
 
