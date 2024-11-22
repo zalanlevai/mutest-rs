@@ -294,6 +294,24 @@ macro m() {
         macro_rules! cstr { () => {}; }
         pub(crate) use cstr;
     }
+
+    // TEST: Import enum variants.
+    mod test_enum_variant_imports {
+        use inner::Color::Red;
+
+        mod inner {
+            use self::Color::Green;
+            use Color::Blue;
+
+            pub enum Color { Red, Green, Blue }
+
+            mod nested_mod {
+                mod within {
+                    use super::super::Color::Red;
+                }
+            }
+        }
+    }
 }
 
 m!();

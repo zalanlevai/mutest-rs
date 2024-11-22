@@ -825,7 +825,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn sanitize_import_path(&mut self, scope: hir::HirId, import_node_id: ast::NodeId, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
         let Some(&import_def_id) = self.def_res.node_id_to_def_id.get(&import_node_id) else { unreachable!() };
 
-        let hir::Res::Def(def_kind, def_id) = res else { span_bug!(path.span, "import path has non-def last segment") };
+        let hir::Res::Def(def_kind, _def_id) = res else { span_bug!(path.span, "import path has non-def last segment") };
         // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
         // and we can simply sanitize the whole path in one go.
         if let hir::DefKind::Mod = def_kind {
@@ -833,7 +833,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return;
         }
 
-        let [mod_path_segments @ .., item_path_segment] = &mut path.segments[..] else { span_bug!(path.span, "empty import path") };
+        let (mod_path_segments, item_path_segment, item_res, enum_variant) = match &mut path.segments[..] {
+            [mod_path_segments @ .., item_path_segment, enum_variant_path_segment]
+                if let Some(item_res @ hir::Res::Def(hir::DefKind::Enum, _)) = self.def_res.node_res(item_path_segment.id)
+            => (mod_path_segments, item_path_segment, item_res, Some((enum_variant_path_segment, res))),
+
+            [mod_path_segments @ .., item_path_segment] => (mod_path_segments, item_path_segment, res, None),
+
+            _ => span_bug!(path.span, "empty import path"),
+        };
+        let hir::Res::Def(_, item_def_id) = item_res else { span_bug!(path.span, "import path has non-def item segment") };
 
         let mod_scope = self.tcx.parent_module(scope).to_def_id();
         let overlay_mod_scope = match self.macros_2_0_top_level_relative_path_res_hack {
@@ -844,8 +853,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         let (parent_mod_def_id, referenced_mod_child) = match mod_path_segments {
             [.., parent_mod_path_segment] if let Some(parent_mod_res) = self.def_res.node_res(parent_mod_path_segment.id) => {
                 let hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id) = parent_mod_res else { span_bug!(path.span, "import path has non-mod prefix segment") };
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(parent_mod_def_id))
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, item_res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(parent_mod_def_id))
                 };
                 (parent_mod_def_id, referenced_mod_child)
             }
@@ -853,18 +862,18 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // `$crate::Item` paths.
             [dollar_crate_segment]  if dollar_crate_segment.ident.name == kw::DollarCrate => {
                 let crate_num = dollar_crate_segment.ident.span.ctxt().outer_expn_data().macro_def_id.unwrap().krate;
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, crate_num.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(crate_num.as_def_id()))
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, crate_num.as_def_id(), item_res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(crate_num.as_def_id()))
                 };
                 (crate_num.as_def_id(), referenced_mod_child)
             }
 
             // `crate::Item` paths.
             [crate_segment] if crate_segment.ident.name == kw::Crate => {
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, def_id.krate.as_def_id(), res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(def_id.krate.as_def_id()))
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, item_def_id.krate.as_def_id(), item_res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(item_def_id.krate.as_def_id()))
                 };
-                (def_id.krate.as_def_id(), referenced_mod_child)
+                (item_def_id.krate.as_def_id(), referenced_mod_child)
             }
 
             // `super{::super}*::Item` paths.
@@ -873,8 +882,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 for _ in 0..super_segments.len() {
                     parent_mod_def_id = self.tcx.parent_module_from_def_id(parent_mod_def_id.expect_local()).to_def_id();
                 }
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(def_id), self.tcx.def_path_str(parent_mod_def_id))
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, item_res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(parent_mod_def_id))
                 };
                 (parent_mod_def_id, referenced_mod_child)
             }
@@ -882,12 +891,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // `{self::}?Item` paths.
             [] | [ast::PathSegment { ident: Ident { name: kw::SelfLower, .. }, .. }] => {
                 let Some((parent_mod_def_id, referenced_mod_child)) = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten().find_map(|scope| {
-                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, res.expect_non_local(), item_path_segment.ident.name)?;
+                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, item_res.expect_non_local(), item_path_segment.ident.name)?;
                     Some((scope, referenced_mod_child))
                 }) else {
                     let searched_mods = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten()
                         .map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
-                    span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
+                    span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(item_def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
                 };
 
                 (parent_mod_def_id, referenced_mod_child)
@@ -896,20 +905,37 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             _ => span_bug!(path.span, "unhandled import path root with missing parent mod resolutions"),
         };
 
-        if def_id.is_local() {
+        let mod_child_path_segments_count = match enum_variant {
+            None => 1,
+            Some(_) => 2,
+        };
+
+        if item_def_id.is_local() {
             let mut def_ident = referenced_mod_child.ident;
             sanitize_ident_if_from_expansion(&mut def_ident, IdentResKind::Def);
             item_path_segment.ident = def_ident.with_span_pos(item_path_segment.ident.span);
+
+            if let Some((enum_variant_path_segment, enum_variant_res)) = enum_variant {
+                let hir::Res::Def(_, enum_variant_def_id) = enum_variant_res else { span_bug!(path.span, "import path has non-def enum child segment") };
+
+                let Some(referenced_enum_child) = res::lookup_mod_child(self.tcx, item_def_id, enum_variant_res.expect_non_local(), enum_variant_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in enum {}", self.tcx.def_path_str(enum_variant_def_id), self.tcx.def_path_str(item_def_id))
+                };
+
+                let mut def_ident = referenced_enum_child.ident;
+                sanitize_ident_if_from_expansion(&mut def_ident, IdentResKind::Def);
+                enum_variant_path_segment.ident = def_ident.with_span_pos(enum_variant_path_segment.ident.span);
+            }
         }
 
         if parent_mod_def_id == mod_scope {
-            path.segments.splice(0..(path.segments.len() - 1), []);
+            path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), []);
             return;
         }
 
         let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
         self.sanitize_path(&mut parent_mod_path, hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id), Some(import_def_id.to_def_id()));
-        path.segments.splice(0..(path.segments.len() - 1), parent_mod_path.segments);
+        path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), parent_mod_path.segments);
     }
 
     fn sanitize_use_tree(&mut self, use_tree: &mut ast::UseTree, node_id: ast::NodeId, span: Span) {
