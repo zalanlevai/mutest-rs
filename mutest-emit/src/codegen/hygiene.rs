@@ -1295,7 +1295,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     break 'arm;
                 }
 
-                let Some(base_expr_hir) = self.body_res.hir_expr(&base_expr) else {
+                let Some(base_expr_hir) = self.body_res.hir_expr(base_expr.peel_parens()) else {
                     self.report_unmatched_ast_node(base_expr.span, || format!("unable to resolve field base expr `{}` for sanitization", ast::print::expr_to_string(expr)));
                     if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
                     panic!("expected resolution");
