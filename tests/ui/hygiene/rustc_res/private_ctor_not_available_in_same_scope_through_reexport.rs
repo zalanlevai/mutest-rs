@@ -1,6 +1,8 @@
 //@ fail
 //@ stderr
 
+#![allow(unused)]
+
 mod def {
     use inner::S;
 

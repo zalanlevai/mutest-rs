@@ -42,7 +42,7 @@ enum IdentResKind {
 }
 
 fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResKind) {
-    // `crate`, `self`, `super` and `Super` are keywords that cannot be raw identifiers, see
+    // `crate`, `self`, `super` and `Self` are keywords that cannot be raw identifiers, see
     // https://doc.rust-lang.org/reference/identifiers.html.
     if ident.name == kw::Crate { return; }
     if ident.name == kw::Super { return; }
@@ -183,8 +183,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 kw::Crate
                             }
 
-                            // Keep `Self` keyword segment in path from def path resolution.
+                            // Keep special `Self`, and `super` keyword segments in path from def path resolution.
                             _ if def_path_segment.ident.name == kw::SelfUpper => kw::SelfUpper,
+                            _ if def_path_segment.ident.name == kw::Super => kw::Super,
 
                             _ => self.tcx.opt_item_name(def_id)?,
                         };
@@ -297,9 +298,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath {
-        // Prefer using a direct, local path to local items within the same module as the enclosing module of the current scope.
+        // Prefer using a direct, local path to local items within the same module as the enclosing module (or parent modules) of the current scope.
         // NOTE: This helps avoid visibility-related resolution issues in local items, see
-        //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`.
+        //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`, and
+        //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_child_scope_through_reexport`.
         if let Some(current_scope) = self.current_scope && let Some(local_def_id) = def_id.as_local() && def_id != current_scope {
             let mod_scope = match self.tcx.def_kind(current_scope) {
                 hir::DefKind::Mod => current_scope,
@@ -310,6 +312,37 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             if containing_mod == mod_scope {
                 if let Ok(visible_path) = res::locally_visible_def_path(self.tcx, def_id, current_scope) {
                     return visible_path;
+                }
+            } else if !containing_mod.is_crate_root() {
+                let is_locally_accessible_through_supers = 'v: {
+                    let mut parent_mod_scope = mod_scope;
+                    let mut super_mods = vec![];
+
+                    while parent_mod_scope != containing_mod {
+                        let parent_mod = self.tcx.parent_module_from_def_id(parent_mod_scope.expect_local()).to_def_id();
+                        if parent_mod.is_crate_root() {
+                            break 'v None;
+                        }
+
+                        super_mods.push(parent_mod);
+                        parent_mod_scope = parent_mod;
+                    }
+
+                    Some(super_mods)
+                };
+
+                if let Some(super_mods) = is_locally_accessible_through_supers {
+                    if let Ok(mut visible_path) = res::locally_visible_def_path(self.tcx, def_id, containing_mod) {
+                        // Construct path to containing parent module, which are
+                        // always accessible through consecutive `super` path segments.
+                        visible_path.segments.splice(0..0, super_mods.into_iter().map(|def_id| res::DefPathSegment {
+                            def_id,
+                            ident: Ident::new(kw::Super, DUMMY_SP),
+                            reexport: None,
+                        }));
+
+                        return visible_path;
+                    }
                 }
             }
         }
