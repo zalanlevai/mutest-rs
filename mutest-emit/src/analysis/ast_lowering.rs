@@ -230,6 +230,26 @@ pub mod visit {
         fn visit_assoc_item_constraint(&mut self, constraint_ast: &'ast ast::AssocConstraint, constraint_hir: &'hir hir::TypeBinding<'hir>) {
             walk_assoc_item_constraint(self, constraint_ast, constraint_hir);
         }
+
+        fn visit_anon_const(&mut self, anon_const_ast: &'ast ast::AnonConst, anon_const_hir: &'hir hir::AnonConst) {
+            walk_anon_const(self, anon_const_ast, anon_const_hir);
+        }
+
+        fn visit_path_anon_const(&mut self, ty_ast: &'ast ast::Ty, anon_const_hir: &'hir hir::AnonConst) {
+            walk_path_anon_const(self, ty_ast, anon_const_hir);
+        }
+
+        fn visit_const_block(&mut self, anon_const_ast: &'ast ast::AnonConst, const_block_hir: &'hir hir::ConstBlock) {
+            walk_const_block(self, anon_const_ast, const_block_hir);
+        }
+
+        fn visit_const_arg(&mut self, anon_const_ast: &'ast ast::AnonConst, const_arg_hir: &'hir hir::ConstArg<'hir>) {
+            walk_const_arg(self, anon_const_ast, const_arg_hir);
+        }
+
+        fn visit_array_len(&mut self, anon_const_ast: &'ast ast::AnonConst, array_len_hir: &'hir hir::ArrayLen<'hir>) {
+            walk_array_len(self, anon_const_ast, array_len_hir);
+        }
     }
 
     pub fn walk_fn<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, kind_ast: ast::visit::FnKind<'ast>, _span_ast: Span, _id_ast: ast::NodeId, kind_hir: hir::intravisit::FnKind<'hir>, generics_hir: Option<&'hir hir::Generics<'hir>>, sig_hir: hir::FnSig<'hir>, body_hir: Option<hir::BodyId>, _span_hir: Span, _id_hir: hir::HirId) {
@@ -324,7 +344,9 @@ pub mod visit {
 
     pub fn walk_variant<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, variant_ast: &'ast ast::Variant, variant_hir: &'hir hir::Variant<'hir>) {
         visitor.visit_variant_data(&variant_ast.data, &variant_hir.data);
-        // TODO: Visit anonymous const
+        if let Some(anon_const_ast) = &variant_ast.disr_expr && let Some(anon_const_hir) = &variant_hir.disr_expr {
+            visitor.visit_anon_const(anon_const_ast, anon_const_hir);
+        }
     }
 
     pub fn walk_variant_data<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, variant_data_ast: &'ast ast::VariantData, variant_data_hir: &'hir hir::VariantData<'hir>) {
@@ -456,9 +478,11 @@ pub mod visit {
                 }
             }
             (ast::GenericParamKind::Lifetime, hir::GenericParamKind::Lifetime { .. }) => {}
-            (ast::GenericParamKind::Const { ty: ty_ast, default: _default_ast, .. }, hir::GenericParamKind::Const { ty: ty_hir, default: _default_hir, .. }) => {
+            (ast::GenericParamKind::Const { ty: ty_ast, default: default_ast, .. }, hir::GenericParamKind::Const { ty: ty_hir, default: default_hir, .. }) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir);
-                // TODO: Visit anonymous const
+                if let Some(default_ast) = default_ast && let Some(default_hir) = default_hir {
+                    visitor.visit_anon_const(default_ast, default_hir);
+                }
             }
             _ => unreachable!(),
         }
@@ -608,8 +632,8 @@ pub mod visit {
                     visit_matching_expr(visitor, expr_ast, expr_hir);
                 }
             }
-            (ast::ExprKind::ConstBlock(_anon_const_ast), hir::ExprKind::ConstBlock(_anon_const_hir)) => {
-                // TODO: Visit anonymous const
+            (ast::ExprKind::ConstBlock(anon_const_ast), hir::ExprKind::ConstBlock(const_block_hir)) => {
+                visitor.visit_const_block(anon_const_ast, const_block_hir);
             }
             (ast::ExprKind::Call(expr_ast, args_ast), hir::ExprKind::Call(expr_hir, args_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
@@ -845,9 +869,9 @@ pub mod visit {
                     visit_matching_expr(visitor, base_ast, base_hir);
                 }
             }
-            (ast::ExprKind::Repeat(expr_ast, _anon_const_ast), hir::ExprKind::Repeat(expr_hir, _anon_const_hir)) => {
+            (ast::ExprKind::Repeat(expr_ast, anon_const_ast), hir::ExprKind::Repeat(expr_hir, array_len_hir)) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
-                // TODO: Visit anonymous const
+                visitor.visit_array_len(anon_const_ast, array_len_hir);
             }
             (ast::ExprKind::Try(expr_ast), hir::ExprKind::Match(expr_hir, _, hir::MatchSource::TryDesugar(_))) => {
                 if let hir::ExprKind::Call(path_expr_hir, [expr_hir]) = &expr_hir.kind
@@ -1064,9 +1088,9 @@ pub mod visit {
             (ast::TyKind::Slice(ty_ast), hir::TyKind::Slice(ty_hir)) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir);
             }
-            (ast::TyKind::Array(ty_ast, _anon_const_ast), hir::TyKind::Array(ty_hir, _array_len_hir)) => {
-                // TODO: Visit anonymous const
+            (ast::TyKind::Array(ty_ast, anon_const_ast), hir::TyKind::Array(ty_hir, array_len_hir)) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir);
+                visitor.visit_array_len(anon_const_ast, array_len_hir);
             }
             (ast::TyKind::Tup(tys_ast), hir::TyKind::Tup(tys_hir)) => {
                 for (ty_ast, ty_hir) in iter::zip(tys_ast, *tys_hir) {
@@ -1106,8 +1130,8 @@ pub mod visit {
             (ast::TyKind::ImplTrait(_, _bounds_ast, _), hir::TyKind::Path(_qpath_hir)) => {
                 // TODO: Visit path
             }
-            (ast::TyKind::Typeof(_anon_const_ast), hir::TyKind::Typeof(_anon_const_hir)) => {
-                // TODO: Visit anonymous const
+            (ast::TyKind::Typeof(anon_const_ast), hir::TyKind::Typeof(anon_const_hir)) => {
+                visitor.visit_anon_const(anon_const_ast, anon_const_hir);
             }
             (ast::TyKind::ImplicitSelf, hir::TyKind::Path(_qpath_hir)) => {
                 // TODO: Visit path
@@ -1239,8 +1263,12 @@ pub mod visit {
             (ast::GenericArg::Type(ty_ast), hir::GenericArg::Type(ty_hir)) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir);
             }
-            (ast::GenericArg::Const(_anon_const_ast), hir::GenericArg::Const(_const_arg_hir)) => {
-                // TODO
+            (ast::GenericArg::Const(anon_const_ast), hir::GenericArg::Const(const_arg_hir)) => {
+                visitor.visit_const_arg(anon_const_ast, const_arg_hir);
+            }
+            // NOTE: Paths to named constants are expressed as generic type arguments in the AST.
+            (ast::GenericArg::Type(ty_ast), hir::GenericArg::Const(const_arg_hir)) if let ast::TyKind::Path(_, _) = &ty_ast.kind => {
+                visitor.visit_path_anon_const(ty_ast, const_arg_hir.value);
             }
             _ => {
                 let mut diagnostic = visitor.tcx().dcx().struct_warn("unrecognized AST-HIR node pair");
@@ -1266,8 +1294,8 @@ pub mod visit {
                     (ast::Term::Ty(ty_ast), hir::Term::Ty(ty_hir)) => {
                         visit_matching_ty(visitor, ty_ast, ty_hir);
                     }
-                    (ast::Term::Const(_anon_const_ast), hir::Term::Const(_const_arg_hir)) => {
-                        // TODO
+                    (ast::Term::Const(anon_const_ast), hir::Term::Const(anon_const_hir)) => {
+                        visitor.visit_anon_const(anon_const_ast, anon_const_hir);
                     }
                     _ => unreachable!(),
                 }
@@ -1276,6 +1304,51 @@ pub mod visit {
                 for (generic_bound_ast, generic_bound_hir) in iter::zip(generic_bounds_ast, generic_bounds_hir) {
                     visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
                 }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn walk_anon_const<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, anon_const_ast: &'ast ast::AnonConst, anon_const_hir: &'hir hir::AnonConst) {
+        let body_hir = visitor.nested_body(anon_const_hir.body);
+
+        if let Some(body_hir) = body_hir {
+            visit_matching_expr(visitor, &anon_const_ast.value, &body_hir.value);
+        }
+    }
+
+    pub fn walk_path_anon_const<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, ty_ast: &'ast ast::Ty, anon_const_hir: &'hir hir::AnonConst) {
+        let body_hir = visitor.nested_body(anon_const_hir.body);
+
+        if let Some(body_hir) = body_hir {
+            match (&ty_ast.kind, &body_hir.value.kind) {
+                (ast::TyKind::Path(qself_ast, path_ast), hir::ExprKind::Path(qpath_hir)) => {
+                    visitor.visit_qpath(qself_ast.as_deref(), path_ast, qpath_hir);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    pub fn walk_const_block<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, anon_const_ast: &'ast ast::AnonConst, const_block_hir: &'hir hir::ConstBlock) {
+        let body_hir = visitor.nested_body(const_block_hir.body);
+
+        if let Some(body_hir) = body_hir {
+            visit_matching_expr(visitor, &anon_const_ast.value, &body_hir.value);
+        }
+    }
+
+    pub fn walk_const_arg<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, anon_const_ast: &'ast ast::AnonConst, const_arg_hir: &'hir hir::ConstArg<'hir>) {
+        visitor.visit_anon_const(anon_const_ast, const_arg_hir.value);
+    }
+
+    pub fn walk_array_len<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, anon_const_ast: &'ast ast::AnonConst, array_len_hir: &'hir hir::ArrayLen<'hir>) {
+        match (&anon_const_ast.value.kind, array_len_hir) {
+            (ast::ExprKind::Underscore, hir::ArrayLen::Infer(_)) => {
+                // TODO
+            }
+            (_, hir::ArrayLen::Body(anon_const_hir)) => {
+                visitor.visit_anon_const(anon_const_ast, anon_const_hir);
             }
             _ => unreachable!(),
         }
@@ -1604,6 +1677,29 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
         self.insert_ids(constraint_ast.id, constraint_hir.hir_id);
         visit::walk_assoc_item_constraint(self, constraint_ast, constraint_hir);
     }
+
+    fn visit_anon_const(&mut self, anon_const_ast: &'ast ast::AnonConst, anon_const_hir: &'hir hir::AnonConst) {
+        self.insert_ids(anon_const_ast.id, anon_const_hir.hir_id);
+        visit::walk_anon_const(self, anon_const_ast, anon_const_hir);
+    }
+
+    fn visit_path_anon_const(&mut self, ty_ast: &'ast ast::Ty, anon_const_hir: &'hir hir::AnonConst) {
+        self.insert_ids(ty_ast.id, anon_const_hir.hir_id);
+        visit::walk_path_anon_const(self, ty_ast, anon_const_hir);
+    }
+
+    fn visit_const_block(&mut self, anon_const_ast: &'ast ast::AnonConst, const_block_hir: &'hir hir::ConstBlock) {
+        self.insert_ids(anon_const_ast.id, const_block_hir.hir_id);
+        visit::walk_const_block(self, anon_const_ast, const_block_hir);
+    }
+
+    fn visit_const_arg(&mut self, anon_const_ast: &'ast ast::AnonConst, const_arg_hir: &'hir hir::ConstArg<'hir>) {
+        visit::walk_const_arg(self, anon_const_ast, const_arg_hir);
+    }
+
+    fn visit_array_len(&mut self, anon_const_ast: &'ast ast::AnonConst, array_len_hir: &'hir hir::ArrayLen<'hir>) {
+        visit::walk_array_len(self, anon_const_ast, array_len_hir);
+    }
 }
 
 pub fn resolve_body<'tcx, K>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, item_ast: &ast::Item<K>, node_hir: hir::Node<'tcx>) -> Option<BodyResolutions<'tcx>>
@@ -1758,8 +1854,9 @@ impl<'ast, 'tcx, 'op> ast::visit::Visitor<'ast> for BodyResValidator<'tcx, 'op> 
         ast::visit::walk_lifetime(self, lifetime)
     }
 
-    fn visit_anon_const(&mut self, _anon_const: &'ast ast::AnonConst) {
-        // TODO: Check node id and walk subexpressions.
+    fn visit_anon_const(&mut self, anon_const: &'ast ast::AnonConst) {
+        self.check_node_id("anonymous const", anon_const.id, anon_const.value.span);
+        ast::visit::walk_anon_const(self, anon_const)
     }
 
     fn visit_block(&mut self, block: &'ast ast::Block) {

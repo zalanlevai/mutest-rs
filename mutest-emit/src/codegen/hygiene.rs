@@ -1441,6 +1441,27 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         if let Some(protected_ident) = protected_ident { self.protected_idents.remove(&protected_ident); }
     }
 
+    fn visit_anon_const(&mut self, anon_const: &mut ast::AnonConst) {
+        let Some(&def_id) = self.def_res.node_id_to_def_id.get(&anon_const.id) else { unreachable!() };
+
+        // Store new context scope.
+        let previous_scope = mem::replace(&mut self.current_scope, Some(def_id.to_def_id()));
+
+        // Store new typeck scope.
+        let previous_typeck_ctx = self.current_typeck_ctx;
+        let typeck_root_def_id = self.tcx.typeck_root_def_id(def_id.to_def_id());
+        let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
+        if let Some(typeck_root_body_id) = self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
+            self.current_typeck_ctx = Some(self.tcx.typeck_body(typeck_root_body_id));
+        }
+
+        ast::mut_visit::noop_visit_anon_const(anon_const, self);
+
+        // Restore previous context.
+        self.current_typeck_ctx = previous_typeck_ctx;
+        self.current_scope = previous_scope;
+    }
+
     fn visit_path(&mut self, path: &mut ast::Path) {
         let Some(last_segment) = path.segments.last() else { unreachable!(); };
         let Some(res) = self.def_res.node_res(last_segment.id) else {

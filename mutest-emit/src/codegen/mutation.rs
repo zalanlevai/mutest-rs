@@ -531,8 +531,13 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
     fn visit_attribute(&mut self, _attr: &'ast ast::Attribute) {}
 
     fn visit_ty(&mut self, _ty: &'ast ast::Ty) {
-        // NOTE: We do not want to visit types, specifically expressions within them, since we cannot match them
-        //       against HIR nodes.
+        // NOTE: We do not want to visit types, specifically expressions within them, since
+        //       we cannot introduce dynamic mutations in them.
+    }
+
+    fn visit_anon_const(&mut self, _anon_const: &'ast ast::AnonConst) {
+        // NOTE: We do not want to visit anonymous consts, specifically expressions within them, since
+        //       we cannot introduce dynamic mutations in them.
     }
 }
 

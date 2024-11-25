@@ -1160,4 +1160,10 @@ pub mod mut_visit {
         }
         vis.visit_span(&mut assoc_constraint.span);
     }
+
+    // Copy of `rustc_ast::mut_visit::noop_visit_anon_const`, which has been made private.
+    pub fn noop_visit_anon_const<T: MutVisitor>(anon_const: &mut AnonConst, vis: &mut T) {
+        vis.visit_id(&mut anon_const.id);
+        vis.visit_expr(&mut anon_const.value);
+    }
 }

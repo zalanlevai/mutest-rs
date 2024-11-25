@@ -443,6 +443,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
                 | hir::DefKind::Trait | hir::DefKind::Impl { .. } | hir::DefKind::TraitAlias
                 | hir::DefKind::Fn | hir::DefKind::Const | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
                 | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
+                | hir::DefKind::AnonConst
             );
             while is_transparent(tcx.def_kind(scope)) && let Some(parent_scope) = tcx.opt_parent(scope) {
                 scope = parent_scope;
