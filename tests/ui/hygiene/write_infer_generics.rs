@@ -12,6 +12,23 @@ macro m() {
     // <$ty as From<_>>::from($expr);
     let _ = String::from("str");
     let _ = u8::from(false);
+
+    // TEST: Write infer generics corresponding to trait method.
+    pub trait Parser: Sized {
+        fn parse_from<I, T>(itr: I) -> Self
+        where
+            I: IntoIterator<Item = T>,
+            T: Into<String>;
+    }
+    impl<T: Parser> Parser for Box<T> {
+        fn parse_from<I, It>(itr: I) -> Self
+        where
+            I: IntoIterator<Item = It>,
+            It: Into<String>,
+        {
+            Box::new(<T as Parser>::parse_from(itr))
+        }
+    }
 }
 
 #[test]

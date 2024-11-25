@@ -256,7 +256,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                         let mut args = ThinVec::with_capacity(generics.own_params.len());
                         if generics.own_params.len() >= 1 {
-                            for generic_param in &generics.own_params[(generics.has_self as usize)..] {
+                            let skip_self = generics.has_self && generics.parent.is_none();
+
+                            for generic_param in &generics.own_params[(skip_self as usize)..] {
                                 match &generic_param.kind {
                                     ty::GenericParamDefKind::Lifetime => {}
                                     ty::GenericParamDefKind::Type { has_default, synthetic } => {
