@@ -49,32 +49,60 @@ impl<'tcx> TcxExpansionExt for TyCtxt<'tcx> {
 pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![allow(unused_features)]
 #![allow(unused_imports)]
-
-#![feature(rustc_attrs)]
-#![feature(fmt_internals)]
-#![feature(fmt_helpers_for_derive)]
-#![feature(const_fmt_arguments_new)]
-#![feature(str_internals)]
-#![feature(sort_internals)]
-#![feature(panic_internals)]
-#![feature(print_internals)]
-#![feature(allocator_internals)]
-#![feature(libstd_sys_internals)]
-#![feature(thread_local_internals)]
-
-#![feature(allocator_api)]
-#![feature(cfg_target_thread_local)]
-#![feature(core_intrinsics)]
-#![feature(error_in_core)]
-#![feature(derive_clone_copy)]
-#![feature(derive_eq)]
-#![feature(coverage_attribute)]
-#![feature(rt)]
-#![feature(rustc_private)]
-#![feature(stdarch_internal)]
-#![feature(structural_match)]
-#![feature(thread_local)]
 "#;
+
+pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
+    let expn_id = tcx.expansion_for_ast_pass(
+        AstPass::StdImports,
+        DUMMY_SP,
+        &[sym::rustc_attrs],
+    );
+    let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
+
+    let g = &tcx.sess.psess.attr_id_generator;
+
+    macro ensure_attrs($(#![$meta:ident($kind:ident)])+) {
+        $(
+            let kind = Symbol::intern(stringify!($kind));
+            if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::$meta, kind)) {
+                let feature_more_qualified_paths_attr = ast::mk::attr_inner(g, DUMMY_SP,
+                    Ident::new(sym::$meta, DUMMY_SP),
+                    ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                        ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(kind, ast::token::IdentIsRaw::No)),
+                    ])),
+                );
+                krate.attrs.push(feature_more_qualified_paths_attr);
+            }
+        )+
+    }
+
+    ensure_attrs! {
+        #![feature(rustc_attrs)]
+        #![feature(fmt_internals)]
+        #![feature(fmt_helpers_for_derive)]
+        #![feature(const_fmt_arguments_new)]
+        #![feature(str_internals)]
+        #![feature(sort_internals)]
+        #![feature(panic_internals)]
+        #![feature(print_internals)]
+        #![feature(allocator_internals)]
+        #![feature(libstd_sys_internals)]
+        #![feature(thread_local_internals)]
+
+        #![feature(allocator_api)]
+        #![feature(cfg_target_thread_local)]
+        #![feature(core_intrinsics)]
+        #![feature(error_in_core)]
+        #![feature(derive_clone_copy)]
+        #![feature(derive_eq)]
+        #![feature(coverage_attribute)]
+        #![feature(rt)]
+        #![feature(rustc_private)]
+        #![feature(stdarch_internal)]
+        #![feature(structural_match)]
+        #![feature(thread_local)]
+    }
+}
 
 pub fn insert_generated_code_crate_refs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
     let expn_id = tcx.expansion_for_ast_pass(

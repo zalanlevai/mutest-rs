@@ -478,6 +478,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 // HACK: See below.
                 mutest_emit::codegen::expansion::insert_generated_code_crate_refs(tcx, &mut generated_crate_ast);
+                mutest_emit::codegen::expansion::insert_generated_code_prelude_attrs(tcx, &mut generated_crate_ast);
 
                 mutest_emit::codegen::entry_point::clean_entry_points(sess, &mut generated_crate_ast);
                 mutest_emit::codegen::entry_point::generate_dummy_main(tcx, &mut generated_crate_ast);
