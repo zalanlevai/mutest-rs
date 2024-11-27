@@ -161,25 +161,21 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let args = segment.args.as_ref()?;
                         let res = self.def_res.node_res(segment.id)?;
                         let def_id = res.opt_def_id()?;
-                        Some((def_id, args.clone()))
+                        Some((def_id, Some(args.clone())))
                     })
                     .collect::<Vec<_>>();
 
                 // Ensure that we always retain the final, "item" generic arguments, even if
                 // the last path segment itself does not have a sufficient resolution, since
                 // we can use the final path resolution instead.
-                if let Some(args) = &last_path_segment.args {
-                    let [.., last_def_path_segment] = &def_path.segments[..] else { unreachable!() };
-
-                    let mut def_id = last_def_path_segment.def_id;
-                    if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
-                        // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
-                        // so that the segment def ids match up.
-                        def_id = self.tcx.parent(def_id);
-                    }
-
-                    segments_with_generics.push((def_id, args.clone()));
+                let [.., last_def_path_segment] = &def_path.segments[..] else { unreachable!() };
+                let mut def_id = last_def_path_segment.def_id;
+                if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
+                    // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
+                    // so that the segment def ids match up.
+                    def_id = self.tcx.parent(def_id);
                 }
+                segments_with_generics.push((def_id, last_path_segment.args.clone()));
 
                 segments_with_generics
             }
@@ -219,81 +215,88 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                 let mut segment = ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None };
 
-                // Copy matching generic args from the corresponding segment in the original path.
-                if let Some((_, mut args)) = segments_with_generics.extract_if(|(segment_def_id, _)| *segment_def_id == def_id).next() {
-                    // Sanitize associated constraint idents.
-                    match args.ast_deref_mut() {
-                        ast::GenericArgs::AngleBracketed(args) => 'arm: {
-                            // Skip sanitization if it is only an argument list and there are no references to assoc items.
-                            // NOTE: This is also needed to avoid attempting to fetch assoc items for e.g. generic function calls.
-                            if !args.args.iter().any(|arg| matches!(arg, ast::AngleBracketedArg::Constraint(..))) { break 'arm; }
+                match segments_with_generics.extract_if(|(segment_def_id, _)| *segment_def_id == def_id).next() {
+                    // Copy matching generic args from the corresponding segment in the original path.
+                    Some((_, Some(mut args))) => {
+                        // Sanitize associated constraint idents.
+                        match args.ast_deref_mut() {
+                            ast::GenericArgs::AngleBracketed(args) => 'arm: {
+                                // Skip sanitization if it is only an argument list and there are no references to assoc items.
+                                // NOTE: This is also needed to avoid attempting to fetch assoc items for e.g. generic function calls.
+                                if !args.args.iter().any(|arg| matches!(arg, ast::AngleBracketedArg::Constraint(..))) { break 'arm; }
 
-                            let assoc_items = self.tcx.associated_items(def_id);
+                                let assoc_items = self.tcx.associated_items(def_id);
 
-                            for arg in &mut args.args {
-                                match arg {
-                                    ast::AngleBracketedArg::Constraint(assoc_constraint) => {
-                                        let assoc_kind = match &assoc_constraint.kind {
-                                            ast::AssocConstraintKind::Equality { term } => {
-                                                match term {
-                                                    ast::Term::Ty(..) => ty::AssocKind::Type,
-                                                    ast::Term::Const(..) => ty::AssocKind::Const,
+                                for arg in &mut args.args {
+                                    match arg {
+                                        ast::AngleBracketedArg::Constraint(assoc_constraint) => {
+                                            let assoc_kind = match &assoc_constraint.kind {
+                                                ast::AssocConstraintKind::Equality { term } => {
+                                                    match term {
+                                                        ast::Term::Ty(..) => ty::AssocKind::Type,
+                                                        ast::Term::Const(..) => ty::AssocKind::Const,
+                                                    }
                                                 }
-                                            }
-                                            ast::AssocConstraintKind::Bound { .. } => ty::AssocKind::Type,
-                                        };
+                                                ast::AssocConstraintKind::Bound { .. } => ty::AssocKind::Type,
+                                            };
 
-                                        if let Some(assoc_item) = assoc_items
-                                            .filter_by_name_unhygienic(assoc_constraint.ident.name)
-                                            .find(|assoc_item| assoc_item.kind == assoc_kind)
-                                        {
-                                            // Copy and sanitize assoc item definition ident.
-                                            let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
-                                            copy_def_span_ctxt(&mut assoc_constraint.ident, assoc_item_ident_span);
-                                            sanitize_ident_if_from_expansion(&mut assoc_constraint.ident, IdentResKind::Def);
+                                            if let Some(assoc_item) = assoc_items
+                                                .filter_by_name_unhygienic(assoc_constraint.ident.name)
+                                                .find(|assoc_item| assoc_item.kind == assoc_kind)
+                                            {
+                                                // Copy and sanitize assoc item definition ident.
+                                                let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
+                                                copy_def_span_ctxt(&mut assoc_constraint.ident, assoc_item_ident_span);
+                                                sanitize_ident_if_from_expansion(&mut assoc_constraint.ident, IdentResKind::Def);
+                                            }
                                         }
+                                        ast::AngleBracketedArg::Arg(_) => {}
                                     }
-                                    ast::AngleBracketedArg::Arg(_) => {}
                                 }
                             }
+                            ast::GenericArgs::Parenthesized(_) => {}
                         }
-                        ast::GenericArgs::Parenthesized(_) => {}
+
+                        // Copy modified args.
+                        segment.args = Some(args);
                     }
 
-                    // Copy modified args.
-                    segment.args = Some(args);
-                } else {
+                    // Corresponding segment in the original path has no generic args, leave as-is.
+                    Some((_, None)) => {}
+
                     // If there are no corresponding args in the original path, we may still have to
-                    // add dummy generics with type inference holes for the required generics of the def
+                    // add dummy generics with type inference holes for the non-synthetic generics of the def
                     // to generate a valid path.
-                    let has_generics = matches!(self.tcx.def_kind(def_id),
-                        | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::TyAlias
-                        | hir::DefKind::Trait | hir::DefKind::TraitAlias
-                        | hir::DefKind::Fn | hir::DefKind::Const
-                        | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
-                    );
-                    if has_generics {
-                        let generics = self.tcx.generics_of(def_id);
+                    None => {
+                        let has_generics = matches!(self.tcx.def_kind(def_id),
+                            | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::TyAlias
+                            | hir::DefKind::Trait | hir::DefKind::TraitAlias
+                            | hir::DefKind::Fn | hir::DefKind::Const
+                            | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
+                        );
+                        if has_generics {
+                            let generics = self.tcx.generics_of(def_id);
 
-                        let mut args = ThinVec::with_capacity(generics.own_params.len());
-                        if generics.own_params.len() >= 1 {
-                            let skip_self = generics.has_self && generics.parent.is_none();
+                            let mut args = ThinVec::with_capacity(generics.own_params.len());
+                            if generics.own_params.len() >= 1 {
+                                let skip_self = generics.has_self && generics.parent.is_none();
 
-                            for generic_param in &generics.own_params[(skip_self as usize)..] {
-                                match &generic_param.kind {
-                                    ty::GenericParamDefKind::Lifetime => {}
-                                    ty::GenericParamDefKind::Type { has_default, synthetic } => {
-                                        if *has_default || *synthetic { continue; }
-                                        let ty = ast::mk::ty(DUMMY_SP, ast::TyKind::Infer);
-                                        args.push(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty)));
+                                for generic_param in &generics.own_params[(skip_self as usize)..] {
+                                    match &generic_param.kind {
+                                        ty::GenericParamDefKind::Lifetime => {}
+                                        ty::GenericParamDefKind::Type { has_default: _, synthetic } => {
+                                            if *synthetic { continue; }
+                                            let ty = ast::mk::ty(DUMMY_SP, ast::TyKind::Infer);
+                                            args.push(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty)));
+                                        }
+                                        ty::GenericParamDefKind::Const { .. } => {}
                                     }
-                                    ty::GenericParamDefKind::Const { .. } => {}
                                 }
                             }
-                        }
 
-                        if args.len() >= 1 {
-                            segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args })));
+                            if args.len() >= 1 {
+                                segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args })));
+                            }
                         }
                     }
                 }
