@@ -150,19 +150,40 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_path: &res::DefPath) {
         assert!(!def_path.segments.is_empty());
 
-        let mut segments_with_generics = path.segments.iter()
-            .filter_map(|segment| {
-                let args = segment.args.as_ref()?;
-                let res = self.def_res.node_res(segment.id)?;
-                let mut def_id = res.opt_def_id()?;
-                if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
-                    // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
-                    // so that the segment def ids match up.
-                    def_id = self.tcx.parent(def_id);
+        let mut segments_with_generics = match &path.segments[..] {
+            // NOTE: We emit dummy, empty "source" paths when constructing import paths.
+            // FIXME: Turn into ICE once this mechanism for import paths is not used anymore.
+            [] => vec![],
+
+            [path_segments @ .., last_path_segment] => {
+                let mut segments_with_generics = path_segments.into_iter()
+                    .filter_map(|segment| {
+                        let args = segment.args.as_ref()?;
+                        let res = self.def_res.node_res(segment.id)?;
+                        let def_id = res.opt_def_id()?;
+                        Some((def_id, args.clone()))
+                    })
+                    .collect::<Vec<_>>();
+
+                // Ensure that we always retain the final, "item" generic arguments, even if
+                // the last path segment itself does not have a sufficient resolution, since
+                // we can use the final path resolution instead.
+                if let Some(args) = &last_path_segment.args {
+                    let [.., last_def_path_segment] = &def_path.segments[..] else { unreachable!() };
+
+                    let mut def_id = last_def_path_segment.def_id;
+                    if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
+                        // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
+                        // so that the segment def ids match up.
+                        def_id = self.tcx.parent(def_id);
+                    }
+
+                    segments_with_generics.push((def_id, args.clone()));
                 }
-                Some((def_id, args.clone()))
-            })
-            .collect::<Vec<_>>();
+
+                segments_with_generics
+            }
+        };
 
         let mut relative = !def_path.global;
 
