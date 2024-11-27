@@ -52,13 +52,6 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 "#;
 
 pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
-    let expn_id = tcx.expansion_for_ast_pass(
-        AstPass::StdImports,
-        DUMMY_SP,
-        &[sym::rustc_attrs],
-    );
-    let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
-
     let g = &tcx.sess.psess.attr_id_generator;
 
     macro ensure_attrs($(#![$meta:ident($kind:ident)])+) {
