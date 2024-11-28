@@ -570,6 +570,30 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         ty_ast
     }
 
+    fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], span: Span) -> Option<P<ast::GenericArgs>> {
+        let args_ast = generic_args.into_iter()
+            .filter_map(|generic_arg| {
+                match generic_arg.unpack() {
+                    ty::GenericArgKind::Lifetime(region) => {
+                        let lifetime = self.sanitize_region(region)?;
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
+                    }
+                    ty::GenericArgKind::Type(ty) => {
+                        let ty_ast = self.sanitize_ty(ty, span);
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
+                    }
+                    ty::GenericArgKind::Const(_) => {
+                        None // TODO
+                    }
+                }
+            })
+            .collect::<ThinVec<_>>();
+
+        if args_ast.is_empty() { return None; }
+
+        Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
+    }
+
     /// Extract bound params from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
@@ -617,27 +641,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return None;
         };
 
-        let args_ast = trait_predicate.trait_ref.args[1..].iter()
-            .filter_map(|generic_arg| {
-                match generic_arg.unpack() {
-                    ty::GenericArgKind::Lifetime(region) => {
-                        let lifetime = self.sanitize_region(region)?;
-                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
-                    }
-                    ty::GenericArgKind::Type(ty) => {
-                        let ty_ast = self.sanitize_ty(ty, span);
-                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
-                    }
-                    ty::GenericArgKind::Const(_) => {
-                        None // TODO
-                    }
-                }
-            })
-            .collect::<ThinVec<_>>();
-
-        if args_ast.is_empty() { return None; }
-
-        Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
+        self.sanitize_generic_args(&trait_predicate.trait_ref.args[1..], span)
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
@@ -697,7 +701,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let qself_ty = self.lookup_hir_node_ty(qself_ty_hir);
 
                         // NOTE: All nested qpaths can be reduced down to a simply qualified path by resolving the definition.
-                        match self.tcx.def_kind(self.tcx.parent(qres.def_id())) {
+                        let parent_def_id = self.tcx.parent(qres.def_id());
+                        match self.tcx.def_kind(parent_def_id) {
                             hir::DefKind::Trait | hir::DefKind::TraitAlias => {
                                 let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
 
@@ -707,16 +712,29 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 };
 
                                 self.sanitize_path(path, qres.expect_non_local(), None);
-                                // NOTE: There is no need to append bound params from local trait bounds corresponding to parameter types
-                                //       if the path is already qualified, since
+                                // NOTE: There is no need to append bound param args if the path is already qualified, since
                                 //       the necessary trait arguments should already be present in the corresponding path segment.
                                 if qself.is_none() {
-                                    if let Some(parent_path_segment_res) = parent_path_segment_res {
-                                        // Append bound params from local trait bounds corresponding to parameter types to the trait subpath.
-                                        if let Some(generic_args_ast) = self.extract_local_trait_bound_params(self.tcx.parent(qres.def_id()), parent_path_segment_res, qself_ty_hir.span) {
-                                            let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
-                                            parent_path_segment.args = Some(generic_args_ast);
+                                    let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(node_hir_id)[..]) {
+                                        // Inferred generic args for the trait.
+                                        Some(node_args @ [_, ..]) => {
+                                            let trait_generics = self.tcx.generics_of(parent_def_id);
+                                            let trait_args = &node_args[(trait_generics.has_self as usize)..trait_generics.count()];
+
+                                            self.sanitize_generic_args(trait_args, qself_ty_hir.span)
                                         }
+
+                                        // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
+                                        _ if let Some(parent_path_segment_res) = parent_path_segment_res => {
+                                            self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, qself_ty_hir.span)
+                                        }
+
+                                        _ => None,
+                                    };
+
+                                    if let Some(generic_args_ast) = generic_args_ast {
+                                        let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
+                                        parent_path_segment.args = Some(generic_args_ast);
                                     }
                                 }
 
