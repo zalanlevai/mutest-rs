@@ -558,13 +558,15 @@ pub mod visit {
         if let Some(ty_ast) = &local_ast.ty && let Some(ty_hir) = local_hir.ty {
             visit_matching_ty(visitor, ty_ast, ty_hir);
         }
-        match (&local_ast.kind, local_hir.init) {
-            | (ast::LocalKind::Init(expr_ast), Some(expr_hir))
-            | (ast::LocalKind::InitElse(expr_ast, _), Some(expr_hir)) => {
+        match (&local_ast.kind, local_hir.init, local_hir.els) {
+            (ast::LocalKind::Init(expr_ast), Some(expr_hir), None) => {
                 visit_matching_expr(visitor, expr_ast, expr_hir);
             }
-
-            (ast::LocalKind::Decl, None) => {}
+            (ast::LocalKind::InitElse(expr_ast, els_ast), Some(expr_hir), Some(els_hir)) => {
+                visit_matching_expr(visitor, expr_ast, expr_hir);
+                visitor.visit_block(els_ast, els_hir);
+            }
+            (ast::LocalKind::Decl, None, None) => {}
             _ => unreachable!(),
         }
     }
