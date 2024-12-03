@@ -44,13 +44,19 @@ impl<'tcx> CrateResolutions<'tcx> {
                     ExternLocation::FoundInLibrarySearchDirectories => None,
 
                     // --extern name=file.rlib
-                    ExternLocation::ExactPaths(possible_paths) => {
+                    ExternLocation::ExactPaths(possible_paths) => 'arm: {
                         // HACK: Find crate with sources matching this --extern flag.
                         let Some((&cnum, _)) = crate_sources.iter().find(|(_, source_paths)| {
                             source_paths.iter().any(|source_path| possible_paths.iter().any(|possible_path| {
                                 possible_path.canonicalized() == source_path
                             }))
-                        }) else { unreachable!() };
+                        }) else {
+                            // NOTE: We can only fetch the crate sources for actually used crates,
+                            //       so we can safely discard unused crates without used sources.
+                            // TODO: It might be better to remove such crates entirely from the
+                            //       apparent extern prelude, as that is what rustc seems to do.
+                            break 'arm None;
+                        };
                         Some(cnum)
                     }
                 };

@@ -2,6 +2,7 @@
 //@ stderr: empty
 //@ aux-build: dummy_crate.rs
 //@ rustc-flags: --extern dummy_crate_renamed=target/mutest_test/debug/deps/auxiliary/libdummy_crate.rlib
+//@ rustc-flags: --extern dummy_crate_reexport_unused=target/mutest_test/debug/deps/auxiliary/libdummy_crate_reexport.rlib
 //@ mutest-flags: --Zsanitize-macro-expns
 
 use dummy_crate_renamed::{S, bar};
