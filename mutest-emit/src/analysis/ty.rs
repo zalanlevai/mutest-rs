@@ -5,7 +5,7 @@ use rustc_middle::ty;
 use rustc_trait_selection::infer::InferCtxtExt;
 
 use crate::analysis::hir;
-use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol};
 
 pub fn impls_trait_with_env<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>) -> bool {
     let ty = tcx.erase_regions(ty);
@@ -37,6 +37,18 @@ pub fn region_opt_param_def_id<'tcx>(region: ty::Region<'tcx>) -> Option<hir::De
     }
 }
 
+trait SpanFromGenericsExt {
+    fn span_from_generics<'tcx>(self, tcx: TyCtxt<'tcx>, item_with_generics: hir::DefId) -> Span;
+}
+
+impl SpanFromGenericsExt for ty::ParamConst {
+    fn span_from_generics<'tcx>(self, tcx: TyCtxt<'tcx>, item_with_generics: hir::DefId) -> Span {
+        let generics = tcx.generics_of(item_with_generics);
+        let const_param = generics.const_param(self, tcx);
+        tcx.def_span(const_param.def_id)
+    }
+}
+
 pub use print::ast_repr;
 
 pub mod print {
@@ -53,6 +65,8 @@ pub mod print {
     use crate::codegen::ast::{self, P};
     use crate::codegen::hygiene;
     use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
+
+    use super::SpanFromGenericsExt;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum ScopedItemPaths {
@@ -393,110 +407,135 @@ pub mod print {
         fn print_const(&mut self, ct: ty::Const<'tcx>) -> Result<Self::Const, Self::Error> {
             let sp = self.sp;
 
-            let valtree = ct.eval(self.tcx, ty::ParamEnv::reveal_all(), DUMMY_SP).map_err(|_| format!("encountered invalid const"))?;
-            let val = self.tcx.valtree_to_const_val((ct.ty(), valtree));
+            match ct.kind() {
+                ty::ConstKind::Param(param_const) => {
+                    let mut ident = Ident::new(param_const.name, sp);
+                    if self.sanitize_macro_expns {
+                        'sanitize: {
+                            let Some(scope) = self.scope else { break 'sanitize; };
+                            let def_ident_span = param_const.span_from_generics(self.tcx, scope);
+                            hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+                        }
+                    }
 
-            match val {
-                mir::ConstValue::Scalar(scalar) => {
-                    let lit_expr = match ct.ty().kind() {
-                        ty::TyKind::Bool => {
-                            scalar.to_bool().map(|v| ast::mk::expr_bool(sp, v))
-                                .map_err(|e| format!("encountered invalid bool const: {e:?}"))
-                        }
-                        ty::TyKind::Char => {
-                            scalar.to_char().map(|v| ast::mk::expr_lit(sp, ast::token::LitKind::Char, Symbol::intern(&v.to_string()), None))
-                                .map_err(|e| format!("encountered invalid char const: {e:?}"))
-                        }
-                        ty::TyKind::Int(ty::IntTy::I8) => {
-                            scalar.to_i8().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i8))
-                                .map_err(|e| format!("encountered invalid i8 const: {e:?}"))
-                        }
-                        ty::TyKind::Int(ty::IntTy::I16) => {
-                            scalar.to_i16().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i16))
-                                .map_err(|e| format!("encountered invalid i16 const: {e:?}"))
-                        }
-                        ty::TyKind::Int(ty::IntTy::I32) => {
-                            scalar.to_i32().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i32))
-                                .map_err(|e| format!("encountered invalid i32 const: {e:?}"))
-                        }
-                        ty::TyKind::Int(ty::IntTy::I64) => {
-                            scalar.to_i64().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i64))
-                                .map_err(|e| format!("encountered invalid i64 const: {e:?}"))
-                        }
-                        ty::TyKind::Int(ty::IntTy::I128) => {
-                            scalar.to_i128().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i128))
-                                .map_err(|e| format!("encountered invalid i128 const: {e:?}"))
-                        }
-                        ty::TyKind::Int(ty::IntTy::Isize) => {
-                            scalar.to_target_isize(&self.tcx).map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::isize))
-                                .map_err(|e| format!("encountered invalid isize const: {e:?}"))
-                        }
-                        ty::TyKind::Uint(ty::UintTy::U8) => {
-                            scalar.to_u8().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u8))
-                                .map_err(|e| format!("encountered invalid u8 const: {e:?}"))
-                        }
-                        ty::TyKind::Uint(ty::UintTy::U16) => {
-                            scalar.to_u16().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u16))
-                                .map_err(|e| format!("encountered invalid u16 const: {e:?}"))
-                        }
-                        ty::TyKind::Uint(ty::UintTy::U32) => {
-                            scalar.to_u32().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u32))
-                                .map_err(|e| format!("encountered invalid u32 const: {e:?}"))
-                        }
-                        ty::TyKind::Uint(ty::UintTy::U64) => {
-                            scalar.to_u64().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u64))
-                                .map_err(|e| format!("encountered invalid u64 const: {e:?}"))
-                        }
-                        ty::TyKind::Uint(ty::UintTy::U128) => {
-                            scalar.to_u128().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u128))
-                                .map_err(|e| format!("encountered invalid u128 const: {e:?}"))
-                        }
-                        ty::TyKind::Uint(ty::UintTy::Usize) => {
-                            scalar.to_target_usize(&self.tcx).map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::usize))
-                                .map_err(|e| format!("encountered invalid usize const: {e:?}"))
-                        }
-                        ty::TyKind::Float(ty::FloatTy::F16) => {
-                            scalar.to_f16()
-                                .map(|v| {
-                                    let v = f16::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u16);
-                                    ast::mk::expr_float_exact(sp, v as f64, sym::f16)
-                                })
-                                .map_err(|e| format!("encountered invalid f16 const: {e:?}"))
-                        }
-                        ty::TyKind::Float(ty::FloatTy::F32) => {
-                            scalar.to_f32()
-                                .map(|v| {
-                                    let v = f32::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u32);
-                                    ast::mk::expr_float_exact(sp, v as f64, sym::f32)
-                                })
-                                .map_err(|e| format!("encountered invalid f32 const: {e:?}"))
-                        }
-                        ty::TyKind::Float(ty::FloatTy::F64) => {
-                            scalar.to_f64()
-                                .map(|v| {
-                                    let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u64);
-                                    ast::mk::expr_float_exact(sp, v, sym::f64)
-                                })
-                                .map_err(|e| format!("encountered invalid f64 const: {e:?}"))
-                        }
-                        ty::TyKind::Float(ty::FloatTy::F128) => {
-                            scalar.to_f128()
-                                .map(|v| {
-                                    let rounded_v: rustc_apfloat::ieee::Double = rustc_apfloat::FloatConvert::convert(v, &mut false).value;
-                                    let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(rounded_v) as u64);
-                                    ast::mk::expr_float_exact(sp, v, sym::f128)
-                                })
-                                .map_err(|e| format!("encountered invalid f128 const: {e:?}"))
-                        }
-                        _ => Err("encountered unknown constant scalar value".to_owned())
-                    }?;
-
-                    Ok(ast::mk::anon_const(sp, lit_expr.into_inner().kind))
+                    Ok(ast::mk::anon_const(sp, ast::mk::expr_ident(sp, ident).into_inner().kind))
                 }
 
-                mir::ConstValue::ZeroSized => Err("encountered zero-sized const".to_owned()),
-                mir::ConstValue::Slice { .. } => Err("encountered slice const".to_owned()),
-                mir::ConstValue::Indirect { .. } => Err("encountered indirect const".to_owned()),
+                | ty::ConstKind::Infer(_)
+                | ty::ConstKind::Bound(_, _)
+                | ty::ConstKind::Placeholder(_)
+                | ty::ConstKind::Unevaluated(_)
+                | ty::ConstKind::Value(_)
+                | ty::ConstKind::Expr(_)
+                => {
+                    let valtree = ct.eval(self.tcx, ty::ParamEnv::reveal_all(), DUMMY_SP).map_err(|e| format!("encountered invalid const: {e:?}"))?;
+                    let val = self.tcx.valtree_to_const_val((ct.ty(), valtree));
+
+                    match val {
+                        mir::ConstValue::Scalar(scalar) => {
+                            let lit_expr = match ct.ty().kind() {
+                                ty::TyKind::Bool => {
+                                    scalar.to_bool().map(|v| ast::mk::expr_bool(sp, v))
+                                        .map_err(|e| format!("encountered invalid bool const: {e:?}"))
+                                }
+                                ty::TyKind::Char => {
+                                    scalar.to_char().map(|v| ast::mk::expr_lit(sp, ast::token::LitKind::Char, Symbol::intern(&v.to_string()), None))
+                                        .map_err(|e| format!("encountered invalid char const: {e:?}"))
+                                }
+                                ty::TyKind::Int(ty::IntTy::I8) => {
+                                    scalar.to_i8().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i8))
+                                        .map_err(|e| format!("encountered invalid i8 const: {e:?}"))
+                                }
+                                ty::TyKind::Int(ty::IntTy::I16) => {
+                                    scalar.to_i16().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i16))
+                                        .map_err(|e| format!("encountered invalid i16 const: {e:?}"))
+                                }
+                                ty::TyKind::Int(ty::IntTy::I32) => {
+                                    scalar.to_i32().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i32))
+                                        .map_err(|e| format!("encountered invalid i32 const: {e:?}"))
+                                }
+                                ty::TyKind::Int(ty::IntTy::I64) => {
+                                    scalar.to_i64().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i64))
+                                        .map_err(|e| format!("encountered invalid i64 const: {e:?}"))
+                                }
+                                ty::TyKind::Int(ty::IntTy::I128) => {
+                                    scalar.to_i128().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i128))
+                                        .map_err(|e| format!("encountered invalid i128 const: {e:?}"))
+                                }
+                                ty::TyKind::Int(ty::IntTy::Isize) => {
+                                    scalar.to_target_isize(&self.tcx).map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::isize))
+                                        .map_err(|e| format!("encountered invalid isize const: {e:?}"))
+                                }
+                                ty::TyKind::Uint(ty::UintTy::U8) => {
+                                    scalar.to_u8().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u8))
+                                        .map_err(|e| format!("encountered invalid u8 const: {e:?}"))
+                                }
+                                ty::TyKind::Uint(ty::UintTy::U16) => {
+                                    scalar.to_u16().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u16))
+                                        .map_err(|e| format!("encountered invalid u16 const: {e:?}"))
+                                }
+                                ty::TyKind::Uint(ty::UintTy::U32) => {
+                                    scalar.to_u32().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u32))
+                                        .map_err(|e| format!("encountered invalid u32 const: {e:?}"))
+                                }
+                                ty::TyKind::Uint(ty::UintTy::U64) => {
+                                    scalar.to_u64().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u64))
+                                        .map_err(|e| format!("encountered invalid u64 const: {e:?}"))
+                                }
+                                ty::TyKind::Uint(ty::UintTy::U128) => {
+                                    scalar.to_u128().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u128))
+                                        .map_err(|e| format!("encountered invalid u128 const: {e:?}"))
+                                }
+                                ty::TyKind::Uint(ty::UintTy::Usize) => {
+                                    scalar.to_target_usize(&self.tcx).map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::usize))
+                                        .map_err(|e| format!("encountered invalid usize const: {e:?}"))
+                                }
+                                ty::TyKind::Float(ty::FloatTy::F16) => {
+                                    scalar.to_f16()
+                                        .map(|v| {
+                                            let v = f16::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u16);
+                                            ast::mk::expr_float_exact(sp, v as f64, sym::f16)
+                                        })
+                                        .map_err(|e| format!("encountered invalid f16 const: {e:?}"))
+                                }
+                                ty::TyKind::Float(ty::FloatTy::F32) => {
+                                    scalar.to_f32()
+                                        .map(|v| {
+                                            let v = f32::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u32);
+                                            ast::mk::expr_float_exact(sp, v as f64, sym::f32)
+                                        })
+                                        .map_err(|e| format!("encountered invalid f32 const: {e:?}"))
+                                }
+                                ty::TyKind::Float(ty::FloatTy::F64) => {
+                                    scalar.to_f64()
+                                        .map(|v| {
+                                            let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u64);
+                                            ast::mk::expr_float_exact(sp, v, sym::f64)
+                                        })
+                                        .map_err(|e| format!("encountered invalid f64 const: {e:?}"))
+                                }
+                                ty::TyKind::Float(ty::FloatTy::F128) => {
+                                    scalar.to_f128()
+                                        .map(|v| {
+                                            let rounded_v: rustc_apfloat::ieee::Double = rustc_apfloat::FloatConvert::convert(v, &mut false).value;
+                                            let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(rounded_v) as u64);
+                                            ast::mk::expr_float_exact(sp, v, sym::f128)
+                                        })
+                                        .map_err(|e| format!("encountered invalid f128 const: {e:?}"))
+                                }
+                                _ => Err("encountered unknown constant scalar value".to_owned())
+                            }?;
+
+                            Ok(ast::mk::anon_const(sp, lit_expr.into_inner().kind))
+                        }
+
+                        mir::ConstValue::ZeroSized => Err("encountered zero-sized const".to_owned()),
+                        mir::ConstValue::Slice { .. } => Err("encountered slice const".to_owned()),
+                        mir::ConstValue::Indirect { .. } => Err("encountered indirect const".to_owned()),
+                    }
+                }
+
+                ty::ConstKind::Error(_) => Err("encountered const error".to_owned()),
             }
         }
 

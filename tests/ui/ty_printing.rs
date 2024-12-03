@@ -103,6 +103,21 @@ fn test() {
         { struct S<const C: usize>; t!(f_struct_const_expr -> S<{ 8 - 7 - 1 }>); }
         // { struct S<const C: f64>; t!(f_struct_const_f64 -> S<0.21f64>); } // Forbidden const generic parameter: f64.
 
+        {
+            fn f_const_generic_wrapper<const N: usize>() {
+                // HACK: Since we cannot parse const generics with macro matchers, we have to resort to
+                //       a manual expansion of the following, would-be macro call:
+                //       `t!(f_const_generic<const N: usize> -> [(); N]);`
+                #[mutest::skip]
+                fn f_const_generic<const N: usize>(_: ()) -> AssertMutated<[(); N]> {
+                    AssertMutated::Sentinel(PhantomData)
+                }
+                let v = f_const_generic::<N>(());
+                assert_eq!(AssertMutated::Mutated(PhantomData), v);
+            }
+            f_const_generic_wrapper::<0>();
+        }
+
         { struct S; t!(f_local_struct -> S); }
         t!(f_option_str_static_ref -> Option<&'static str>);
         t!(f_option_t<T> -> Option<T> [<usize>]);
