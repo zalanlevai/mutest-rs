@@ -51,7 +51,7 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
     type Mutation = ContinueBreakSwapMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
-        let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
+        let MutCtxt { opts: _, tcx, crate_res: _, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return Mutations::none(); };
 

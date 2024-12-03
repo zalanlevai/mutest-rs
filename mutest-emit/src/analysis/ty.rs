@@ -70,6 +70,7 @@ pub mod print {
         type Path;
 
         fn tcx(&self) -> TyCtxt<'tcx>;
+        fn crate_res(&self) -> &res::CrateResolutions<'tcx>;
 
         fn path_crate(&mut self, cnum: hir::CrateNum) -> Result<Self::Path, Self::Error>;
         fn path_append(&mut self, path: Self::Path, disambiguated_data: &hir::DisambiguatedDefPathData) -> Result<Self::Path, Self::Error>;
@@ -117,7 +118,7 @@ pub mod print {
                     }
                 }
 
-                let visible_def_paths = res::visible_def_paths(printer.tcx(), def_id, scope, None);
+                let visible_def_paths = res::visible_def_paths(printer.tcx(), printer.crate_res(), def_id, scope, None);
                 if let Some(visible_def_path) = visible_def_paths.into_iter().next() {
                     return Some(printer.print_res_def_path(visible_def_path)).transpose();
                 }
@@ -204,6 +205,7 @@ pub mod print {
     #[derive(Clone, Copy)]
     struct AstTyPrinter<'tcx, 'op> {
         tcx: TyCtxt<'tcx>,
+        crate_res: &'op res::CrateResolutions<'tcx>,
         def_res: &'op ast_lowering::DefResolutions,
         scope: Option<hir::DefId>,
         sp: Span,
@@ -225,11 +227,15 @@ pub mod print {
             self.tcx
         }
 
+        fn crate_res(&self) -> &res::CrateResolutions<'tcx> {
+            self.crate_res
+        }
+
         fn path_crate(&mut self, cnum: hir::CrateNum) -> Result<Self::Path, Self::Error> {
             match cnum {
                 LOCAL_CRATE => Ok(ast::mk::path_ident(self.sp, Ident::new(kw::Crate, self.sp))),
                 _ => {
-                    let crate_name = self.tcx.crate_name(cnum);
+                    let crate_name = self.crate_res.visible_crate_name(cnum);
                     Ok(ast::mk::path_ident(self.sp, Ident::new(crate_name, self.sp)))
                 }
             }
@@ -337,7 +343,7 @@ pub mod print {
             if self.sanitize_macro_expns {
                 // HACK: This is inefficient, as it resolves the path again, which already happens in `try_print_visible_def_path`.
                 // TODO: Remove most code in `try_print_visible_def_path` and just use the logic in the `hygiene` module once sanitization becomes the default.
-                hygiene::sanitize_path(self.tcx, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
+                hygiene::sanitize_path(self.tcx, self.crate_res, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
             }
 
             if args.is_empty() { return Ok(path); }
@@ -701,6 +707,7 @@ pub mod print {
 
     pub fn ast_repr<'tcx>(
         tcx: TyCtxt<'tcx>,
+        crate_res: &res::CrateResolutions<'tcx>,
         def_res: &ast_lowering::DefResolutions,
         scope: Option<hir::DefId>,
         sp: Span,
@@ -711,6 +718,7 @@ pub mod print {
     ) -> Option<P<ast::Ty>> {
         let mut printer = AstTyPrinter {
             tcx,
+            crate_res,
             def_res,
             scope,
             sp,

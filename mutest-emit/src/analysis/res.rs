@@ -1,7 +1,9 @@
 use std::hash::Hash;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::metadata::{ModChild, Reexport};
+use rustc_session::config::ExternLocation;
+use rustc_session::search_paths::PathKind;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 
@@ -11,6 +13,84 @@ use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
+
+pub struct CrateResolutions<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    extern_crate_name_to_cnum: FxHashMap<Symbol, Option<hir::CrateNum>>,
+    cnum_to_extern_crate_name: FxHashMap<hir::CrateNum, Symbol>,
+}
+
+impl<'tcx> CrateResolutions<'tcx> {
+    pub fn from_post_analysis_tcx(tcx: TyCtxt<'tcx>) -> Self {
+        let crate_sources = tcx.crates(()).iter()
+            .filter_map(|&cnum| {
+                let crate_source = tcx.used_crate_source(cnum);
+                let extern_crate_source_paths = [&crate_source.dylib, &crate_source.rlib, &crate_source.rmeta].into_iter().flatten()
+                    .filter(|(_, path_kind)| matches!(path_kind, PathKind::ExternFlag))
+                    .map(|(path, _)| path.clone())
+                    .collect::<SmallVec<[_; 3]>>();
+                match &extern_crate_source_paths[..] {
+                    [] => None,
+                    _ => Some((cnum, extern_crate_source_paths)),
+                }
+            })
+            .collect::<FxHashMap<_, _>>();
+
+        let mut extern_crate_name_to_cnum = tcx.sess.opts.externs.iter()
+            .filter(|(_, entry)| entry.add_prelude)
+            .map(|(name, entry)| {
+                let renamed_cnum = match &entry.location {
+                    // --extern name
+                    ExternLocation::FoundInLibrarySearchDirectories => None,
+
+                    // --extern name=file.rlib
+                    ExternLocation::ExactPaths(possible_paths) => {
+                        // HACK: Find crate with sources matching this --extern flag.
+                        let Some((&cnum, _)) = crate_sources.iter().find(|(_, source_paths)| {
+                            source_paths.iter().any(|source_path| possible_paths.iter().any(|possible_path| {
+                                possible_path.canonicalized() == source_path
+                            }))
+                        }) else { unreachable!() };
+                        Some(cnum)
+                    }
+                };
+
+                (Symbol::intern(name), renamed_cnum)
+            })
+            .collect::<FxHashMap<_, _>>();
+        if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_core)) {
+            extern_crate_name_to_cnum.insert(sym::core, None);
+            if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_std)) {
+                extern_crate_name_to_cnum.insert(sym::alloc, None);
+                extern_crate_name_to_cnum.insert(sym::std, None);
+            }
+        }
+
+        let cnum_to_extern_crate_name = extern_crate_name_to_cnum.iter()
+            .filter_map(|(crate_name, cnum)| cnum.map(|cnum| (cnum, *crate_name)))
+            .collect::<FxHashMap<_, _>>();
+
+        Self {
+            tcx,
+            extern_crate_name_to_cnum,
+            cnum_to_extern_crate_name,
+        }
+    }
+
+    pub fn crate_by_visible_name(&self, symbol: Symbol) -> Option<hir::CrateNum> {
+        self.extern_crate_name_to_cnum.get(&symbol).copied().flatten().or_else(|| {
+            self.tcx.crates(()).into_iter().find(|&&cnum| self.tcx.crate_name(cnum) == symbol).copied()
+        })
+    }
+
+    pub fn visible_crate_name(&self, cnum: hir::CrateNum) -> Symbol {
+        self.cnum_to_extern_crate_name.get(&cnum).copied().unwrap_or_else(|| self.tcx.crate_name(cnum))
+    }
+
+    pub fn is_in_extern_prelude(&self, symbol: Symbol) -> bool {
+        self.extern_crate_name_to_cnum.contains_key(&symbol)
+    }
+}
 
 pub fn module_children<'tcx>(tcx: TyCtxt<'tcx>, mod_def_id: hir::DefId) -> &'tcx [ModChild] {
     match mod_def_id.as_local() {
@@ -470,7 +550,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     Ok(def_path)
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
@@ -486,7 +566,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                 Some(type_root) => smallvec![DefPath { type_root: Some(type_root), segments: vec![], global: false }],
                 None => {
                     let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
-                    visible_def_paths(tcx, implementer_def_id, scope, ignore_reexport)
+                    visible_def_paths(tcx, crate_res, implementer_def_id, scope, ignore_reexport)
                 }
             };
 
@@ -532,7 +612,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
             let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
             (root_def_id, root_def_path)
         }
-        None if let crate_name = tcx.crate_name(def_id.krate) && extern_prelude.contains(&crate_name) => {
+        None if let crate_name = crate_res.visible_crate_name(def_id.krate) && crate_res.is_in_extern_prelude(crate_name) => {
             let root_def_id = def_id.krate.as_def_id();
             let root_ident = Ident::new(crate_name, DUMMY_SP);
             let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
@@ -552,10 +632,10 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
                 while let Some(&visible_parent) = visible_parent_map.get(&visible_def_id) {
                     visible_def_id = visible_parent;
                     if let Some(cnum) = visible_def_id.as_crate_root() {
-                        let crate_name = tcx.crate_name(cnum);
-                        if !extern_prelude.contains(&crate_name) { continue; }
+                        let crate_name = crate_res.visible_crate_name(cnum);
+                        if !crate_res.is_in_extern_prelude(crate_name) { continue; }
 
-                        let root_ident = Ident::new(tcx.crate_name(cnum), DUMMY_SP);
+                        let root_ident = Ident::new(crate_name, DUMMY_SP);
                         let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: visible_def_id, ident: root_ident, reexport: None }], global: true };
                         break 'root (visible_def_id, root_def_path);
                     }
@@ -627,8 +707,8 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Opt
     paths
 }
 
-pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[ast::Path; 1]> {
-    visible_def_paths(tcx, def_id, scope, ignore_reexport).into_iter().map(|path| path.ast_path()).collect::<SmallVec<_>>()
+pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[ast::Path; 1]> {
+    visible_def_paths(tcx, crate_res, def_id, scope, ignore_reexport).into_iter().map(|path| path.ast_path()).collect::<SmallVec<_>>()
 }
 
 macro interned {

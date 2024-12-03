@@ -122,6 +122,7 @@ enum Macros2_0TopLevelRelativePathResHack {
 
 struct MacroExpansionSanitizer<'tcx, 'op> {
     tcx: TyCtxt<'tcx>,
+    crate_res: &'op res::CrateResolutions<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
     /// Body resolutions for interfacing with the HIR.
     body_res: &'op ast_lowering::BodyResolutions<'tcx>,
@@ -193,11 +194,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         //       it panics if no span is found, which happens for crate root defs.
                         let span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
                         let name = match () {
+                            // Name the local crate with the `crate` keyword.
                             _ if def_id == LOCAL_CRATE.as_def_id() => {
                                 // We must not make the path global if we use the `crate` keyword.
                                 relative = true;
 
                                 kw::Crate
+                            }
+                            // Name external crates with their currently visible names (i.e. accounting for extern renames).
+                            _ if def_id.is_crate_root() => {
+                                self.crate_res.visible_crate_name(def_id.krate)
                             }
 
                             // Keep special `Self`, and `super` keyword segments in path from def path resolution.
@@ -373,7 +379,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        let mut visible_paths = res::visible_def_paths(self.tcx, def_id, self.current_scope, ignore_reexport);
+        let mut visible_paths = res::visible_def_paths(self.tcx, self.crate_res, def_id, self.current_scope, ignore_reexport);
         if let Some(visible_path) = visible_paths.drain(..).next() { return visible_path; }
 
         // Ensure that the def is in the current scope, otherwise it really is not visible from here.
@@ -563,7 +569,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn sanitize_ty(&self, ty: Ty<'tcx>, span: Span) -> P<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(ty_ast) = ty::ast_repr(self.tcx, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else {
+        let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else {
             span_bug!(span, "cannot construct AST representation of type `{ty:?}`");
         };
 
@@ -1158,9 +1164,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 }
 
-pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, scope: Option<hir::DefId>, path: &mut ast::Path, res: hir::Res<ast::NodeId>, descend_into_args: bool) {
+pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<'tcx>, def_res: &ast_lowering::DefResolutions, scope: Option<hir::DefId>, path: &mut ast::Path, res: hir::Res<ast::NodeId>, descend_into_args: bool) {
     let mut sanitizer = MacroExpansionSanitizer {
         tcx,
+        crate_res,
         def_res,
         body_res: &ast_lowering::BodyResolutions::empty(tcx),
         syntax_extensions: vec![],
@@ -1558,7 +1565,7 @@ fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
     ]);
 }
 
-pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, body_res: &ast_lowering::BodyResolutions<'tcx>, krate: &mut ast::Crate) {
+pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<'tcx>, def_res: &ast_lowering::DefResolutions, body_res: &ast_lowering::BodyResolutions<'tcx>, krate: &mut ast::Crate) {
     let mut syntax_extensions = vec![];
     register_builtin_macros(&mut syntax_extensions);
 
@@ -1605,6 +1612,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering
 
     let mut sanitizer = MacroExpansionSanitizer {
         tcx,
+        crate_res,
         def_res,
         body_res,
         syntax_extensions,

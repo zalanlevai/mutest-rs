@@ -34,7 +34,7 @@ impl<'a> Operator<'a> for RelationalOpInvert {
     type Mutation = RelationalOpInvertMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
-        let MutCtxt { opts: _, tcx: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
+        let MutCtxt { opts: _, tcx: _, crate_res: _, def_res: _, def_site: def, item_hir: _, body_res: _, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _) = location else { return Mutations::none(); };
 

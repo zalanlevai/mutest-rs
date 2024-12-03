@@ -287,6 +287,8 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 tcx.analysis(())?;
 
+                let crate_res = mutest_emit::analysis::res::CrateResolutions::from_post_analysis_tcx(tcx);
+
                 let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx, &tests).count();
 
                 let t_target_analysis_start = Instant::now();
@@ -324,11 +326,11 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 if opts.sanitize_macro_expns {
-                    mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &def_res, &body_res, &mut generated_crate_ast);
+                    mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &crate_res, &def_res, &body_res, &mut generated_crate_ast);
                 }
 
                 let t_mutation_analysis_start = Instant::now();
-                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &def_res, &body_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
+                let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
                 if opts.verbosity >= 1 {
                     let mutated_fns = mutations.iter().map(|m| m.target.def_id).unique();
                     let mutated_fns_count = mutated_fns.count();

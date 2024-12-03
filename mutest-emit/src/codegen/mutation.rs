@@ -52,6 +52,7 @@ impl<'ast, 'a> MutLoc<'ast, 'a> {
 pub struct MutCtxt<'tcx, 'ast, 'op> {
     pub opts: &'op Options,
     pub tcx: TyCtxt<'tcx>,
+    pub crate_res: &'op res::CrateResolutions<'tcx>,
     pub def_res: &'op ast_lowering::DefResolutions,
     pub body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     pub def_site: Span,
@@ -286,6 +287,7 @@ struct MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
     operators: Operators<'op, 'm>,
     opts: &'op Options,
     tcx: TyCtxt<'tcx>,
+    crate_res: &'op res::CrateResolutions<'tcx>,
     def_res: &'op ast_lowering::DefResolutions,
     body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     def_site: Span,
@@ -350,6 +352,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         register_mutations!(self, MutCtxt {
             opts: self.opts,
             tcx: self.tcx,
+            crate_res: self.crate_res,
             def_res: self.def_res,
             body_res: self.body_res,
             def_site: self.def_site,
@@ -381,6 +384,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         register_mutations!(self, MutCtxt {
             opts: self.opts,
             tcx: self.tcx,
+            crate_res: self.crate_res,
             def_res: self.def_res,
             body_res: self.body_res,
             def_site: self.def_site,
@@ -439,6 +443,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         register_mutations!(self, MutCtxt {
             opts: self.opts,
             tcx: self.tcx,
+            crate_res: self.crate_res,
             def_res: self.def_res,
             body_res: self.body_res,
             def_site: self.def_site,
@@ -479,6 +484,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         register_mutations!(self, MutCtxt {
             opts: self.opts,
             tcx: self.tcx,
+            crate_res: self.crate_res,
             def_res: self.def_res,
             body_res: self.body_res,
             def_site: self.def_site,
@@ -788,6 +794,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
 pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
+    crate_res: &res::CrateResolutions<'tcx>,
     def_res: &ast_lowering::DefResolutions,
     body_res: &ast_lowering::BodyResolutions<'tcx>,
     krate: &'ast ast::Crate,
@@ -807,6 +814,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
         operators: ops,
         opts,
         tcx,
+        crate_res,
         def_res,
         body_res,
         def_site,

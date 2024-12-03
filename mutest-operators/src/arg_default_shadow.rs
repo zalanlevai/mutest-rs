@@ -85,7 +85,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
     type Mutation = ArgDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
-        let MutCtxt { opts, tcx, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
+        let MutCtxt { opts, tcx, crate_res, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnParam(param, f) = location else { return Mutations::none(); };
 
@@ -124,7 +124,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
                 let scope = f_hir.owner_id.def_id.to_def_id();
                 let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
                 let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                ty::ast_repr(tcx, def_res, Some(scope), def, param_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns)
+                ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, param_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns)
             }) else { continue; };
 
             // Default::default();

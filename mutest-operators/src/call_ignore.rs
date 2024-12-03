@@ -77,7 +77,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
     type Mutation = CallValueDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
-        let MutCtxt { opts, tcx, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
+        let MutCtxt { opts, tcx, crate_res, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
         let Some(body_hir) = f_hir.body else { return Mutations::none(); };
@@ -97,7 +97,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         // `let _ = $expr` statement to guarantee the same callee resolution.
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, def_res, None, def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns) else { return Mutations::none(); };
+        let Some(expr_ty_ast) = ty::ast_repr(tcx, crate_res, def_res, None, def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns) else { return Mutations::none(); };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
@@ -150,7 +150,7 @@ impl<'a> Operator<'a> for CallDelete {
     type Mutation = CallDeleteMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
-        let MutCtxt { opts: _, tcx, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
+        let MutCtxt { opts: _, tcx, crate_res: _, def_res: _, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
         let Some(body_hir) = f_hir.body else { return Mutations::none(); };
