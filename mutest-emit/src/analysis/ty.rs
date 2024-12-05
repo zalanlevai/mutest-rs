@@ -271,13 +271,24 @@ pub mod print {
             args: &[ty::GenericArg<'tcx>],
             assoc_constraints: impl Iterator<Item = ty::ExistentialProjection<'tcx>>,
         ) -> Result<Self::Path, Self::Error> {
+            let sp = self.sp;
+
             let mut errors = vec![];
 
             let mut args_ast = args.iter()
                 .map(|arg: &ty::GenericArg<'tcx>| -> Result<Option<ast::AngleBracketedArg>, Self::Error> {
                     match arg.unpack() {
                         ty::GenericArgKind::Type(ty) => {
-                            let ty_ast = self.print_ty(ty)?;
+                            let ty_ast = match self.print_ty(ty) {
+                                Ok(ty_ast) => ty_ast,
+                                Err(error) => {
+                                    let mut diagnostic = self.tcx.dcx().struct_span_warn(sp, format!("replacing unrepresentable generic type argument `{ty}` with `_`"));
+                                    diagnostic.span_label(sp, error);
+                                    diagnostic.emit();
+
+                                    ast::mk::ty(sp, ast::TyKind::Infer)
+                                }
+                            };
                             Ok(Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast))))
                         }
                         ty::GenericArgKind::Const(ct) => {
@@ -355,7 +366,7 @@ pub mod print {
                 }
 
                 // FIXME
-                Err("encountered definition with no visible path".to_owned())
+                Err(format!("encountered definition `{}` with no visible path", self.tcx.def_path_str(def_id)))
             }?;
 
             if self.sanitize_macro_expns {

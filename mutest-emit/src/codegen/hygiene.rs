@@ -549,7 +549,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     fn sanitize_ty(&self, ty: Ty<'tcx>, span: Span) -> P<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, DUMMY_SP, ty, def_path_handling, opaque_ty_handling, true) else {
+        let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true) else {
             span_bug!(span, "cannot construct AST representation of type `{ty:?}`");
         };
 
