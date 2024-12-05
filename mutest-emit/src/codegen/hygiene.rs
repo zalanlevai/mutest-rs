@@ -148,9 +148,8 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
 }
 
 impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
-    fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_path: &res::DefPath) {
-        assert!(!def_path.segments.is_empty());
-
+    #[must_use]
+    fn overwrite_path_with_def_path(&self, path: &mut ast::Path, def_path: &res::DefPath<'tcx>) -> Option<Ty<'tcx>> {
         let mut segments_with_generics = match &path.segments[..] {
             // NOTE: We emit dummy, empty "source" paths when constructing import paths.
             // FIXME: Turn into ICE once this mechanism for import paths is not used anymore.
@@ -169,20 +168,19 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 // Ensure that we always retain the final, "item" generic arguments, even if
                 // the last path segment itself does not have a sufficient resolution, since
                 // we can use the final path resolution instead.
-                let [.., last_def_path_segment] = &def_path.segments[..] else { unreachable!() };
-                let mut def_id = last_def_path_segment.def_id;
-                if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
-                    // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
-                    // so that the segment def ids match up.
-                    def_id = self.tcx.parent(def_id);
+                if let [.., last_def_path_segment] = &def_path.segments[..] {
+                    let mut def_id = last_def_path_segment.def_id;
+                    if let hir::DefKind::Ctor(..) = self.tcx.def_kind(def_id) {
+                        // Adjust target definition to the parent, mirroring what is done in `adjust_path_from_expansion`,
+                        // so that the segment def ids match up.
+                        def_id = self.tcx.parent(def_id);
+                    }
+                    segments_with_generics.push((def_id, last_path_segment.args.clone()));
                 }
-                segments_with_generics.push((def_id, last_path_segment.args.clone()));
 
                 segments_with_generics
             }
         };
-
-        let mut relative = !def_path.global;
 
         let mut segments = def_path.segments.iter()
             .flat_map(|def_path_segment| {
@@ -194,21 +192,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         //       it panics if no span is found, which happens for crate root defs.
                         let span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
                         let name = match () {
-                            // Name the local crate with the `crate` keyword.
-                            _ if def_id == LOCAL_CRATE.as_def_id() => {
-                                // We must not make the path global if we use the `crate` keyword.
-                                relative = true;
-
-                                kw::Crate
-                            }
-                            // Name external crates with their currently visible names (i.e. accounting for extern renames).
-                            _ if def_id.is_crate_root() => {
-                                self.crate_res.visible_crate_name(def_id.krate)
-                            }
-
-                            // Keep special `Self`, and `super` keyword segments in path from def path resolution.
+                            // Keep special `Self` keyword segments in path from def path resolution.
                             _ if def_path_segment.ident.name == kw::SelfUpper => kw::SelfUpper,
-                            _ if def_path_segment.ident.name == kw::Super => kw::Super,
 
                             _ => self.tcx.opt_item_name(def_id)?,
                         };
@@ -311,15 +296,35 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             })
             .collect::<ThinVec<_>>();
 
-        if let Some(root_ty) = def_path.type_root {
-            let ident = root_ty.as_ident(DUMMY_SP);
-            segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None });
-            relative = true;
-        }
+        let mut qself = None;
+        match &def_path.root {
+            // `crate::..` paths.
+            &res::DefPathRootKind::Global(cnum) if cnum == LOCAL_CRATE => {
+                segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Crate, DUMMY_SP), args: None });
+            }
+            // `::<crate>::..` paths.
+            &res::DefPathRootKind::Global(cnum) => {
+                let crate_name = self.crate_res.visible_crate_name(cnum);
+                segments.splice(0..0, [
+                    ast::PathSegment::path_root(DUMMY_SP),
+                    ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(crate_name, DUMMY_SP), args: None },
+                ]);
+            }
 
-        // Write non-relative paths as global paths to make sure that no name conflicts arise.
-        if !relative {
-            segments.insert(0, ast::PathSegment::path_root(path.span));
+            // `<ty>::..` paths to inherent impl assoc items.
+            &res::DefPathRootKind::Ty(ty) => {
+                // NOTE: We return the type root of the path to the caller as an indicator that, if present,
+                //       something must be done to create a complete path.
+                qself = Some(ty);
+            }
+
+            // Local path, no special prefix.
+            res::DefPathRootKind::Local => {}
+
+            // `super::..` paths.
+            res::DefPathRootKind::Parent { supers } => {
+                segments.splice(0..0, (0..*supers).map(|_| ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Super, DUMMY_SP), args: None }));
+            }
         }
 
         *path = ast::Path { span: path.span, segments, tokens: None };
@@ -327,9 +332,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         if path.segments.is_empty() {
             span_bug!(path.span, "path was sanitized into an empty path");
         }
+
+        qself
     }
 
-    fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath {
+    fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath<'tcx> {
         // Prefer using a direct, local path to local items within the same module as the enclosing module (or parent modules) of the current scope.
         // NOTE: This helps avoid visibility-related resolution issues in local items, see
         //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`, and
@@ -367,12 +374,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     if let Ok(mut visible_path) = res::locally_visible_def_path(self.tcx, def_id, containing_mod) {
                         // Construct path to containing parent module, which are
                         // always accessible through consecutive `super` path segments.
-                        visible_path.segments.splice(0..0, super_mods.into_iter().map(|def_id| res::DefPathSegment {
-                            def_id,
-                            ident: Ident::new(kw::Super, DUMMY_SP),
-                            reexport: None,
-                        }));
-
+                        visible_path.root = res::DefPathRootKind::Parent { supers: super_mods.len() };
                         return visible_path;
                     }
                 }
@@ -416,12 +418,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         diagnostic.emit();
     }
 
-    fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) {
+    #[must_use]
+    fn adjust_path_from_expansion(&self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) -> Option<Ty<'tcx>> {
         match res {
             hir::Res::Local(node_id) => {
                 let Some(hir_id) = self.body_res.hir_id(node_id) else {
                     self.report_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", ast::print::path_to_string(path)));
-                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
+                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return None; }
                     panic!("expected resolution");
                 };
                 let def_ident = self.tcx.hir().ident(hir_id);
@@ -429,6 +432,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let [ident_segment] = &mut path.segments[..] else { unreachable!() };
                 copy_def_span_ctxt(&mut ident_segment.ident, def_ident.span);
                 sanitize_ident_if_from_expansion(&mut ident_segment.ident, IdentResKind::Local);
+
+                None
             }
 
             hir::Res::Def(def_kind, mut def_id) => {
@@ -457,37 +462,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             def_id = self.tcx.parent(def_id);
                         }
 
-                        let mut impl_parents = res::parent_iter(self.tcx, def_id).enumerate().filter(|(_, def_id)| matches!(self.tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
-                        match impl_parents.next() {
-                            // `..::{impl#?}::$assoc_item::..` path.
-                            Some((1.., impl_parent_def_id)) => {
-                                let impl_subject = self.tcx.impl_subject(impl_parent_def_id);
-                                if let ty::ImplSubject::Inherent(ty) = impl_subject.instantiate_identity() {
-                                    if let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind() {
-                                        span_bug!(path.span, "{} has impl parent at unexpected position", self.tcx.def_path_str(def_id));
-                                    }
-                                }
-                            }
-                            // `..::{impl#?}::$assoc_item` path.
-                            Some((0, impl_parent_def_id)) => {
-                                let impl_subject = self.tcx.impl_subject(impl_parent_def_id);
-                                if let ty::ImplSubject::Inherent(ty) = impl_subject.instantiate_identity() {
-                                    // `<[_]>::$assoc_item` path.
-                                    // HACK: Paths to assoc items in inherent impls of slices and arrays use a special syntax based on qualified paths.
-                                    //       This is handled here by only creating a path relative to the slice and array types respectively
-                                    //       (esentially just naming the assoc item itself), and
-                                    //       later in `sanitize_qualified_path` by appending the appropriate path qualification with the corresponding type.
-                                    if let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind() {
-                                        let Some(relative_def_path) = res::relative_def_path(self.tcx, def_id, impl_parent_def_id) else { unreachable!() };
-                                        return self.overwrite_path_with_def_path(path, &relative_def_path);
-                                    }
-                                }
-                            }
-                            None => {}
-                        }
-
                         let visible_def_path = self.expect_visible_def_path(def_id, path.span, ignore_reexport);
-                        self.overwrite_path_with_def_path(path, &visible_def_path);
+                        self.overwrite_path_with_def_path(path, &visible_def_path)
                     }
 
                     | hir::DefKind::TyParam
@@ -496,10 +472,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     => {
                         let [param_segment] = &mut path.segments[..] else { unreachable!() };
                         sanitize_ident_if_from_expansion(&mut param_segment.ident, IdentResKind::Def);
+
+                        None
                     }
 
                     hir::DefKind::Field => {
                         // TODO
+                        None
                     }
 
                     | hir::DefKind::ExternCrate
@@ -510,7 +489,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::GlobalAsm
                     | hir::DefKind::Impl { .. }
                     | hir::DefKind::Closure
-                    => {}
+                    => None
                 }
             }
 
@@ -521,11 +500,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             | hir::Res::ToolMod
             | hir::Res::NonMacroAttr(..)
             | hir::Res::Err
-            => {}
+            => None
         }
     }
 
-    fn sanitize_path(&mut self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) {
+    #[must_use]
+    fn sanitize_path(&mut self, path: &mut ast::Path, res: hir::Res<ast::NodeId>, ignore_reexport: Option<hir::DefId>) -> Option<Ty<'tcx>> {
         // NOTE: We explicitly only visit the generic arguments, as we will
         //       sanitize the ident segments afterwards.
         for segment in &mut path.segments {
@@ -535,9 +515,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         }
 
         // Short-circuit if `self`.
-        if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return; }
+        if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return None; }
 
-        self.adjust_path_from_expansion(path, res, ignore_reexport);
+        self.adjust_path_from_expansion(path, res, ignore_reexport)
     }
 
     fn typeck_for(&self, owner_id: hir::OwnerId) -> Option<&'tcx ty::TypeckResults<'tcx>> {
@@ -657,7 +637,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         match (qself, self.def_res.node_res(node_id)) {
             // If the path can be resolved without type-checking, then it will be handled like in `visit_path`.
             (None, Some(res)) => {
-                self.sanitize_path(path, res, None);
+                let None = self.sanitize_path(path, res, None) else {
+                    span_bug!(path.span, "produced unexpected type-relative path for path with simple resolution");
+                };
                 res
             }
 
@@ -717,7 +699,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     _ => None,
                                 };
 
-                                self.sanitize_path(path, qres.expect_non_local(), None);
+                                // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
+                                let _ = self.sanitize_path(path, qres.expect_non_local(), None);
+
                                 // NOTE: There is no need to append bound param args if the path is already qualified, since
                                 //       the necessary trait arguments should already be present in the corresponding path segment.
                                 if qself.is_none() {
@@ -853,28 +837,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 }
                             }
 
-                            // `<[_]>::$assoc_item` path.
-                            // HACK: Paths to assoc items in inherent impls of slices and arrays use a special syntax based on qualified paths.
-                            //       This is handled in `adjust_path_from_expansion` by only creating a path relative to the slice and array types respectively
-                            //       (esentially just naming the assoc item itself), and
-                            //       here by appending the appropriate path qualification with the corresponding type.
-                            hir::DefKind::Impl { of_trait: false }
-                                if let ty::ImplSubject::Inherent(ty) = self.tcx.impl_subject(self.tcx.parent(qres.def_id())).instantiate_identity()
-                                && let ty::TyKind::Slice(_) | ty::TyKind::Array(_, _) = ty.kind()
-                            => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
-                                self.sanitize_path(path, qres.expect_non_local(), None);
-                                // NOTE: This syntax can only appear at the root of the path and the qualification cannot contain any part of the path.
-                                *qself = Some(P(ast::QSelf {
-                                    ty: qself_ty_ast,
-                                    path_span: DUMMY_SP,
-                                    position: 0,
-                                }));
-                            }
-
                             hir::DefKind::Impl { of_trait: false } => {
                                 let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
-                                self.sanitize_path(path, qres.expect_non_local(), None);
+
+                                // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
+                                let _ = self.sanitize_path(path, qres.expect_non_local(), None);
 
                                 // Remove the non-assoc part of the path and replace it with
                                 // a "dummy" qualified self using the type derived from the type system
@@ -891,7 +858,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             // If the portion of the path within the qself does not refer to a trait or impl,
                             // then the resolved path no longer needs a qualified self.
                             _ => {
-                                self.sanitize_path(path, qres.expect_non_local(), None);
+                                let None = self.sanitize_path(path, qres.expect_non_local(), None) else {
+                                    span_bug!(path.span, "produced unexpected type-relative path for non-assoc path")
+                                };
                                 *qself = None;
                             }
                         }
@@ -912,7 +881,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
         // and we can simply sanitize the whole path in one go.
         if let hir::DefKind::Mod = def_kind {
-            self.sanitize_path(path, res, Some(import_def_id.to_def_id()));
+            let None = self.sanitize_path(path, res, Some(import_def_id.to_def_id())) else {
+                span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
+            };
             return;
         }
 
@@ -1017,7 +988,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         }
 
         let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
-        self.sanitize_path(&mut parent_mod_path, hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id), Some(import_def_id.to_def_id()));
+        let None = self.sanitize_path(&mut parent_mod_path, hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id), Some(import_def_id.to_def_id())) else {
+            span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
+        };
         path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), parent_mod_path.segments);
     }
 
@@ -1187,7 +1160,9 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<
         }
     }
 
-    sanitizer.adjust_path_from_expansion(path, res, None);
+    let None = sanitizer.adjust_path_from_expansion(path, res, None) else {
+        span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
+    };
 }
 
 macro def_flat_map_item_fns(
@@ -1518,7 +1493,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         let Some(res) = self.def_res.node_res(last_segment.id) else {
             span_bug!(path.span, "path `{}` cannot be resolved by generic path handler", ast::print::path_to_string(path));
         };
-        self.sanitize_path(path, res, None);
+        let None = self.sanitize_path(path, res, None) else {
+            span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
+        };
     }
 
     fn visit_label(&mut self, label: &mut ast::Label) {
@@ -1536,7 +1513,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 let Some(res) = self.def_res.node_res(*id) else {
                     span_bug!(vis.span, "restricted visibility path `{}` cannot be resolved", ast::print::path_to_string(path));
                 };
-                self.adjust_path_from_expansion(path, res, None);
+                let None = self.adjust_path_from_expansion(path, res, None) else {
+                    span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
+                };
             }
             _ => ast::mut_visit::noop_visit_vis(vis, self),
         }

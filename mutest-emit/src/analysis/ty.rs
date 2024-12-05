@@ -95,7 +95,7 @@ pub mod print {
             assoc_constraints: impl Iterator<Item = ty::ExistentialProjection<'tcx>>,
         ) -> Result<Self::Path, Self::Error>;
 
-        fn print_res_def_path(&mut self, def_path: res::DefPath) -> Result<Self::Path, Self::Error>;
+        fn print_res_def_path(&mut self, def_path: res::DefPath<'tcx>) -> Result<Self::Path, Self::Error>;
 
         fn try_print_visible_def_path(&mut self, def_id: hir::DefId, scope: Option<hir::DefId>, scoped_item_paths: ScopedItemPaths) -> Result<Option<Self::Path>, Self::Error> {
             fn try_print_visible_def_path_impl<'tcx, T: Printer<'tcx> + ?Sized>(
@@ -217,7 +217,7 @@ pub mod print {
     }
 
     #[derive(Clone, Copy)]
-    struct AstTyPrinter<'tcx, 'op> {
+    pub struct AstTyPrinter<'tcx, 'op> {
         tcx: TyCtxt<'tcx>,
         crate_res: &'op res::CrateResolutions<'tcx>,
         def_res: &'op ast_lowering::DefResolutions,
@@ -334,8 +334,12 @@ pub mod print {
             Ok(path)
         }
 
-        fn print_res_def_path(&mut self, def_path: res::DefPath) -> Result<Self::Path, Self::Error> {
-            Ok(def_path.ast_path())
+        fn print_res_def_path(&mut self, def_path: res::DefPath<'tcx>) -> Result<Self::Path, Self::Error> {
+            let (None, path) = def_path.ast_path(self.crate_res, self) else {
+                return Err("encountered unresolved definition with qualified path in type position".to_owned());
+            };
+
+            Ok(path)
         }
 
         fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error> {

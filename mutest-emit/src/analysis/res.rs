@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_session::config::ExternLocation;
 use rustc_session::search_paths::PathKind;
@@ -11,8 +12,8 @@ use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
-use crate::codegen::ast;
-use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
+use crate::codegen::ast::{self, P};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym, kw};
 
 pub struct CrateResolutions<'tcx> {
     tcx: TyCtxt<'tcx>,
@@ -367,52 +368,12 @@ where
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum DefPathRootTy {
-    Bool,
-    Char,
-    Int(ty::IntTy),
-    Uint(ty::UintTy),
-    Float(ty::FloatTy),
-    Str,
-}
-
-impl DefPathRootTy {
-    pub fn from_ty<'tcx>(ty: Ty<'tcx>) -> Option<Self> {
-        match ty.kind() {
-            ty::TyKind::Bool => Some(Self::Bool),
-            ty::TyKind::Char => Some(Self::Char),
-            ty::TyKind::Int(int_ty) => Some(Self::Int(*int_ty)),
-            ty::TyKind::Uint(uint_ty) => Some(Self::Uint(*uint_ty)),
-            ty::TyKind::Float(float_ty) => Some(Self::Float(*float_ty)),
-            ty::TyKind::Str => Some(Self::Str),
-            _ => None,
-        }
-    }
-
-    pub fn as_ident(&self, sp: Span) -> Ident {
-        match self {
-            Self::Bool => Ident::new(sym::bool, sp),
-            Self::Char => Ident::new(sym::char, sp),
-            Self::Int(ty::IntTy::I8) => Ident::new(sym::i8, sp),
-            Self::Int(ty::IntTy::I16) => Ident::new(sym::i16, sp),
-            Self::Int(ty::IntTy::I32) => Ident::new(sym::i32, sp),
-            Self::Int(ty::IntTy::I64) => Ident::new(sym::i64, sp),
-            Self::Int(ty::IntTy::I128) => Ident::new(sym::i128, sp),
-            Self::Int(ty::IntTy::Isize) => Ident::new(sym::isize, sp),
-            Self::Uint(ty::UintTy::U8) => Ident::new(sym::u8, sp),
-            Self::Uint(ty::UintTy::U16) => Ident::new(sym::u16, sp),
-            Self::Uint(ty::UintTy::U32) => Ident::new(sym::u32, sp),
-            Self::Uint(ty::UintTy::U64) => Ident::new(sym::u64, sp),
-            Self::Uint(ty::UintTy::U128) => Ident::new(sym::u128, sp),
-            Self::Uint(ty::UintTy::Usize) => Ident::new(sym::usize, sp),
-            Self::Float(ty::FloatTy::F16) => Ident::new(sym::f16, sp),
-            Self::Float(ty::FloatTy::F32) => Ident::new(sym::f32, sp),
-            Self::Float(ty::FloatTy::F64) => Ident::new(sym::f64, sp),
-            Self::Float(ty::FloatTy::F128) => Ident::new(sym::f128, sp),
-            Self::Str => Ident::new(sym::str, sp),
-        }
-    }
+#[derive(Clone, Debug)]
+pub enum DefPathRootKind<'tcx> {
+    Global(hir::CrateNum),
+    Ty(Ty<'tcx>),
+    Local,
+    Parent { supers: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -423,97 +384,118 @@ pub struct DefPathSegment {
 }
 
 #[derive(Clone, Debug)]
-pub struct DefPath {
-    pub type_root: Option<DefPathRootTy>,
+pub struct DefPath<'tcx> {
+    pub root: DefPathRootKind<'tcx>,
     pub segments: Vec<DefPathSegment>,
-    pub global: bool,
 }
 
-impl DefPath {
-    pub fn from_def_id<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Option<Self> {
-        let segments = def_id_path(tcx, def_id).into_iter()
-            .map(|def_id| {
+impl<'tcx> DefPath<'tcx> {
+    pub fn new(root: DefPathRootKind<'tcx>, segments: Vec<DefPathSegment>) -> Self {
+        Self { root, segments }
+    }
+
+    fn from_def_parent_path(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Option<Self> {
+        let [crate_def_id, def_ids @ ..] = &def_id_path(tcx, def_id)[..] else { unreachable!("empty def id path") };
+
+        let segments = def_ids.into_iter()
+            .map(|&def_id| {
                 let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
                 let name = tcx.opt_item_name(def_id)?;
                 Some(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None })
             })
             .try_collect::<Vec<_>>()?;
-        Some(Self { type_root: None, segments, global: true })
+
+        let Some(cnum) = crate_def_id.as_crate_root() else { unreachable!("def id path does not have crate root"); };
+
+        Some(Self::new(DefPathRootKind::Global(cnum), segments))
     }
 
     pub fn def_id_path(&self) -> impl Iterator<Item = hir::DefId> + '_ {
         self.segments.iter().map(|segment| segment.def_id)
     }
 
-    pub fn ast_path(&self) -> ast::Path {
-        let mut global = self.global;
+    pub fn ast_path(&self, crate_res: &CrateResolutions<'tcx>, ast_ty_printer: &mut ty::print::AstTyPrinter<'tcx, '_>) -> (Option<P<ast::QSelf>>, ast::Path) {
+        use ty::print::Printer;
 
         let mut segments = self.segments.iter().map(|segment| {
-            let mut ident = segment.ident;
-
-            if segment.def_id == LOCAL_CRATE.as_def_id() {
-                ident = Ident::new(kw::Crate, DUMMY_SP);
-                // We must not make the path global if we use the `crate` keyword.
-                global = false;
-            }
-
+            let ident = segment.ident;
             ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None }
         }).collect::<ThinVec<_>>();
 
-        if let Some(root_ty) = self.type_root {
-            let ident = root_ty.as_ident(DUMMY_SP);
-            segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None });
-            global = false;
+        let mut qself = None;
+        match &self.root {
+            // `crate::..` paths.
+            &DefPathRootKind::Global(cnum) if cnum == LOCAL_CRATE => {
+                segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Crate, DUMMY_SP), args: None });
+            }
+            // `::<crate>::..` paths.
+            &DefPathRootKind::Global(cnum) => {
+                let crate_name = crate_res.visible_crate_name(cnum);
+                segments.splice(0..0, [
+                    ast::PathSegment::path_root(DUMMY_SP),
+                    ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(crate_name, DUMMY_SP), args: None },
+                ]);
+            }
+
+            // `<ty>::..` paths to inherent impl assoc items.
+            &DefPathRootKind::Ty(ty) => {
+                let Ok(ty_ast) = ast_ty_printer.print_ty(ty) else {
+                    // FIXME: Give proper diagnostic span for errors.
+                    span_bug!(DUMMY_SP, "cannot construct AST representation of type `{ty:?}`");
+                };
+                qself = Some(P(ast::QSelf { ty: ty_ast, position: 0, path_span: DUMMY_SP }));
+            }
+
+            // Local path, no special prefix.
+            DefPathRootKind::Local => {}
+
+            // `super::..` paths.
+            DefPathRootKind::Parent { supers } => {
+                segments.splice(0..0, (0..*supers).map(|_| ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Super, DUMMY_SP), args: None }));
+            }
         }
 
-        if global {
-            segments.insert(0, ast::PathSegment::path_root(DUMMY_SP));
-        }
-
-        ast::Path { span: DUMMY_SP, segments, tokens: None }
+        (qself, ast::Path { span: DUMMY_SP, segments, tokens: None })
     }
-}
-
-fn inherent_impl_ty_to_def_id<'tcx>(impl_ty: Ty<'tcx>) -> hir::DefId {
-    match impl_ty.kind() {
-        ty::TyKind::Adt(adt_def, _) => adt_def.did(),
-        _ => unreachable!("inherent impl is for unhandled type {impl_ty:?}"),
-    }
-}
-
-fn concretize_inherent_impl_in_def_path_segment<'tcx>(tcx: TyCtxt<'tcx>, segment: &mut DefPathSegment) {
-    let impl_subject = tcx.impl_subject(segment.def_id);
-    let ty::ImplSubject::Inherent(implementer_ty) = impl_subject.instantiate_identity() else { unreachable!("encountered trait impl in def path") };
-
-    let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
-
-    segment.def_id = implementer_def_id;
-    segment.ident = tcx.opt_item_ident(implementer_def_id).unwrap();
 }
 
 pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId) -> Option<DefPath> {
     if !tcx.is_descendant_of(def_id, scope) { return None; }
 
     if def_id == scope {
+        if let Some(cnum) = def_id.as_crate_root() {
+            return Some(DefPath::new(DefPathRootKind::Global(cnum), vec![]));
+        }
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
         let name = tcx.opt_item_name(def_id)?;
-        return Some(DefPath { type_root: None, segments: vec![DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None }], global: false });
+        return Some(DefPath::new(DefPathRootKind::Local, vec![DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None }]));
     }
 
     let full_def_id_path = def_id_path(tcx, def_id);
     let scope_def_id_path = def_id_path(tcx, scope);
-    let relative_def_id_path = &full_def_id_path[scope_def_id_path.len()..];
+    let mut relative_def_id_path = &full_def_id_path[scope_def_id_path.len()..];
 
-    let mut def_path = DefPath { type_root: None, segments: Vec::with_capacity(relative_def_id_path.len()), global: false };
+    // NOTE: If we find an inherent impl parent in the relative path,
+    //       we modify the path to be type-relative to the type the inherent impl is for.
+    //       This technically makes it a "global" (i.e. non-relative) path.
+    let mut root = match relative_def_id_path {
+        [crate_def_id, ..] if let Some(cnum) = crate_def_id.as_crate_root() => DefPathRootKind::Global(cnum),
+        _ => DefPathRootKind::Local,
+    };
+    for (i, &def_id) in relative_def_id_path.iter().enumerate().rev() {
+        let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(def_id) else { continue; };
+        let ty::ImplSubject::Inherent(implementer_ty) = tcx.impl_subject(def_id).instantiate_identity() else { unreachable!("encountered trait impl in def path") };
+
+        relative_def_id_path = &relative_def_id_path[(i + 1)..];
+        root = DefPathRootKind::Ty(implementer_ty);
+        break;
+    }
+
+    let mut def_path = DefPath::new(root, Vec::with_capacity(relative_def_id_path.len()));
     for &def_id in relative_def_id_path {
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
         let name = tcx.opt_item_name(def_id).unwrap_or(kw::Empty);
         def_path.segments.push(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None });
-    }
-
-    for segment in &mut def_path.segments {
-        let hir::DefKind::Impl { of_trait: _ } = tcx.def_kind(segment.def_id) else { continue; };
-        concretize_inherent_impl_in_def_path_segment(tcx, segment);
     }
 
     Some(def_path)
@@ -556,7 +538,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     Ok(def_path)
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[DefPath; 1]> {
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[DefPath<'tcx>; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
@@ -568,25 +550,10 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
             let impl_subject = tcx.impl_subject(impl_parent_def_id);
             let ty::ImplSubject::Inherent(implementer_ty) = impl_subject.instantiate_identity() else { unreachable!("encountered trait impl in def path") };
 
-            let mut visible_root_def_paths = match DefPathRootTy::from_ty(implementer_ty) {
-                Some(type_root) => smallvec![DefPath { type_root: Some(type_root), segments: vec![], global: false }],
-                None => {
-                    let implementer_def_id = inherent_impl_ty_to_def_id(implementer_ty);
-                    visible_def_paths(tcx, crate_res, implementer_def_id, scope, ignore_reexport)
-                }
-            };
+            let ident = tcx.opt_item_ident(def_id).unwrap();
+            let def_path = DefPath::new(DefPathRootKind::Ty(implementer_ty), vec![DefPathSegment { def_id, ident, reexport: None }]);
 
-            if visible_root_def_paths.is_empty() { return smallvec![]; }
-
-            for visible_root_def_path in &mut visible_root_def_paths {
-                visible_root_def_path.segments.push(DefPathSegment {
-                    def_id: def_id,
-                    ident: tcx.opt_item_ident(def_id).unwrap(),
-                    reexport: None,
-                });
-            }
-
-            return visible_root_def_paths;
+            return smallvec![def_path];
         }
 
         None => {}
@@ -614,14 +581,12 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
     let (root_def_id, root_def_path) = match def_id.as_local() {
         Some(_) => {
             let root_def_id = CRATE_DEF_ID.to_def_id();
-            let root_ident = Ident::new(kw::Crate, DUMMY_SP);
-            let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
+            let root_def_path = DefPath::new(DefPathRootKind::Global(LOCAL_CRATE), vec![]);
             (root_def_id, root_def_path)
         }
         None if let crate_name = crate_res.visible_crate_name(def_id.krate) && crate_res.is_in_extern_prelude(crate_name) => {
             let root_def_id = def_id.krate.as_def_id();
-            let root_ident = Ident::new(crate_name, DUMMY_SP);
-            let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: root_def_id, ident: root_ident, reexport: None }], global: true };
+            let root_def_path = DefPath::new(DefPathRootKind::Global(def_id.krate), vec![]);
             (root_def_id, root_def_path)
         }
         None => 'root: {
@@ -641,8 +606,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
                         let crate_name = crate_res.visible_crate_name(cnum);
                         if !crate_res.is_in_extern_prelude(crate_name) { continue; }
 
-                        let root_ident = Ident::new(crate_name, DUMMY_SP);
-                        let root_def_path = DefPath { type_root: None, segments: vec![DefPathSegment { def_id: visible_def_id, ident: root_ident, reexport: None }], global: true };
+                        let root_def_path = DefPath::new(DefPathRootKind::Global(cnum), vec![]);
                         break 'root (visible_def_id, root_def_path);
                     }
                 }
@@ -651,12 +615,12 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
             };
 
             let root_def_id = def_id.krate.as_def_id();
-            let Some(mut root_def_path) = DefPath::from_def_id(tcx, reachable_extern_crate_def_id.to_def_id()) else { return smallvec![] };
+            let Some(mut root_def_path) = DefPath::from_def_parent_path(tcx, reachable_extern_crate_def_id.to_def_id()) else { return smallvec![] };
 
             if let Some(scope) = scope && tcx.is_descendant_of(reachable_extern_crate_def_id.to_def_id(), scope) {
                 let scope_def_id_path = def_id_path(tcx, scope);
-                root_def_path.segments.splice(0..scope_def_id_path.len(), []);
-                root_def_path.global = false;
+                root_def_path.segments.splice(0..(scope_def_id_path.len() - 1), []);
+                root_def_path.root = DefPathRootKind::Local;
             }
 
             (root_def_id, root_def_path)
@@ -711,10 +675,6 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
     }
 
     paths
-}
-
-pub fn visible_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[ast::Path; 1]> {
-    visible_def_paths(tcx, crate_res, def_id, scope, ignore_reexport).into_iter().map(|path| path.ast_path()).collect::<SmallVec<_>>()
 }
 
 macro interned {
