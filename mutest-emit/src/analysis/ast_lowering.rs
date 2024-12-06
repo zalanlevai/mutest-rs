@@ -207,6 +207,14 @@ pub mod visit {
             walk_ty(self, ty_ast, ty_hir);
         }
 
+        fn visit_impl_trait(&mut self, node_id: ast::NodeId, generic_bounds_ast: &'ast ast::GenericBounds, item_id: hir::ItemId, opaque_ty_hir: &'hir hir::OpaqueTy<'hir>) {
+            walk_impl_trait(self, node_id, generic_bounds_ast, item_id, opaque_ty_hir);
+        }
+
+        fn visit_impl_trait_in_param(&mut self, node_id: ast::NodeId, generic_bounds_ast: &'ast ast::GenericBounds, impl_trait_predicate_hir: &'hir hir::WhereBoundPredicate<'hir>) {
+            walk_impl_trait_in_param(self, node_id, generic_bounds_ast, impl_trait_predicate_hir);
+        }
+
         fn visit_path(&mut self, path_ast: &'ast ast::Path, path_hir: &'hir hir::Path<'hir>) {
             walk_path(self, path_ast, path_hir);
         }
@@ -1126,11 +1134,26 @@ pub mod visit {
                 }
                 // TODO: Visit lifetime
             }
-            (ast::TyKind::ImplTrait(_, _bounds_ast, _), hir::TyKind::OpaqueDef(_, _args_hir, _)) => {
-                // TODO
+            (ast::TyKind::ImplTrait(node_id, generic_bounds_ast, _), hir::TyKind::OpaqueDef(opaque_item_id, _args_hir, _)) => {
+                let opaque_ty_hir = visitor.tcx().hir_node(opaque_item_id.hir_id()).expect_item().expect_opaque_ty();
+
+                visitor.visit_impl_trait(*node_id, generic_bounds_ast, *opaque_item_id, opaque_ty_hir);
             }
-            (ast::TyKind::ImplTrait(_, _bounds_ast, _), hir::TyKind::Path(_qpath_hir)) => {
-                // TODO: Visit path
+            // NOTE: `impl Trait` in param type positions are represented as paths to a synthetic generic type parameter on the owner node.
+            //       The owner node also has the generic bounds corresponding to the `impl Trait` as part of a generated generic predicate.
+            (ast::TyKind::ImplTrait(node_id, generic_bounds_ast, _), hir::TyKind::Path(_qpath_hir)) => {
+                let Some((def_id, _)) = ty_hir.as_generic_param() else { unreachable!() };
+
+                let owner_node = visitor.tcx().hir_owner_node(ty_hir.hir_id.owner);
+                let Some(owner_generics) = owner_node.generics() else { unreachable!() };
+
+                let Some(impl_trait_predicate_hir) = owner_generics.predicates.iter().find_map(|where_predicate| {
+                    let hir::WherePredicate::BoundPredicate(predicate_hir) = where_predicate else { return None; };
+                    if predicate_hir.origin != hir::PredicateOrigin::ImplTrait {return None; }
+                    predicate_hir.is_param_bound(def_id).then_some(predicate_hir)
+                }) else { unreachable!() };
+
+                visitor.visit_impl_trait_in_param(*node_id, generic_bounds_ast, impl_trait_predicate_hir);
             }
             (ast::TyKind::Typeof(anon_const_ast), hir::TyKind::Typeof(anon_const_hir)) => {
                 visitor.visit_anon_const(anon_const_ast, anon_const_hir);
@@ -1157,6 +1180,18 @@ pub mod visit {
                 diagnostic.span_note(ty_hir.span, format!("HIR node: {}", hir_kind.descr()));
                 diagnostic.emit();
             }
+        }
+    }
+
+    pub fn walk_impl_trait<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, _node_id: ast::NodeId, generic_bounds_ast: &'ast ast::GenericBounds, _item_id: hir::ItemId, opaque_ty_hir: &'hir hir::OpaqueTy<'hir>) {
+        for (generic_bound_ast, generic_bound_hir) in iter::zip(generic_bounds_ast, opaque_ty_hir.bounds) {
+            visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
+        }
+    }
+
+    pub fn walk_impl_trait_in_param<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, _node_id: ast::NodeId, generic_bounds_ast: &'ast ast::GenericBounds, impl_trait_predicate_hir: &'hir hir::WhereBoundPredicate<'hir>) {
+        for (generic_bound_ast, generic_bound_hir) in iter::zip(generic_bounds_ast, impl_trait_predicate_hir.bounds) {
+            visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
         }
     }
 
@@ -1652,6 +1687,16 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
     fn visit_ty(&mut self, ty_ast: &'ast ast::Ty, ty_hir: &'hir hir::Ty<'hir>) {
         self.insert_ids(ty_ast.id, ty_hir.hir_id);
         visit::walk_ty(self, ty_ast, ty_hir);
+    }
+
+    fn visit_impl_trait(&mut self, node_id: ast::NodeId, generic_bounds_ast: &'ast ast::GenericBounds, item_id: hir::ItemId, opaque_ty_hir: &'hir hir::OpaqueTy<'hir>) {
+        self.insert_ids(node_id, item_id.hir_id());
+        visit::walk_impl_trait(self, node_id, generic_bounds_ast, item_id, opaque_ty_hir);
+    }
+
+    fn visit_impl_trait_in_param(&mut self, node_id: ast::NodeId, generic_bounds_ast: &'ast ast::GenericBounds, impl_trait_predicate_hir: &'hir hir::WhereBoundPredicate<'hir>) {
+        self.insert_ids(node_id, impl_trait_predicate_hir.hir_id);
+        visit::walk_impl_trait_in_param(self, node_id, generic_bounds_ast, impl_trait_predicate_hir);
     }
 
     fn visit_path(&mut self, path_ast: &'ast ast::Path, path_hir: &'hir hir::Path<'hir>) {
