@@ -11,15 +11,15 @@ use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
 
 macro m() {
-    // <[$ty]>::into_vec::<_>(Box::new([]));
+    // <[$ty]>::into_vec::<$ty'>(Box::new([]));
     let _: Vec<()> = <[_]>::into_vec(Box::new([]));
     let _: Vec<usize> = <[_]>::into_vec(Box::new([]));
 
-    // <$ty as From<_>>::from($expr);
+    // <$ty as From<$ty'>>::from($expr);
     let _ = String::from("str");
     let _ = u8::from(false);
 
-    // TEST: Write infer generics corresponding to trait method.
+    // TEST: Write inferred generics corresponding to trait method.
     trait Parser: Sized {
         fn parse_from<I, T>(itr: I) -> Self
         where
@@ -36,7 +36,7 @@ macro m() {
         }
     }
 
-    // TEST: Write infer args for generics with defaults, to satisfy generic contexts.
+    // TEST: Write inferred args for generics with defaults, to satisfy generic contexts.
     enum Entry<'a, T, A = Global>
     where
         A: Allocator,
@@ -56,7 +56,7 @@ macro m() {
         }
     }
 
-    // TEST: Avoid writing infer generics in contexts where it cannot be used (e.g. generic traits in impl headers).
+    // TEST: Avoid writing inferred generics in contexts where it cannot be used (e.g. generic traits in impl headers).
     struct S;
     impl PartialEq for S {
         fn eq(&self, other: &Self) -> bool { true }
