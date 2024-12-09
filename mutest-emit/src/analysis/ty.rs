@@ -376,9 +376,25 @@ pub mod print {
             }
 
             if args.is_empty() { return Ok(path); }
-            let args = self.tcx().generics_of(def_id).own_args(args);
-            if args.is_empty() { return Ok(path); }
-            self.path_generic_args(path, args, iter::empty())
+            let item_args = self.tcx().generics_of(def_id).own_args(args);
+            if !item_args.is_empty() {
+                path = self.path_generic_args(path, item_args, iter::empty())?;
+            }
+
+            // NOTE: If the def is a trait assoc item, then we must also write out the trait generics on the trait path segment.
+            if let Some(assoc_item) = self.tcx.opt_associated_item(def_id) && let Some(trait_def_id) = assoc_item.trait_container(self.tcx) {
+                // HACK: Temporarily turn the path into a path to the containing trait itself to append generic args to it.
+                let Some(assoc_item_path_segment) = path.segments.pop() else { unreachable!("empty path") };
+
+                let trait_args = self.tcx().generics_of(trait_def_id).own_args(args);
+                if !trait_args.is_empty() {
+                    path = self.path_generic_args(path, trait_args, iter::empty())?;
+                }
+
+                path.segments.push(assoc_item_path_segment);
+            }
+
+            Ok(path)
         }
 
         fn print_region(&mut self, region: ty::Region<'_>) -> Result<Self::Region, Self::Error> {
