@@ -13,7 +13,7 @@ use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
 use crate::codegen::ast::{self, P};
-use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym, kw};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
 pub struct CrateResolutions<'tcx> {
     tcx: TyCtxt<'tcx>,
@@ -538,7 +538,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     Ok(def_path)
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>) -> SmallVec<[DefPath<'tcx>; 1]> {
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span) -> SmallVec<[DefPath<'tcx>; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
@@ -611,7 +611,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
                     }
                 }
 
-                panic!("expected {def_id:?} to be reached through another crate in the extern prelude");
+                span_bug!(span, "expected `{}` to be reached through another crate in the extern prelude", tcx.def_path_str(def_id));
             };
 
             let root_def_id = def_id.krate.as_def_id();
