@@ -318,6 +318,11 @@ macro m() {
         use {Sync as SyncTrait, Send};
         use Result::{Err as Break, Ok as Continue};
     }
+
+    // TEST: `crate::` imports from extern crate.
+    mod test_crate_root_imports_from_extern_crate {
+        dummy_crate::use_foo_from_crate_root_through_macro_expansion!();
+    }
 }
 
 m!();

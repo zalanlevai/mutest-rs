@@ -892,10 +892,18 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // `crate::Item` paths.
             [crate_segment] if crate_segment.ident.name == kw::Crate => {
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, item_def_id.krate.as_def_id(), item_res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(item_def_id.krate.as_def_id()))
+                // NOTE: It is important that we look into the local crate root first, to avoid potential visibility issues.
+                let crate_scopes = [LOCAL_CRATE.as_def_id(), item_def_id.krate.as_def_id()];
+
+                let Some((parent_mod_def_id, referenced_mod_child)) = crate_scopes.into_iter().find_map(|scope| {
+                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, item_res.expect_non_local(), item_path_segment.ident.name)?;
+                    Some((scope, referenced_mod_child))
+                }) else {
+                    let searched_mods = crate_scopes.into_iter().map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
+                    span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(item_def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
                 };
-                (item_def_id.krate.as_def_id(), referenced_mod_child)
+
+                (parent_mod_def_id, referenced_mod_child)
             }
 
             // `super{::super}*::Item` paths.
