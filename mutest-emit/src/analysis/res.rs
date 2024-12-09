@@ -566,18 +566,6 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
             Some((def_id, cnum))
         });
 
-    let mut extern_prelude = tcx.sess.opts.externs.iter()
-        .filter(|(_, entry)| entry.add_prelude)
-        .map(|(name, _)| Symbol::intern(name))
-        .collect::<FxHashSet<_>>();
-    if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_core)) {
-        extern_prelude.insert(sym::core);
-        if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_std)) {
-            extern_prelude.insert(sym::alloc);
-            extern_prelude.insert(sym::std);
-        }
-    }
-
     let (root_def_id, root_def_path) = match def_id.as_local() {
         Some(_) => {
             let root_def_id = CRATE_DEF_ID.to_def_id();
