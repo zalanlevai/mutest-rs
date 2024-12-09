@@ -370,13 +370,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     #[track_caller]
-    fn report_unmatched_ast_node<S, F>(&self, span: Span, msg: F)
+    fn bug_unmatched_ast_node<S, F>(&self, span: Span, msg: F) -> !
     where
         S: Into<String>,
         F: FnOnce() -> S,
     {
-        let mut diagnostic = self.tcx.dcx().struct_warn(msg().into());
-        diagnostic.span(span);
+        let mut diagnostic = self.tcx.dcx().struct_span_bug(span, msg().into());
         diagnostic.span_label(span, "no corresponding HIR node found");
         diagnostic.note(format!("body resolutions from {scope}",
             scope = match self.current_scope {
@@ -393,9 +392,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         match res {
             hir::Res::Local(node_id) => {
                 let Some(hir_id) = self.body_res.hir_id(node_id) else {
-                    self.report_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", ast::print::path_to_string(path)));
-                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return None; }
-                    panic!("expected resolution");
+                    self.bug_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", ast::print::path_to_string(path)));
                 };
                 let def_ident = self.tcx.hir().ident(hir_id);
 
@@ -616,9 +613,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // Otherwise, resolve it with the help of the corresponding HIR QPath.
             (qself @ _, _) => {
                 let Some(node_hir_id) = self.body_res.hir_id(node_id) else {
-                    self.report_unmatched_ast_node(path.span, || format!("unable to resolve path `{}` for sanitization", ast::print::qpath_to_string(qself.as_deref(), path)));
-                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return hir::Res::Err; }
-                    panic!("expected resolution");
+                    self.bug_unmatched_ast_node(path.span, || format!("unable to resolve path `{}` for sanitization", ast::print::qpath_to_string(qself.as_deref(), path)));
                 };
 
                 let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { span_bug!(path.span, "no corresponding qualified path in HIR") };
@@ -1325,16 +1320,12 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
 
                 let Some(base_expr_hir) = self.body_res.hir_expr(base_expr.peel_parens()) else {
-                    self.report_unmatched_ast_node(base_expr.span, || format!("unable to resolve field base expr `{}` for sanitization", ast::print::expr_to_string(expr)));
-                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
-                    panic!("expected resolution");
+                    self.bug_unmatched_ast_node(base_expr.span, || format!("unable to resolve field base expr `{}` for sanitization", ast::print::expr_to_string(expr)));
                 };
                 // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_expr` call
                 //       because of the `&mut expr.kind` partial borrow above.
                 let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else {
-                    self.report_unmatched_ast_node(expr_span, || format!("unable to resolve field expr `{}` for sanitization", ast::print::expr_to_string(expr)));
-                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
-                    panic!("expected_resolution");
+                    self.bug_unmatched_ast_node(expr_span, || format!("unable to resolve field expr `{}` for sanitization", ast::print::expr_to_string(expr)));
                 };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
@@ -1352,9 +1343,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_expr` call
                 //       because of the `&mut expr.kind` partial borrow above.
                 let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else {
-                    self.report_unmatched_ast_node(expr_span, || format!("unable to resolve method call expr `{}` for sanitization", ast::print::expr_to_string(expr)));
-                    if let Some(scope) = self.current_scope && self.tcx.asyncness(scope).is_async() { return; }
-                    panic!("expected resolution");
+                    self.bug_unmatched_ast_node(expr_span, || format!("unable to resolve method call expr `{}` for sanitization", ast::print::expr_to_string(expr)));
                 };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { unreachable!() };

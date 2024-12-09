@@ -1,5 +1,5 @@
 //@ build
-// //@ stderr: empty // TODO: Enable once AST lowering for async bodies is implemented.
+//@ stderr: empty
 //@ mutest-flags: --Zsanitize-macro-expns
 
 #![feature(decl_macro)]
