@@ -312,6 +312,12 @@ macro m() {
             }
         }
     }
+
+    // TEST: Prelude imports.
+    mod test_prelude_imports {
+        use {Sync as SyncTrait, Send};
+        use Result::{Err as Break, Ok as Continue};
+    }
 }
 
 m!();

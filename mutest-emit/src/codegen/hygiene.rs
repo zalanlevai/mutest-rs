@@ -127,6 +127,9 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     /// Body resolutions for interfacing with the HIR.
     body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     syntax_extensions: Vec<SyntaxExtension>,
+    /// The prelude module of this crate (marked with `#[prelude_import]`)
+    /// whose contents are available in every module, used for import path resolution.
+    prelude_mod: Option<hir::DefId>,
 
     /// Keep track of the current scope (e.g. items and bodies) for relative name resolution.
     current_scope: Option<hir::DefId>,
@@ -909,12 +912,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
             // `{self::}?Item` paths.
             [] | [ast::PathSegment { ident: Ident { name: kw::SelfLower, .. }, .. }] => {
-                let Some((parent_mod_def_id, referenced_mod_child)) = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten().find_map(|scope| {
+                let mod_scopes = [overlay_mod_scope, Some(mod_scope), self.prelude_mod];
+
+                let Some((parent_mod_def_id, referenced_mod_child)) = mod_scopes.into_iter().flatten().find_map(|scope| {
                     let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, item_res.expect_non_local(), item_path_segment.ident.name)?;
                     Some((scope, referenced_mod_child))
                 }) else {
-                    let searched_mods = [overlay_mod_scope, Some(mod_scope)].into_iter().flatten()
-                        .map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
+                    let searched_mods = mod_scopes.into_iter().flatten().map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
                     span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(item_def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
                 };
 
@@ -1109,6 +1113,8 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<
         def_res,
         body_res: &ast_lowering::BodyResolutions::empty(tcx),
         syntax_extensions: vec![],
+        // NOTE: This is only used for sanitizing import paths, which is the only reason we can ignore setting it here.
+        prelude_mod: None,
         current_scope: scope,
         current_typeck_ctx: None,
         macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
@@ -1548,12 +1554,21 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
         })
         .collect_into(&mut syntax_extensions);
 
+    // Find the prelude module of this crate, whose contents are available in every module.
+    let prelude_mod = tcx.hir().root_module().item_ids.iter().find_map(|&item_id| {
+        let hir::ItemKind::Use(use_path, hir::UseKind::Glob) = tcx.hir().item(item_id).kind else { return None; };
+        if !tcx.hir().attrs(item_id.hir_id()).iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::prelude_import)) { return None; }
+        let [.., last_segment] = use_path.segments else { unreachable!() };
+        Some(last_segment.res.def_id())
+    });
+
     let mut sanitizer = MacroExpansionSanitizer {
         tcx,
         crate_res,
         def_res,
         body_res,
         syntax_extensions,
+        prelude_mod,
         current_scope: Some(LOCAL_CRATE.as_def_id()),
         current_typeck_ctx: None,
         macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
