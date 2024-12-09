@@ -705,6 +705,11 @@ pub mod print {
                     }
                 }
                 ty::TyKind::Param(param_ty) => {
+                    // Avoid naming synthetic generic params from `impl Trait` function parameters.
+                    if param_ty.name.as_str().starts_with("impl ") {
+                        return Ok(ast::mk::ty(sp, ast::TyKind::Infer));
+                    }
+
                     let mut ident = Ident::new(param_ty.name, sp);
                     if self.sanitize_macro_expns {
                         'sanitize: {
