@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
 use std::sync::Arc;
@@ -5,7 +6,7 @@ use std::sync::atomic::{self, AtomicBool};
 
 use rustc_interface::Config as CompilerConfig;
 use rustc_interface::interface::Result as CompilerResult;
-use rustc_session::config::Input;
+use rustc_session::config::{ExternEntry, ExternLocation, Externs, Input};
 use rustc_session::parse::ParseSess;
 use rustc_span::Symbol;
 use rustc_span::source_map::RealFileLoader;
@@ -139,6 +140,20 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
     compiler_config.crate_check_cfg.push("cfg(mutest, values(none()))".to_owned());
     // Enable #[cfg(mutest)].
     compiler_config.crate_cfg.push("mutest".to_owned());
+
+    let mut externs = BTreeMap::<String, ExternEntry>::new();
+    for (key, entry) in compiler_config.opts.externs.iter() {
+        externs.insert(key.clone(), entry.clone());
+    }
+    // Externs for some std macros may have to be loaded.
+    externs.insert("std_detect".to_owned(), ExternEntry {
+        location: ExternLocation::FoundInLibrarySearchDirectories,
+        is_private_dep: false,
+        add_prelude: true,
+        nounused_dep: false,
+        force: false,
+    });
+    compiler_config.opts.externs = Externs::new(externs);
 
     compiler_config
 }

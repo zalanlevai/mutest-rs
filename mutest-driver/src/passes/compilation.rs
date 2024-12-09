@@ -42,8 +42,8 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&sysroot, &triple, &early_dcx, &format!("crate={}", config.mutest_search_path.display()), true));
     compiler_config.opts.search_paths.push(SearchPath::from_cli_opt(&sysroot, &triple, &early_dcx, &format!("dependency={}", config.mutest_search_path.join("deps").display()), true));
     drop(early_dcx);
-    // The externs (paths to dependencies) of the `mutest_runtime` crate are baked into it at compile time. These must
-    // be propagated to any crate which depends on it.
+    // The externs (paths to dependencies) of the `mutest_runtime` crate are baked into it at compile time.
+    // These must be propagated to any crate which depends on it.
     let mut externs = BTreeMap::<String, ExternEntry>::new();
     for (key, entry) in compiler_config.opts.externs.iter() {
         externs.insert(key.clone(), entry.clone());
@@ -76,14 +76,6 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
             force,
         });
     }
-    // Externs for some std macros may have to be loaded.
-    externs.insert("std_detect".to_owned(), ExternEntry {
-        location: ExternLocation::FoundInLibrarySearchDirectories,
-        is_private_dep: false,
-        add_prelude: true,
-        nounused_dep: false,
-        force: false,
-    });
     compiler_config.opts.externs = Externs::new(externs);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
