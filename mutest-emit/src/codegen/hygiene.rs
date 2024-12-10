@@ -181,6 +181,20 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     segments_with_generics.push((def_id, last_path_segment.args.clone()));
                 }
 
+                // Ensure that we always retain the generic arguments provided to an enum, even if
+                // the enum is not present in the def path and the enum variant is referred to directly
+                // (e.g. if there is a visible re-export of the enum variant).
+                // NOTE: The enum generic args can always be provided to the enum variant instead, so
+                //       we always just use this form instead, see
+                //       `tests/ui/hygiene/rustc_res/enum_variant_may_be_available_without_enum_being_visible`.
+                if let [.., (enum_def_id, enum_args), (enum_variant_def_id, enum_variant_args)] = &mut segments_with_generics[..]
+                    && let hir::DefKind::Enum = self.tcx.def_kind(*enum_def_id)
+                    && let hir::DefKind::Variant = self.tcx.def_kind(*enum_variant_def_id)
+                    && let None = enum_variant_args
+                {
+                    *enum_variant_args = enum_args.take();
+                }
+
                 segments_with_generics
             }
         };
