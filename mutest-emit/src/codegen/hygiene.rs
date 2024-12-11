@@ -114,6 +114,12 @@ fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attri
 }
 
 #[derive(Clone, Copy)]
+enum DefPathRequestKind {
+    Item(hir::DefId),
+    ParentModStub(hir::ModDefId),
+}
+
+#[derive(Clone, Copy)]
 enum Macros2_0TopLevelRelativePathResHack {
     InTopLevelMacros2_0Scope { parent_module: hir::DefId },
     InNestedMacros2_0Scope(ExpnId),
@@ -323,7 +329,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         qself
     }
 
-    fn expect_visible_def_path(&self, def_id: hir::DefId, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath<'tcx> {
+    fn expect_visible_def_path(&self, request: DefPathRequestKind, span: Span, ignore_reexport: Option<hir::DefId>) -> res::DefPath<'tcx> {
+        let def_id = match request {
+            DefPathRequestKind::Item(def_id) => def_id,
+            DefPathRequestKind::ParentModStub(def_id) => def_id.to_def_id(),
+        };
+
         // Prefer using a direct, local path to local items within the same module as the enclosing module (or parent modules) of the current scope.
         // NOTE: This helps avoid visibility-related resolution issues in local items, see
         //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`, and
@@ -333,7 +344,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 hir::DefKind::Mod => current_scope,
                 _ => self.tcx.parent_module_from_def_id(current_scope.expect_local()).to_def_id(),
             };
-            let containing_mod = self.tcx.parent_module_from_def_id(local_def_id).to_def_id();
+            let containing_mod = match request {
+                DefPathRequestKind::Item(_) => self.tcx.parent_module_from_def_id(local_def_id).to_def_id(),
+                DefPathRequestKind::ParentModStub(_) => def_id,
+            };
 
             if containing_mod == mod_scope {
                 if let Ok(visible_path) = res::locally_visible_def_path(self.tcx, def_id, current_scope) {
@@ -358,11 +372,20 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 };
 
                 if let Some(super_mods) = is_locally_accessible_through_supers {
-                    if let Ok(mut visible_path) = res::locally_visible_def_path(self.tcx, def_id, containing_mod) {
-                        // Construct path to containing parent module, which are
-                        // always accessible through consecutive `super` path segments.
-                        visible_path.root = res::DefPathRootKind::Parent { supers: super_mods.len() };
-                        return visible_path;
+                    match request {
+                        DefPathRequestKind::Item(_) => {
+                            if let Ok(mut visible_path) = res::locally_visible_def_path(self.tcx, def_id, containing_mod) {
+                                // Construct path to containing parent module, which are
+                                // always accessible through consecutive `super` path segments.
+                                visible_path.root = res::DefPathRootKind::Parent { supers: super_mods.len() };
+                                return visible_path;
+                            }
+                        }
+                        DefPathRequestKind::ParentModStub(_) => {
+                            // Construct direct path of `super` path segments, which is not valid by itself,
+                            // but will be valid once the caller appends the item segment(s) to it.
+                            return res::DefPath::new(res::DefPathRootKind::Parent { supers: super_mods.len() }, vec![]);
+                        }
                     }
                 }
             }
@@ -446,7 +469,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             def_id = self.tcx.parent(def_id);
                         }
 
-                        let visible_def_path = self.expect_visible_def_path(def_id, path.span, ignore_reexport);
+                        let visible_def_path = self.expect_visible_def_path(DefPathRequestKind::Item(def_id), path.span, ignore_reexport);
                         self.overwrite_path_with_def_path(path, &visible_def_path)
                     }
 
@@ -857,16 +880,35 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn sanitize_import_path(&mut self, scope: hir::HirId, import_node_id: ast::NodeId, path: &mut ast::Path, res: hir::Res<ast::NodeId>) {
-        let Some(&import_def_id) = self.def_res.node_id_to_def_id.get(&import_node_id) else { unreachable!() };
+        enum ModPathKind {
+            DirectPath,
+            ParentModPathStub,
+        }
 
-        let hir::Res::Def(def_kind, _def_id) = res else { span_bug!(path.span, "import path has non-def last segment") };
-        // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
-        // and we can simply sanitize the whole path in one go.
-        if let hir::DefKind::Mod = def_kind {
-            let None = self.sanitize_path(path, res, Some(import_def_id.to_def_id())) else {
+        let adjust_mod_path_from_expansion = |path: &mut ast::Path, mod_def_id: hir::ModDefId, mod_path_kind: ModPathKind, ignore_reexport: Option<hir::DefId>| {
+            let def_path_request = match mod_path_kind {
+                ModPathKind::DirectPath => DefPathRequestKind::Item(mod_def_id.to_def_id()),
+                ModPathKind::ParentModPathStub => DefPathRequestKind::ParentModStub(mod_def_id),
+            };
+
+            let visible_def_path = self.expect_visible_def_path(def_path_request, path.span, ignore_reexport);
+            let None = self.overwrite_path_with_def_path(path, &visible_def_path) else {
                 span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
             };
-            return;
+        };
+
+        let Some(&import_def_id) = self.def_res.node_id_to_def_id.get(&import_node_id) else { unreachable!() };
+
+        match res {
+            // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
+            // and we can simply sanitize the whole path in one go.
+            hir::Res::Def(hir::DefKind::Mod, def_id) => {
+                let mod_def_id = hir::ModDefId::new_unchecked(def_id);
+                return adjust_mod_path_from_expansion(path, mod_def_id, ModPathKind::DirectPath, Some(import_def_id.to_def_id()));
+            }
+
+            hir::Res::Def(_, _) => {}
+            _ => span_bug!(path.span, "import path has non-def last segment"),
         }
 
         let (mod_path_segments, item_path_segment, item_res, enum_variant) = match &mut path.segments[..] {
@@ -979,9 +1021,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         }
 
         let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
-        let None = self.sanitize_path(&mut parent_mod_path, hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id), Some(import_def_id.to_def_id())) else {
-            span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
-        };
+        let parent_mod_def_id = hir::ModDefId::new_unchecked(parent_mod_def_id);
+        adjust_mod_path_from_expansion(&mut parent_mod_path, parent_mod_def_id, ModPathKind::ParentModPathStub, Some(import_def_id.to_def_id()));
         path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), parent_mod_path.segments);
     }
 

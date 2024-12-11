@@ -213,6 +213,24 @@ macro m() {
         Item!();
     }
 
+    // TEST: Overlapping import of module and its child item.
+    mod test_overlapping_imports_of_mod_and_child_item {
+        use inner as _;
+        use inner::escape;
+
+        mod inner {
+            pub use self::escape::escape;
+            pub mod escape {
+                pub fn escape() {}
+            }
+
+            mod other {
+                use super::escape;
+            }
+        }
+
+    }
+
     // TEST: Item imports from other macro scopes.
     mod test_item_imports_from_macros {
         use inner::MixedMacroRulesReexports;
