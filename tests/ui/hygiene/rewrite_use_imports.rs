@@ -331,6 +331,12 @@ macro m() {
         }
     }
 
+    // TEST: Primitive type imports.
+    mod test_primitive_type_imports {
+        use u32 as u31;
+        use ::std::primitive::bool;
+    }
+
     // TEST: Prelude imports.
     mod test_prelude_imports {
         use {Sync as SyncTrait, Send};

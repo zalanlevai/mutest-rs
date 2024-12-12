@@ -908,6 +908,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
 
             hir::Res::Def(_, _) => {}
+
+            hir::Res::PrimTy(_) => {
+                // NOTE: Primitive types can be imported and even aliased.
+                //       They can take two forms, `$ty` and `::{std/core}::primitive::$ty`, but
+                //       there is no need to change either form in any context
+                //       (when it has already been validated by the compiler), so
+                //       we can keep these paths as-is.
+                return;
+            }
+
             _ => span_bug!(path.span, "import path has non-def last segment"),
         }
 
