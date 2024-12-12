@@ -902,7 +902,20 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         match res {
             // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
             // and we can simply sanitize the whole path in one go.
-            hir::Res::Def(hir::DefKind::Mod, def_id) => {
+            hir::Res::Def(hir::DefKind::Mod, def_id) => 'arm: {
+                // NOTE: Module re-exports (e.g. `pub use alloc::vec` in `std`) point to the underlying module, but
+                //       we want to refer to the re-export by path in case the import this resolution comes from
+                //       is diverging and points to an identically named item in the re-export's scope.
+                // Check if the parent module named in the path diverges from the final resolution's parent module,
+                // indicating that we are dealing with a module re-export resolution.
+                if let [.., parent_mod_path_segment, _] = &path.segments[..]
+                    && let Some(hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id)) = self.def_res.node_res(parent_mod_path_segment.id)
+                    && parent_mod_def_id != self.tcx.parent(def_id)
+                {
+                    // HACK: Deal with module re-export paths like we do with item paths.
+                    break 'arm;
+                }
+
                 let mod_def_id = hir::ModDefId::new_unchecked(def_id);
                 return adjust_mod_path_from_expansion(path, mod_def_id, ModPathKind::DirectPath, Some(import_def_id.to_def_id()));
             }

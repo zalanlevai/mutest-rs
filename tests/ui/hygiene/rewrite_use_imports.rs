@@ -228,7 +228,11 @@ macro m() {
                 use super::escape;
             }
         }
+    }
 
+    // TEST: Overlapping import of re-exported module and direct child item.
+    mod test_overlapping_imports_of_reexported_mod_and_child_item {
+        use std::vec;
     }
 
     // TEST: Item imports from other macro scopes.
