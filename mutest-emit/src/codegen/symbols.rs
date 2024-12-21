@@ -43,10 +43,10 @@ pub mod sym {
         mutest_main_static,
         mutest_runtime,
         op_name,
+        reachable_from,
         substitutions,
         SubstMap,
         SubstMeta,
-        reachable_from,
         tests,
         undetected_diagnostic,
     }
@@ -108,6 +108,7 @@ pub mod path {
         mutest_main_static (::mutest_runtime::mutest_main_static),
         static_map (::mutest_runtime::static_map),
         SubstMap (crate::mutest_generated::SubstMap),
+        SubstMapTrait (::mutest_runtime::SubstMap),
         SubstMeta (::mutest_runtime::SubstMeta),
         wrap (::mutest_runtime::wrap),
     }

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::MutationSafety;
 use crate::config::{self, Options};
-use crate::metadata::{MutantMeta, MutationMeta};
+use crate::metadata::{MutantMeta, MutationMeta, SubstMap};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
 
@@ -20,34 +20,32 @@ mod test {
     pub use ::test::test::*;
 }
 
-// TODO: Consider using `MaybeUninit<Mutant>` for the cell type if the harness never runs the
-//       program without any mutations applied.
-pub struct ActiveMutantHandle<S: 'static>(Cell<Option<&'static MutantMeta<S>>>);
+pub struct ActiveMutantHandle<S: SubstMap>(Cell<Option<S>>);
 
-impl<S> ActiveMutantHandle<S> {
+impl<S: SubstMap> ActiveMutantHandle<S> {
     pub const fn empty() -> Self {
         Self(Cell::new(None))
     }
 
-    pub const fn with(v: &'static MutantMeta<S>) -> Self {
+    pub const fn with(v: S) -> Self {
         Self(Cell::new(Some(v)))
     }
 
-    pub fn borrow(&self) -> Option<&'static MutantMeta<S>> {
-        self.0.get()
+    pub fn borrow(&self) -> Option<&S> {
+        (unsafe { &*self.0.as_ptr() }).as_ref()
     }
 
     /// # Safety
     ///
     /// The caller must ensure that no other thread is reading from the handle.
-    pub(crate) unsafe fn replace(&self, v: Option<&'static MutantMeta<S>>) {
+    pub(crate) unsafe fn replace(&self, v: Option<S>) {
         self.0.replace(v);
     }
 }
 
 // SAFETY: While access to the handle data is not synchronized, the handle can only be mutated using
 //         unsafe, crate-private functions, see above.
-unsafe impl<S> Sync for ActiveMutantHandle<S> {}
+unsafe impl<S: SubstMap> Sync for ActiveMutantHandle<S> {}
 
 // NOTE: `mutest_runtime::wrap` is currently a no-op test wrapper. The codegen for it was left intact if we ever need
 //       such functionality in the future.
@@ -181,7 +179,7 @@ pub enum MutationTestResult {
     Crashed,
 }
 
-fn run_tests<S>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
+fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
     let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
@@ -259,7 +257,7 @@ fn run_tests<S>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, threa
     Ok(results)
 }
 
-pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
+pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     let opts = Options {
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
@@ -359,7 +357,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
         //         As for lingering test cases from previous test runs, their behaviour will change accordingly, but we
         //         have already marked them as timed out and abandoned them by this point. The behaviour in such cases
         //         stays the same, regardless of whether the handle performs locking or not.
-        unsafe { active_mutant_handle.replace(Some(mutant)); }
+        unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
 
         if opts.verbosity >= 1 {
             print!("{}: ", mutant.id);
@@ -513,7 +511,7 @@ pub fn mutest_main<S>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &
 
 const MUTEST_ISOLATED_WORKER_MUTANT_ID: &str = "__MUTEST_ISOLATED_WORKER_MUTANT_ID";
 
-fn mutest_isolated_worker<S>(test: test::TestDescAndFn, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) -> ! {
+fn mutest_isolated_worker<S: SubstMap>(test: test::TestDescAndFn, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) -> ! {
     let mutant_id = env::var(MUTEST_ISOLATED_WORKER_MUTANT_ID).unwrap()
         .parse::<u32>().expect(&format!("{MUTEST_ISOLATED_WORKER_MUTANT_ID} must be a number"));
 
@@ -522,12 +520,12 @@ fn mutest_isolated_worker<S>(test: test::TestDescAndFn, mutants: &'static [&'sta
     };
 
     // SAFETY: No other thread is running yet, no one else is reading from the handle yet.
-    unsafe { active_mutant_handle.replace(Some(mutant)); }
+    unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
 
     test_runner::run_test_in_spawned_subprocess(test);
 }
 
-pub fn mutest_main_static<S>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
+pub fn mutest_main_static<S: SubstMap + Sync>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &ActiveMutantHandle<S>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
         env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION);
 

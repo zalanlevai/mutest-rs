@@ -81,7 +81,7 @@ pub fn bake_mutant(mutant: &Mutant, sp: Span, _sess: &Session, mutations_expr: P
     ])
 }
 
-fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
+fn mk_subst_map_struct(g: &ast::attr::AttrIdGenerator, sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
     let fields = subst_locs.iter()
         .map(|subst_loc| {
             // pub $subst_loc_id: Option<SubstMeta>,
@@ -94,10 +94,33 @@ fn mk_subst_map_struct(sp: Span, subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
         })
         .collect::<ThinVec<_>>();
 
+    let derive_clone_attr = ast::mk::attr_outer(g, sp,
+        Ident::new(sym::derive, sp),
+        ast::mk::attr_args_delimited(sp, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+            ast::mk::tt_token_joint(sp, ast::token::TokenKind::Ident(sym::Clone, ast::token::IdentIsRaw::No)),
+        ])),
+    );
+
     // pub(crate) struct SubstMap { ... }
     let vis = ast::mk::vis_pub_crate(sp);
     let ident = Ident::new(*sym::SubstMap, sp);
-    ast::mk::item_struct(sp, vis, ident, None, fields)
+    ast::mk::item_struct(sp, vis, ident, None, fields).map(|mut i| { i.attrs = thin_vec![derive_clone_attr]; i })
+}
+
+fn mk_subst_map_trait_impl(sp: Span, _subst_locs: &[SubstLoc]) -> P<ast::Item> {
+    ast::mk::item(sp, thin_vec![], ast::mk::vis_default(sp), Ident::empty(), ast::ItemKind::Impl(Box::new(ast::Impl {
+        defaultness: ast::Defaultness::Final,
+        unsafety: ast::Unsafe::No,
+        generics: Default::default(),
+        constness: ast::Const::No,
+        polarity: ast::ImplPolarity::Positive,
+        of_trait: Some(ast::TraitRef {
+            ref_id: ast::DUMMY_NODE_ID,
+            path: ast::mk::path_local(path::SubstMapTrait(sp)),
+        }),
+        self_ty: ast::mk::ty_ident(sp, None, Ident::new(*sym::SubstMap, sp)),
+        items: thin_vec![],
+    })))
 }
 
 fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>, unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
@@ -128,7 +151,7 @@ fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>, unsafe_targ
     ast::mk::item_mod(sp, vis, ident, items).map(|mut m| { m.attrs = thin_vec![allow_non_upper_case_globals_attr]; m })
 }
 
-fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_locs: &Vec<SubstLoc>) -> P<ast::Item> {
+fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_locs: &[SubstLoc]) -> P<ast::Item> {
     let elements = mutants.iter()
         .map(|mutant| {
             // &[...]
@@ -168,14 +191,14 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_lo
                     ast::mk::expr_struct_field(sp, ident, expr)
                 })
                 .collect::<ThinVec<_>>();
-            let subst_map_expr = ast::mk::expr_struct(sp, path::SubstMap(sp), subst_map_fields);
+            let subst_map_expr = ast::mk::expr_ref(sp, ast::mk::expr_struct(sp, path::SubstMap(sp), subst_map_fields));
 
             // &MutantMeta { ... }
             ast::mk::expr_ref(sp, bake_mutant(mutant, sp, sess, mutations_expr, subst_map_expr))
         })
         .collect::<ThinVec<_>>();
 
-    // const MUTANTS: : &[&mutest_runtime::MutantMeta<SubstMap>] = &[ ... ];
+    // const MUTANTS: &[&mutest_runtime::MutantMeta<SubstMap>] = &[ ... ];
     let vis = ast::mk::vis_default(sp);
     let ident = Ident::new(*sym::MUTANTS, sp);
     let mutant_meta_ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp,
@@ -280,7 +303,8 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
             thin_vec![
                 extern_crate_test,
                 extern_crate_mutest_runtime,
-                mk_subst_map_struct(def, &subst_locs),
+                mk_subst_map_struct(g, def, &subst_locs),
+                mk_subst_map_trait_impl(def, &subst_locs),
                 mk_mutations_mod(def, self.sess, &mutations, self.unsafe_targeting),
                 mk_mutants_slice_const(def, self.sess, self.mutants, &subst_locs),
                 mk_active_mutant_handle_static(def),

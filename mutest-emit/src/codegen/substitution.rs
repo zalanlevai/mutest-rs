@@ -64,26 +64,17 @@ fn mk_subst_match_expr(sp: Span, subst_loc: SubstLoc, default: Option<P<ast::Exp
     // crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow()
     let borrow = Ident::new(*sym::borrow, sp);
     let mutant_handle_borrow_expr = ast::mk::expr_method_call_path_ident(sp, path::ACTIVE_MUTANT_HANDLE(sp), borrow, ThinVec::new());
-    // m.substitutions.$subst_loc_id.as_ref()
-    let mutant_lookup_expr = ast::mk::expr_method_call(sp,
-        ast::mk::expr_field_deep(sp,
-            ast::mk::expr_ident(sp, Ident::new(*sym::mutant, sp)),
-            vec![
-                Ident::new(*sym::substitutions, sp),
-                Ident::new(subst_loc.into_subst_loc_id().into_symbol(), sp),
-            ]
-        ),
-        ast::mk::path_segment(sp, Ident::new(*sym::as_ref, sp), vec![]),
-        ThinVec::new(),
-    );
-    // crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|m| m.substitutions.$subst_loc_id.as_ref())
+    // substs.$subst_loc_id
+    let substs_ident = Ident::new(Symbol::intern("substs"), sp);
+    let mutant_lookup_expr = ast::mk::expr_field(sp, ast::mk::expr_ident(sp, substs_ident), Ident::new(subst_loc.into_subst_loc_id().into_symbol(), sp));
+    // crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|substs| substs.$subst_loc_id)
     let subst_lookup_expr = ast::mk::expr_method_call(sp,
         mutant_handle_borrow_expr,
         ast::mk::path_segment(sp, Ident::new(*sym::and_then, sp), vec![]),
-        thin_vec![ast::mk::expr_closure(sp, vec![Ident::new(*sym::mutant, sp)], mutant_lookup_expr)],
+        thin_vec![ast::mk::expr_closure(sp, vec![substs_ident], mutant_lookup_expr)],
     );
 
-    // match crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|m| m.substitutions.$subst.as_ref()) { ... }
+    // match crate::mutest_generated::ACTIVE_MUTANT_HANDLE.borrow().and_then(|substs| substs.$subst_loc_id) { ... }
     ast::mk::expr_paren(sp, ast::mk::expr_match(sp, subst_lookup_expr, arms))
 }
 
