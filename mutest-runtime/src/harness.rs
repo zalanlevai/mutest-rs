@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
-use std::process::{self, Termination};
+use std::process;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -46,16 +46,6 @@ impl<S: SubstMap> ActiveMutantHandle<S> {
 // SAFETY: While access to the handle data is not synchronized, the handle can only be mutated using
 //         unsafe, crate-private functions, see above.
 unsafe impl<S: SubstMap> Sync for ActiveMutantHandle<S> {}
-
-// NOTE: `mutest_runtime::wrap` is currently a no-op test wrapper. The codegen for it was left intact if we ever need
-//       such functionality in the future.
-pub fn wrap<T, F>(test: F) -> T
-where
-    T: Termination + 'static,
-    F: FnOnce() -> T + 'static,
-{
-    test()
-}
 
 const ERROR_EXIT_CODE: i32 = 101;
 

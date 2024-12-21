@@ -110,6 +110,5 @@ pub mod path {
         SubstMap (crate::mutest_generated::SubstMap),
         SubstMapTrait (::mutest_runtime::SubstMap),
         SubstMeta (::mutest_runtime::SubstMeta),
-        wrap (::mutest_runtime::wrap),
     }
 }
