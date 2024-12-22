@@ -81,49 +81,27 @@ pub fn bake_mutant(mutant: &Mutant, sp: Span, _sess: &Session, mutations_expr: P
     ])
 }
 
-fn mk_subst_map_struct(g: &ast::attr::AttrIdGenerator, sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
-    let fields = subst_locs.iter()
-        .map(|subst_loc| {
-            // pub $subst_loc_id: Option<SubstMeta>,
-            let vis = ast::mk::vis_pub(sp);
-            let ident = Ident::new(subst_loc.into_subst_loc_id().into_symbol(), sp);
-            let ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp, path::Option(sp), vec![], vec![
-                ast::GenericArg::Type(ast::mk::ty_path(None, ast::mk::path_local(path::SubstMeta(sp)))),
-            ]));
-            ast::mk::field_def(sp, vis, Some(ident), ty)
-        })
-        .collect::<ThinVec<_>>();
+fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
+    let option_subst_meta_ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp, path::Option(sp), vec![], vec![
+        ast::GenericArg::Type(ast::mk::ty_path(None, ast::mk::path_local(path::SubstMeta(sp)))),
+    ]));
 
-    let derive_clone_attr = ast::mk::attr_outer(g, sp,
-        Ident::new(sym::derive, sp),
-        ast::mk::attr_args_delimited(sp, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-            ast::mk::tt_token_joint(sp, ast::token::TokenKind::Ident(sym::Clone, ast::token::IdentIsRaw::No)),
-        ])),
-    );
+    let subst_locs_count_anon_const = ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&subst_locs.len().to_string()), None).into_inner().kind);
 
-    // pub(crate) struct SubstMap { ... }
+    // pub(crate) type SubstMap = [Option<SubstMeta>; $subst_locs_count];
     let vis = ast::mk::vis_pub_crate(sp);
     let ident = Ident::new(*sym::SubstMap, sp);
-    ast::mk::item_struct(sp, vis, ident, None, fields).map(|mut i| { i.attrs = thin_vec![derive_clone_attr]; i })
-}
-
-fn mk_subst_map_trait_impl(sp: Span, _subst_locs: &[SubstLoc]) -> P<ast::Item> {
-    ast::mk::item(sp, thin_vec![], ast::mk::vis_default(sp), Ident::empty(), ast::ItemKind::Impl(Box::new(ast::Impl {
+    ast::mk::item(sp, thin_vec![], vis, ident, ast::ItemKind::TyAlias(Box::new(ast::TyAlias {
         defaultness: ast::Defaultness::Final,
-        unsafety: ast::Unsafe::No,
         generics: Default::default(),
-        constness: ast::Const::No,
-        polarity: ast::ImplPolarity::Positive,
-        of_trait: Some(ast::TraitRef {
-            ref_id: ast::DUMMY_NODE_ID,
-            path: ast::mk::path_local(path::SubstMapTrait(sp)),
-        }),
-        self_ty: ast::mk::ty_ident(sp, None, Ident::new(*sym::SubstMap, sp)),
-        items: thin_vec![],
+        where_clauses: Default::default(),
+        bounds: vec![],
+        // [Option<SubstMeta>; $subst_locs_count]
+        ty: Some(ast::mk::ty_array(sp, option_subst_meta_ty, subst_locs_count_anon_const)),
     })))
 }
 
-fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &Vec<&Mut>, unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
+fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &[&Mut], unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
     let g = &sess.psess.attr_id_generator;
 
     let items = iter::once(ast::mk::item_extern_crate(sp, *sym::mutest_runtime, None))
@@ -166,14 +144,15 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_lo
                 .collect::<ThinVec<_>>();
             let mutations_expr = ast::mk::expr_slice(sp, elements);
 
-            // SubstMap { ... }
-            let subst_map_fields = subst_locs.iter()
-                .map(|subst_loc| {
-                    // $subst_loc_id: Some(SubstMeta { mutation: &crate::mutest_generated::mutations::$mut_id })
-                    let ident = Ident::new(subst_loc.into_subst_loc_id().into_symbol(), sp);
+            let subst_map_entries = subst_locs.iter().enumerate()
+                .flat_map(|(subst_loc_idx, subst_loc)| {
+                    // ($subst_loc_idx, SubstMeta { mutation: &crate::mutest_generated::mutations::$mut_id })
                     let mutation = mutant.mutations.iter().find(|m| m.substs.iter().any(|s| s.location == *subst_loc));
-                    let expr = match mutation {
+                    match mutation {
                         Some(mutation) => {
+                            let subst_loc_idx_expr = ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&subst_loc_idx.to_string()), None);
+
+                            // SubstMeta { mutation: &crate::mutest_generated::mutations::$mut_id }
                             let subst_meta_struct_expr = ast::mk::expr_struct(sp, ast::mk::path_local(path::SubstMeta(sp)), thin_vec![
                                 ast::mk::expr_struct_field(sp, Ident::new(*sym::mutation, sp), {
                                     let mutation_path = ast::mk::pathx(sp,
@@ -184,14 +163,20 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_lo
                                 }),
                             ]);
 
-                            ast::mk::expr_call_path(sp, path::Some(sp), thin_vec![subst_meta_struct_expr])
+                            let subst_map_entry_expr = ast::mk::expr_tuple(sp, thin_vec![
+                                subst_loc_idx_expr,
+                                subst_meta_struct_expr,
+                            ]);
+
+                            Some(subst_map_entry_expr)
                         },
-                        None => ast::mk::expr_path(path::None(sp)),
-                    };
-                    ast::mk::expr_struct_field(sp, ident, expr)
+                        None => None,
+                    }
                 })
                 .collect::<ThinVec<_>>();
-            let subst_map_expr = ast::mk::expr_ref(sp, ast::mk::expr_struct(sp, path::SubstMap(sp), subst_map_fields));
+            let subst_map_expr = ast::mk::expr_ref(sp, ast::mk::expr_call_path(sp, ast::mk::path_local(path::subst_map_array(sp)), thin_vec![
+                ast::mk::expr_slice(sp, subst_map_entries),
+            ]));
 
             // &MutantMeta { ... }
             ast::mk::expr_ref(sp, bake_mutant(mutant, sp, sess, mutations_expr, subst_map_expr))
@@ -251,6 +236,7 @@ struct HarnessGenerator<'tcx, 'trg, 'm> {
     sess: &'tcx Session,
     unsafe_targeting: UnsafeTargeting,
     mutants: &'m [Mutant<'trg, 'm>],
+    subst_locs: &'m [SubstLoc],
     def_site: Span,
 }
 
@@ -263,7 +249,6 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
         let def = self.def_site;
 
         let mutations = FxHashSet::from_iter(self.mutants.iter().flat_map(|m| &m.mutations)).into_iter().collect::<Vec<_>>();
-        let subst_locs = FxHashSet::from_iter(self.mutants.iter().flat_map(|m| m.iter_substitutions().map(|s| s.location))).into_iter().collect::<Vec<_>>();
 
         // #![feature(test)]
         let feature_test_attr = ast::mk::attr_inner(g, def,
@@ -303,10 +288,9 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
             thin_vec![
                 extern_crate_test,
                 extern_crate_mutest_runtime,
-                mk_subst_map_struct(g, def, &subst_locs),
-                mk_subst_map_trait_impl(def, &subst_locs),
+                mk_subst_map_ty_alias(def, &self.subst_locs),
                 mk_mutations_mod(def, self.sess, &mutations, self.unsafe_targeting),
-                mk_mutants_slice_const(def, self.sess, self.mutants, &subst_locs),
+                mk_mutants_slice_const(def, self.sess, self.mutants, &self.subst_locs),
                 mk_active_mutant_handle_static(def),
                 mk_harness_fn(def),
             ],
@@ -316,7 +300,7 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
     }
 }
 
-pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate: &mut ast::Crate, unsafe_targeting: UnsafeTargeting) {
+pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], subst_locs: &[SubstLoc], krate: &mut ast::Crate, unsafe_targeting: UnsafeTargeting) {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
         DUMMY_SP,
@@ -324,6 +308,6 @@ pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &Vec<Mutant>, krate: &
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut generator = HarnessGenerator { sess: tcx.sess, unsafe_targeting, mutants, def_site };
+    let mut generator = HarnessGenerator { sess: tcx.sess, unsafe_targeting, mutants, subst_locs, def_site };
     generator.visit_crate(krate);
 }

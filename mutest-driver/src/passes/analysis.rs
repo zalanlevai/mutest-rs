@@ -476,7 +476,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let t_codegen_start = Instant::now();
 
-                mutest_emit::codegen::substitution::write_substitutions(tcx, &mutants, &mut generated_crate_ast);
+                let subst_locs = mutest_emit::codegen::substitution::write_substitutions(tcx, &mutants, &mut generated_crate_ast);
 
                 // HACK: See below.
                 mutest_emit::codegen::expansion::insert_generated_code_crate_refs(tcx, &mut generated_crate_ast);
@@ -492,7 +492,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 mutest_emit::codegen::substitution::resolve_syntax_ambiguities(tcx, &mut generated_crate_ast);
 
-                mutest_emit::codegen::harness::generate_harness(tcx, &mutants, &mut generated_crate_ast, opts.unsafe_targeting);
+                mutest_emit::codegen::harness::generate_harness(tcx, &mutants, &subst_locs, &mut generated_crate_ast, opts.unsafe_targeting);
 
                 codegen_duration = t_codegen_start.elapsed();
 

@@ -689,7 +689,7 @@ pub mod mk {
         self::block_check_mode(sp, stmts, ast::BlockCheckMode::Default)
     }
 
-    pub fn block_unsafe(sp: Span, stmts: ThinVec<ast::Stmt>, unsafe_source: ast::UnsafeSource) -> P<ast::Block> {
+    pub fn block_unsafe(sp: Span, unsafe_source: ast::UnsafeSource, stmts: ThinVec<ast::Stmt>) -> P<ast::Block> {
         self::block_check_mode(sp, stmts, ast::BlockCheckMode::Unsafe(unsafe_source))
     }
 
