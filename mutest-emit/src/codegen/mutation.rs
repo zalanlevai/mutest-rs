@@ -646,8 +646,8 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
                 // #[test] functions
                 && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test) || attr.has_name(sym::rustc_test_marker))
                 && !test_def_ids.contains(&local_def_id)
-                // functions in #[cfg(test)] module
-                && !tests::is_in_cfg_test(tcx, hir_id)
+                // functions marked #[cfg(test)], or in #[cfg(test)] module
+                && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
                 // #[mutest::skip] functions
                 && !tool_attr::skip(tcx.hir().attrs(hir_id))
         })
@@ -723,8 +723,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
             let hir_id = tcx.local_def_id_to_hir_id(caller_def_id);
             let skip = false
-                // function in #[cfg(test)] module
-                || tests::is_in_cfg_test(tcx, hir_id)
+                // function marked #[cfg(test)], or in #[cfg(test)] module
+                || tests::is_marked_or_in_cfg_test(tcx, hir_id)
                 // #[mutest::skip] function
                 || tool_attr::skip(tcx.hir().attrs(hir_id));
 

@@ -120,8 +120,8 @@ pub fn collect_tests(krate: &ast::Crate, def_res: &ast_lowering::DefResolutions)
     collector.tests
 }
 
-pub fn is_in_cfg_test<'tcx>(tcx: TyCtxt<'tcx>, id: hir::HirId) -> bool {
-    tcx.hir().parent_id_iter(id).any(|parent_id| {
+pub fn is_marked_or_in_cfg_test<'tcx>(tcx: TyCtxt<'tcx>, id: hir::HirId) -> bool {
+    iter::once(id).chain(tcx.hir().parent_id_iter(id)).any(|parent_id| {
         tcx.hir().attrs(parent_id).iter().any(|attr| {
             ast::inspect::is_list_attr_with_ident(attr, None, sym::cfg, sym::test)
         })
