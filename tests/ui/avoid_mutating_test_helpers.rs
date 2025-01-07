@@ -18,9 +18,20 @@ mod tests {
 
     #[test]
     fn test1() {
+        fn test1_impl() {}
+        test1_impl();
+
         help_test();
         inner::help_test_inner();
         super::help_test_standalone();
         super::help_program();
     }
+}
+
+#[test]
+fn test_standalone() {
+    fn test_standalone_impl() {}
+    test_standalone_impl();
+
+    help_program();
 }

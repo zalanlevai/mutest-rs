@@ -643,10 +643,10 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
                 && !tcx.is_const_fn(def_id)
                 // fn;
                 && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
-                // #[test] functions
-                && !tcx.hir().attrs(hir_id).iter().any(|attr| attr.has_name(sym::test) || attr.has_name(sym::rustc_test_marker))
+                // #[test] functions, or inner functions
                 && !test_def_ids.contains(&local_def_id)
-                // functions marked #[cfg(test)], or in #[cfg(test)] module
+                && !res::parent_iter(tcx, def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                // #[cfg(test)] functions, or functions in #[cfg(test)] module
                 && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
                 // #[mutest::skip] functions
                 && !tool_attr::skip(tcx.hir().attrs(hir_id))
@@ -680,6 +680,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     /// }
     /// ```
     type CallPaths<'tst> = FxHashMap<&'tst Test, Option<UnsafeSource>>;
+
+    let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
 
     let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
@@ -723,7 +725,9 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
             let hir_id = tcx.local_def_id_to_hir_id(caller_def_id);
             let skip = false
-                // function marked #[cfg(test)], or in #[cfg(test)] module
+                // Inner function of #[test] function
+                || res::parent_iter(tcx, caller_def_id.to_def_id()).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                // #[cfg(test)] function, or function in #[cfg(test)] module
                 || tests::is_marked_or_in_cfg_test(tcx, hir_id)
                 // #[mutest::skip] function
                 || tool_attr::skip(tcx.hir().attrs(hir_id));
