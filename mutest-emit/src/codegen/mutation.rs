@@ -1049,7 +1049,6 @@ fn compatible_mutant<'trg, 'm>(
 
 /// Pick a compatible mutant for the mutation by randomly picking one from all compatible mutants.
 /// If no compatible mutants are available, then the function returns `None`.
-#[cfg(feature = "random")]
 fn choose_random_mutant<'trg, 'm, 'a>(
     mutation: &Mut<'trg, 'm>,
     mutants: &'a mut [Mutant<'trg, 'm>],
@@ -1074,8 +1073,6 @@ fn choose_random_mutant<'trg, 'm, 'a>(
 pub enum GreedyMutationBatchingOrderingHeuristic {
     ConflictsAsc,
     ConflictsDesc,
-
-    #[cfg(feature = "random")]
     Random,
 }
 
@@ -1083,8 +1080,8 @@ pub fn batch_mutations_greedy<'trg, 'm>(
     mut mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
     ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>,
-    #[cfg(feature = "random")] epsilon: Option<f64>,
-    #[cfg(feature = "random")] mut rng: Option<&mut impl rand::Rng>,
+    epsilon: Option<f64>,
+    mut rng: Option<&mut impl rand::Rng>,
     mutant_max_mutations_count: usize,
 ) -> Vec<Mutant<'trg, 'm>> {
     use GreedyMutationBatchingOrderingHeuristic::*;
@@ -1109,7 +1106,6 @@ pub fn batch_mutations_greedy<'trg, 'm>(
             }
         }
 
-        #[cfg(feature = "random")]
         Some(Random) => {
             use rand::prelude::*;
             let Some(ref mut rng) = rng else { panic!("random ordering requested but rng not provided") };
@@ -1129,7 +1125,6 @@ pub fn batch_mutations_greedy<'trg, 'm>(
             if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
 
             // Attempt to make a random choice if the optional epsilon parameter is used.
-            #[cfg(feature = "random")]
             if let Some(epsilon) = epsilon {
                 let Some(ref mut rng) = rng else { panic!("epsilon random choice requested but rng not provided") };
 
@@ -1157,7 +1152,6 @@ pub fn batch_mutations_greedy<'trg, 'm>(
     mutants
 }
 
-#[cfg(feature = "random")]
 pub fn batch_mutations_random<'trg, 'm>(
     mutations: Vec<Mut<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
@@ -1182,7 +1176,6 @@ pub fn batch_mutations_random<'trg, 'm>(
     mutants
 }
 
-#[cfg(feature = "random")]
 pub fn optimize_batches_simulated_annealing<'trg, 'm>(
     mutants: &mut Vec<Mutant<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,

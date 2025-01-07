@@ -227,39 +227,32 @@ pub fn main() {
             match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
                 None | Some(NONE) => config::MutationBatchingAlgorithm::None,
 
+                Some(RANDOM) => config::MutationBatchingAlgorithm::Random,
+
                 Some(GREEDY) => {
                     let ordering_heuristic = {
                         use mutest_driver_cli::mutant_batch_greedy_ordering_heuristic::*;
 
                         match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
                             None | Some(NONE) => None,
+                            Some(RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
                             Some(CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
                             Some(REVERSE_CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
-
-                            #[cfg(feature = "random")]
-                            Some(RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
-
                             _ => unreachable!(),
                         }
                     };
 
-                    #[cfg(feature = "random")]
                     let epsilon = mutest_arg_matches.get_one::<f64>("mutant-batch-greedy-epsilon").copied();
 
-                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, #[cfg(feature = "random")] epsilon }
+                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon }
                 }
 
-                #[cfg(feature = "random")]
-                Some(RANDOM) => config::MutationBatchingAlgorithm::Random,
-
-                #[cfg(feature = "random")]
                 Some(SIMULATED_ANNEALING) => config::MutationBatchingAlgorithm::SimulatedAnnealing,
 
                 _ => unreachable!(),
             }
         };
 
-        #[cfg(feature = "random")]
         let mutation_batching_randomness = {
             use rand_seeder::Seeder;
 
@@ -307,7 +300,7 @@ pub fn main() {
                 call_graph_depth,
                 mutation_depth,
                 mutation_batching_algorithm,
-                #[cfg(feature = "random")] mutation_batching_randomness,
+                mutation_batching_randomness,
                 mutant_max_mutations_count,
 
                 verify_opts,

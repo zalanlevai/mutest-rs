@@ -7,7 +7,3 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["cargo"] }
-
-[features]
-default = ["random"]
-random = []

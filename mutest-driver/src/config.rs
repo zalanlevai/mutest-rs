@@ -42,23 +42,17 @@ pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
 
 pub enum MutationBatchingAlgorithm {
     None,
-    Greedy { ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>, #[cfg(feature = "random")] epsilon: Option<f64> },
-
-    #[cfg(feature = "random")]
     Random,
-    #[cfg(feature = "random")]
+    Greedy { ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>, epsilon: Option<f64> },
     SimulatedAnnealing,
 }
 
-#[cfg(feature = "random")]
 pub type RandomSeed = [u8; 32];
 
-#[cfg(feature = "random")]
 pub struct MutationBatchingRandomness {
     pub seed: Option<RandomSeed>,
 }
 
-#[cfg(feature = "random")]
 impl MutationBatchingRandomness {
     pub fn rng(&self) -> impl rand::Rng {
         use rand::prelude::*;
@@ -84,7 +78,7 @@ pub struct Options<'op, 'm> {
     pub call_graph_depth: usize,
     pub mutation_depth: usize,
     pub mutation_batching_algorithm: MutationBatchingAlgorithm,
-    #[cfg(feature = "random")] pub mutation_batching_randomness: MutationBatchingRandomness,
+    pub mutation_batching_randomness: MutationBatchingRandomness,
     pub mutant_max_mutations_count: usize,
 
     pub verify_opts: VerifyOptions,

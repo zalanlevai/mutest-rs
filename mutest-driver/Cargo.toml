@@ -16,9 +16,5 @@ mutest-runtime = { path = "../mutest-runtime" }
 
 clap = { version = "4", features = ["cargo"] }
 
-rand = { version = "0.8", optional = true }
-rand_seeder = { version = "0.2", optional = true }
-
-[features]
-default = ["random"]
-random = ["mutest-driver-cli/random", "mutest-emit/random", "dep:rand", "dep:rand_seeder"]
+rand = "0.8"
+rand_seeder = "0.2"

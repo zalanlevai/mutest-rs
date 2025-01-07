@@ -52,8 +52,8 @@ pub mod mutation_operators {
 pub mod mutant_batch_algorithm {
     crate::exclusive_opts! { possible_values where
         GREEDY = "greedy";
-        #[cfg(feature = "random")] RANDOM = "random";
-        #[cfg(feature = "random")] SIMULATED_ANNEALING = "simulated-annealing";
+        RANDOM = "random";
+        SIMULATED_ANNEALING = "simulated-annealing";
         NONE = "none";
     }
 }
@@ -62,7 +62,7 @@ pub mod mutant_batch_greedy_ordering_heuristic {
     crate::exclusive_opts! { possible_values where
         CONFLICTS = "conflicts";
         REVERSE_CONFLICTS = "reverse-conflicts";
-        #[cfg(feature = "random")] RANDOM = "random";
+        RANDOM = "random";
         NONE = "none";
     }
 }
@@ -125,7 +125,9 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE).display_order(199))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(199))
+        .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching.").display_order(199))
         .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(mutant_batch_greedy_ordering_heuristic::possible_values()).default_value(mutant_batch_greedy_ordering_heuristic::REVERSE_CONFLICTS).display_order(199))
+        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)).display_order(199))
         // Printing-related Arguments
         .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
         .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
@@ -140,11 +142,6 @@ pub fn command() -> clap::Command {
         //        of the help flags.
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
         .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true));
-
-    #[cfg(feature = "random")]
-    let cmd = cmd
-        .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching.").display_order(199))
-        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)).display_order(199));
 
     cmd
 }

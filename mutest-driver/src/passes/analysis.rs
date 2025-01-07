@@ -408,10 +408,13 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     config::MutationBatchingAlgorithm::None
                     => mutest_emit::codegen::mutation::batch_mutations_dummy(mutations),
 
-                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, #[cfg(feature = "random")] epsilon } => {
-                        #[cfg(feature = "random")]
+                    config::MutationBatchingAlgorithm::Random => {
                         let mut rng = opts.mutation_batching_randomness.rng();
-                        #[cfg(feature = "random")]
+                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng)
+                    }
+
+                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon } => {
+                        let mut rng = opts.mutation_batching_randomness.rng();
                         if let Some(v) = epsilon {
                             if v < 0_f64 || v > 1_f64 { panic!("epsilon must be a valid probability"); }
                         }
@@ -419,19 +422,12 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                             mutations,
                             &mutation_conflict_graph,
                             ordering_heuristic,
-                            #[cfg(feature = "random")] epsilon,
-                            #[cfg(feature = "random")] Some(&mut rng),
+                            epsilon,
+                            Some(&mut rng),
                             opts.mutant_max_mutations_count,
                         )
                     }
 
-                    #[cfg(feature = "random")]
-                    config::MutationBatchingAlgorithm::Random => {
-                        let mut rng = opts.mutation_batching_randomness.rng();
-                        mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng)
-                    }
-
-                    #[cfg(feature = "random")]
                     config::MutationBatchingAlgorithm::SimulatedAnnealing => {
                         let mut mutants = mutest_emit::codegen::mutation::batch_mutations_dummy(mutations);
 
