@@ -15,6 +15,7 @@ use crate::passes::{Flow, base_compiler_config};
 pub struct AnalysisPassResult {
     pub duration: Duration,
     pub target_analysis_duration: Duration,
+    pub sanitize_macro_expns_duration: Duration,
     pub mutation_analysis_duration: Duration,
     pub mutation_batching_duration: Duration,
     pub codegen_duration: Duration,
@@ -256,6 +257,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let t_start = Instant::now();
             let mut target_analysis_duration = Duration::ZERO;
+            let mut sanitize_macro_expns_duration = Duration::ZERO;
             let mut mutation_analysis_duration = Duration::ZERO;
             let mut mutation_batching_duration = Duration::ZERO;
             let mut codegen_duration = Duration::ZERO;
@@ -326,7 +328,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 if opts.sanitize_macro_expns {
+                    let t_sanitize_macro_expns_start = Instant::now();
                     mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &crate_res, &def_res, &body_res, &mut generated_crate_ast);
+                    sanitize_macro_expns_duration = t_sanitize_macro_expns_start.elapsed();
                 }
 
                 let t_mutation_analysis_start = Instant::now();
@@ -518,6 +522,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 Flow::Continue(AnalysisPassResult {
                     duration: t_start.elapsed(),
                     target_analysis_duration,
+                    sanitize_macro_expns_duration,
                     mutation_analysis_duration,
                     mutation_batching_duration,
                     codegen_duration,

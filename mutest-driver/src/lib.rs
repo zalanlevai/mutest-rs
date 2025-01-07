@@ -56,11 +56,12 @@ pub fn run(mut config: Config) -> CompilerResult<()> {
         println!("finished in {total:.2?}",
             total = t_start.elapsed(),
         );
-        println!("analysis took {analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?})",
+        println!("analysis took {analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?})",
             analysis = analysis_pass.duration,
             targets = analysis_pass.target_analysis_duration,
             mutations = analysis_pass.mutation_analysis_duration,
             batching = analysis_pass.mutation_batching_duration,
+            hygiene = analysis_pass.sanitize_macro_expns_duration,
             codegen = analysis_pass.codegen_duration,
         );
         println!("compilation took {compilation:.2?}",
