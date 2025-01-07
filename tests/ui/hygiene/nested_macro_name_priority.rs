@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! It seems that currently, whether intentionally or otherwise,
 //! names in a nested macro invocation can be introduced without conflict,

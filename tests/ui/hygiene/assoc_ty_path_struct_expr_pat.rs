@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 #![feature(decl_macro)]
 

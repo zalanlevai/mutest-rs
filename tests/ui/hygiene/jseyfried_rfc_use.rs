@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! This test is based on the linked RFC text on macros 2.0 hygiene in the
 //! initial implementation PR at https://github.com/rust-lang/rust/pull/40847,

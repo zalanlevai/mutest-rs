@@ -1,7 +1,6 @@
 //@ build
 //@ stderr: empty
 //@ aux-build: dummy_crate.rs
-//@ mutest-flags: --Zsanitize-macro-expns
 
 #![feature(decl_macro)]
 

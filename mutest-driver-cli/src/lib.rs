@@ -134,7 +134,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(graph_format::possible_values()).default_value(graph_format::SIMPLE).display_order(102))
         // Experimental Flags
         .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
-        .arg(clap::arg!(--"Zsanitize-macro-expns" "Sanitize the identifiers and paths in the expanded output of bang-style macro invocations.").display_order(500))
+        .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended.").display_order(500))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
         //        of the help flags.

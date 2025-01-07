@@ -1,10 +1,10 @@
 warning: replacing unrepresentable generic type argument `exhaustiveness::pattern::Pattern` with `_`
-  --> tests/ui/hygiene/use_infer_ty_if_implicit_generic_arg_is_unreachable.rs:58:47
+  --> tests/ui/hygiene/use_infer_ty_if_implicit_generic_arg_is_unreachable.rs:57:47
    |
-58 |                 let _compiler = Compiler::new(Arena::new());
+57 |                 let _compiler = Compiler::new(Arena::new());
    |                                               ^^^^^ encountered definition `exhaustiveness::pattern::Pattern` with no visible path
 ...
-62 |         m!();
+61 |         m!();
    |         ---- in this macro invocation
    |
    = note: this warning originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)

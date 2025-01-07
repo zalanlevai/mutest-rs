@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! The following paths get normalized into paths that point to their trait items,
 //! which means that the generic arguments in the original path segments will be discarded.

@@ -1,5 +1,6 @@
 //@ fail
 //@ stderr
+//@ mutest-flags: --Zno-sanitize-macro-expns
 
 #![feature(decl_macro)]
 

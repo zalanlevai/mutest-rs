@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! This test ensures that we write out enum generics on their variants
 //! for paths pointing to enum variants.

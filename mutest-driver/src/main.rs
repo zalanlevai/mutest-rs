@@ -291,7 +291,7 @@ pub fn main() {
             verify_opts
         };
 
-        let sanitize_macro_expns = mutest_arg_matches.get_flag("Zsanitize-macro-expns");
+        let sanitize_macro_expns = !mutest_arg_matches.get_flag("Zno-sanitize-macro-expns");
 
         let config = Config {
             compiler_config,

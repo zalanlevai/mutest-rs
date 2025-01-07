@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! This test shows that even for non-qualified associated item paths to inherent impl items,
 //! it is sometimes necessary to use the inferred self type from the type system.

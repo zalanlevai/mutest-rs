@@ -3,7 +3,6 @@
 //@ aux-build: dummy_crate.rs
 //@ aux-build: dummy_crate_reexport.rs
 //@ rustc-flags: --extern dummy_crate_reexport
-//@ mutest-flags: --Zsanitize-macro-expns
 
 #![feature(decl_macro)]
 

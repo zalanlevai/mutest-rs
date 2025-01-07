@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! This test shows that when qualifying paths to trait assoc items,
 //! it is sometimes necessary to use the inferred trait generics from the type system.

@@ -1,6 +1,5 @@
 //@ build
 //@ stderr
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! This test shows that implicit generic args are not always representable,
 //! because there is no requirement for the type to be visible

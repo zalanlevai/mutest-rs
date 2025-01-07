@@ -1,5 +1,6 @@
 //@ build
 //@ stderr: empty
+//@ mutest-flags: --Zno-sanitize-macro-expns
 
 mod def {
     mod inner {

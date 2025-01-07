@@ -1,6 +1,5 @@
 //@ build
 //@ stderr: empty
-//@ mutest-flags: --Zsanitize-macro-expns
 
 //! The test macro `nested_macro_to_flatten_clousre` relies on macro hygiene
 //! to get a different closure parameter ident on each recursion level
