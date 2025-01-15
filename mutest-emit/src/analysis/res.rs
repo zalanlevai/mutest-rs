@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use std::num::NonZeroUsize;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::span_bug;
@@ -538,7 +539,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     Ok(def_path)
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span) -> SmallVec<[DefPath<'tcx>; 1]> {
+pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span, limit: Option<NonZeroUsize>) -> SmallVec<[DefPath<'tcx>; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
@@ -643,6 +644,10 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
                     let mut path = container_def_path.clone();
                     path.segments.push(DefPathSegment { def_id, ident: child.ident, reexport: child.reexport });
                     paths.push(path);
+
+                    if let Some(limit) = limit && paths.len() >= limit.get() {
+                        return paths;
+                    }
                 }
 
                 match child.res {
@@ -663,6 +668,10 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
     }
 
     paths
+}
+
+pub fn visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span) -> Option<DefPath<'tcx>> {
+    visible_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, span, NonZeroUsize::new(1)).into_iter().next()
 }
 
 macro interned {

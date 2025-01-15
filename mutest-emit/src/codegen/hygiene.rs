@@ -391,8 +391,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        let mut visible_paths = res::visible_def_paths(self.tcx, self.crate_res, def_id, self.current_scope, ignore_reexport, span);
-        if let Some(visible_path) = visible_paths.drain(..).next() { return visible_path; }
+        if let Some(visible_path) = res::visible_def_path(self.tcx, self.crate_res, def_id, self.current_scope, ignore_reexport, span) {
+            return visible_path;
+        }
 
         // Ensure that the def is in the current scope, otherwise it really is not visible from here.
         let Some(current_scope) = self.current_scope else {
