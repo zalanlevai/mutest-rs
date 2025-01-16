@@ -26,11 +26,15 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
     let mut unsafe_targets_count = 0;
     let mut tainted_targets_count = 0;
 
-    let mut targets_count = 0;
+    // Targets are printed in source span order.
+    let mut targets_in_print_order = targets
+        .map(|target| (tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)), target))
+        .collect::<Vec<_>>();
+    targets_in_print_order.sort_unstable_by_key(|(target_span, _)| *target_span);
 
-    for target in targets {
-        targets_count += 1;
+    let targets_count = targets_in_print_order.len();
 
+    for (target_span, target) in targets_in_print_order {
         let mut unsafe_marker = "";
         match (target.unsafety.is_unsafe(unsafe_targeting), target.unsafety) {
             (true, Unsafety::Tainted(_)) => {
@@ -48,17 +52,25 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
         println!("tests -({distance})-> {unsafe_marker}{def_path} at {span:#?}",
             distance = target.distance,
             def_path = tcx.def_path_str(target.def_id.to_def_id()),
-            span = tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)),
+            span = target_span,
         );
 
-        for (&test, entry_point) in &target.reachable_from {
+        // Entry points are printed in order of distance first, within that by lexical order of their definition path.
+        let mut entry_points_in_print_order = target.reachable_from.iter()
+            .map(|(&test, entry_point)| (test.path_str(), test, entry_point))
+            .collect::<Vec<_>>();
+        entry_points_in_print_order.sort_unstable_by(|(test_a_path_str, _, entry_point_a), (test_b_path_str, _, entry_point_b)| {
+            Ord::cmp(&entry_point_a.distance, &entry_point_b.distance).then(Ord::cmp(test_a_path_str, test_b_path_str))
+        });
+
+        for (test_path_str, test, entry_point) in entry_points_in_print_order {
             println!("  ({distance}) {tainted_marker}{test}",
                 distance = entry_point.distance,
                 tainted_marker = match target.is_tainted(test, unsafe_targeting) {
                     true => "[tainted] ",
                     false => "",
                 },
-                test = test.path_str(),
+                test = test_path_str,
             );
         }
 
@@ -159,14 +171,22 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
                 display_location = mutation.display_location(tcx.sess),
             );
 
-            for (&test, entry_point) in &mutation.target.reachable_from {
+            // Entry points are printed in order of distance first, within that by lexical order of their definition path.
+            let mut entry_points_in_print_order = mutation.target.reachable_from.iter()
+                .map(|(&test, entry_point)| (test.path_str(), test, entry_point))
+                .collect::<Vec<_>>();
+            entry_points_in_print_order.sort_unstable_by(|(test_a_path_str, _, entry_point_a), (test_b_path_str, _, entry_point_b)| {
+                Ord::cmp(&entry_point_a.distance, &entry_point_b.distance).then(Ord::cmp(test_a_path_str, test_b_path_str))
+            });
+
+            for (test_path_str, test, entry_point) in entry_points_in_print_order {
                 println!("    <-({distance})- {tainted_marker}{test}",
                     distance = entry_point.distance,
                     tainted_marker = match mutation.target.is_tainted(test, unsafe_targeting) {
                         true => "(tainted) ",
                         false => "",
                     },
-                    test = test.path_str(),
+                    test = test_path_str,
                 );
             }
         }
