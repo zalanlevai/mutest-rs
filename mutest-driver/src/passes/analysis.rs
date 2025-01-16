@@ -145,7 +145,11 @@ fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: 
             _ => println!("{} mutations", mutant.mutations.len()),
         };
 
-        for mutation in &mutant.mutations {
+        // Mutations are printed in assigned ID order.
+        let mut mutations_in_print_order = mutant.mutations.iter().collect::<Vec<_>>();
+        mutations_in_print_order.sort_unstable_by_key(|mutation| mutation.id.index());
+
+        for mutation in mutations_in_print_order {
             let mut unsafe_marker = "";
             match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
                 (true, Unsafety::Tainted(_)) => {
