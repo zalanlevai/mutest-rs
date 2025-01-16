@@ -17,6 +17,7 @@ pub struct ConflictGraphOptions {
 
 pub struct PrintOptions {
     pub print_headers: bool,
+    pub tests: Option<()>,
     pub mutation_targets: Option<()>,
     pub conflict_graph: Option<ConflictGraphOptions>,
     pub mutants: Option<()>,
@@ -27,6 +28,7 @@ impl PrintOptions {
     pub fn is_empty(&self) -> bool {
         true
             && self.mutation_targets.is_none()
+            && self.tests.is_none()
             && self.conflict_graph.is_none()
             && self.mutants.is_none()
             && self.code.is_none()

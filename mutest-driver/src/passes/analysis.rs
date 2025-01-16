@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use itertools::Itertools;
+use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
 use rustc_hash::FxHashMap;
 use rustc_interface::run_compiler;
@@ -20,6 +21,35 @@ pub struct AnalysisPassResult {
     pub mutation_batching_duration: Duration,
     pub codegen_duration: Duration,
     pub generated_crate_code: String,
+}
+
+fn print_tests(tests: &[Test]) {
+    let mut ignored_tests_count = 0;
+
+    let mut tests_in_print_order = tests.iter()
+        .map(|test| (test.path_str(), test))
+        .collect::<Vec<_>>();
+    tests_in_print_order.sort_unstable_by(|(test_a_path_str, _), (test_b_path_str, _)| Ord::cmp(test_a_path_str, test_b_path_str));
+
+    let tests_count = tests_in_print_order.len();
+
+    for (test_path_str, test) in tests_in_print_order {
+        let mut marker = "";
+        if test.ignore {
+            marker = " [ignored]";
+            ignored_tests_count += 1;
+        }
+
+        println!("test {test}{marker}",
+            test = test_path_str,
+        );
+    }
+    println!();
+
+    println!("tests: {total} total; {ignored} ignored",
+        total = tests_count,
+        ignored = ignored_tests_count,
+    );
 }
 
 fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'trg Target<'trg>>, unsafe_targeting: UnsafeTargeting) {
@@ -310,6 +340,20 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 };
 
                 let tests = mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res);
+
+                if let Some(_) = opts.print_opts.tests.take() {
+                    if opts.print_opts.print_headers { println!("\n@@@ tests @@@\n"); }
+                    print_tests(&tests);
+                    if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?}",
+                                total = t_start.elapsed(),
+                            );
+                        }
+                        return Flow::Break;
+                    }
+                    if opts.verbosity >= 1 { println!(); }
+                }
 
                 tcx.analysis(())?;
 

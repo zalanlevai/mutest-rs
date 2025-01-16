@@ -141,6 +141,7 @@ pub fn main() {
 
             let mut print_opts = config::PrintOptions {
                 print_headers: print_names.len() > 1,
+                tests: None,
                 mutation_targets: None,
                 conflict_graph: None,
                 mutants: None,
@@ -149,6 +150,7 @@ pub fn main() {
 
             for print_name in print_names {
                 match print_name {
+                    TESTS => print_opts.tests = Some(()),
                     TARGETS => print_opts.mutation_targets = Some(()),
                     CONFLICT_GRAPH | COMPATIBILITY_GRAPH => {
                         use mutest_driver_cli::graph_format::*;

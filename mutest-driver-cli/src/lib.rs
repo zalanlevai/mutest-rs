@@ -69,6 +69,7 @@ pub mod mutant_batch_greedy_ordering_heuristic {
 
 pub mod print {
     crate::opts! { ALL, possible_values where
+        TESTS = "tests"; ["Print list of test cases."]
         TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
         CONFLICT_GRAPH = "conflict-graph"; ["Print mutation conflict graph."]
         COMPATIBILITY_GRAPH = "compatibility-graph"; ["Print mutation compatibility graph (i.e. the complement graph of the conflict graph)."]
