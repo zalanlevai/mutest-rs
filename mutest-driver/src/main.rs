@@ -1,4 +1,5 @@
 #![feature(decl_macro)]
+#![feature(let_chains)]
 
 #![feature(rustc_private)]
 extern crate rustc_driver;
@@ -16,6 +17,7 @@ use mutest_emit::analysis::hir::Unsafety;
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
+use rustc_session::EarlyDiagCtxt;
 
 struct DefaultCallbacks;
 impl rustc_driver::Callbacks for DefaultCallbacks {}
@@ -120,6 +122,8 @@ pub fn main() {
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let compiler_config = mutest_driver::passes::parse_compiler_args(&args)?.expect("no compiler configuration was generated");
 
+        let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
+
         let mutest_search_path = env::var("MUTEST_SEARCH_PATH").ok().map(PathBuf::from)
             .or_else(|| env::current_dir().ok().map(|v| v.join("target").join("debug")))
             .expect("specify MUTEST_SEARCH_PATH environment variable");
@@ -216,11 +220,16 @@ pub fn main() {
                 .collect::<Vec<_>>()
         };
 
-        let mut call_graph_depth = *mutest_arg_matches.get_one::<usize>("call-graph-depth").unwrap();
+        let mut call_graph_depth = mutest_arg_matches.get_one::<usize>("call-graph-depth").copied();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
-        if call_graph_depth < mutation_depth {
-            call_graph_depth = mutation_depth;
+        if let Some(call_graph_depth_value) = call_graph_depth && call_graph_depth_value < mutation_depth {
+            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph depth argument ignored as mutation depth exceeds it");
+            diagnostic.note(format!("mutation depth is set to {mutation_depth}"));
+            diagnostic.note(format!("call graph depth was explicitly set to {call_graph_depth_value}, but will be ignored"));
+            diagnostic.emit();
+
+            call_graph_depth = None;
         }
 
         let mutation_batching_algorithm = {

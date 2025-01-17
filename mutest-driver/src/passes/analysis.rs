@@ -361,8 +361,18 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx, &tests).count();
 
+                let call_graph_depth = match opts.call_graph_depth {
+                    Some(call_graph_depth) => {
+                        if call_graph_depth < opts.mutation_depth {
+                            tcx.dcx().fatal("explicit call graph depth argument exceeds mutation depth");
+                        }
+                        call_graph_depth
+                    }
+                    None => opts.mutation_depth,
+                };
+
                 let t_target_analysis_start = Instant::now();
-                let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, opts.call_graph_depth);
+                let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
