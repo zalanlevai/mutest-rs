@@ -1,13 +1,13 @@
 #![feature(decl_macro)]
 
-macro opts(
-    $all:ident, $possible_values:ident where
+pub macro opts(
+    $all:ident, $possible_values_vis:vis $possible_values:ident where
     $($(#[$attr:meta])* $ident:ident = $name:expr; $([$help:expr])?)*
 ) {
     $($(#[$attr])* pub const $ident: &str = $name;)*
     pub const $all: &[&str] = &[$($(#[$attr])* $ident,)*];
 
-    pub(crate) fn $possible_values() -> Vec<clap::builder::PossibleValue> {
+    $possible_values_vis fn $possible_values() -> Vec<clap::builder::PossibleValue> {
         vec![
             clap::builder::PossibleValue::new("all"),
             $($(#[$attr])* clap::builder::PossibleValue::new($name)$(.help($help))?,)*
@@ -15,19 +15,19 @@ macro opts(
     }
 }
 
-macro exclusive_opts(
-    $possible_values:ident where
+pub macro exclusive_opts(
+    $possible_values_vis:vis $possible_values:ident where
     $($(#[$attr:meta])* $ident:ident = $name:expr; $([$help:expr])?)*
 ) {
     $($(#[$attr])* pub const $ident: &str = $name;)*
 
-    pub(crate) fn $possible_values() -> Vec<clap::builder::PossibleValue> {
+    $possible_values_vis fn $possible_values() -> Vec<clap::builder::PossibleValue> {
         vec![$($(#[$attr])* clap::builder::PossibleValue::new($name)$(.help($help))?,)*]
     }
 }
 
 pub mod mutation_operators {
-    crate::opts! { ALL, possible_values where
+    crate::opts! { ALL, pub(crate) possible_values where
         ARG_DEFAULT_SHADOW = "arg_default_shadow";
         BIT_OP_OR_AND_SWAP = "bit_op_or_and_swap";
         BIT_OP_OR_XOR_SWAP = "bit_op_or_xor_swap";
@@ -50,7 +50,7 @@ pub mod mutation_operators {
 }
 
 pub mod mutant_batch_algorithm {
-    crate::exclusive_opts! { possible_values where
+    crate::exclusive_opts! { pub(crate) possible_values where
         GREEDY = "greedy";
         RANDOM = "random";
         SIMULATED_ANNEALING = "simulated-annealing";
@@ -59,7 +59,7 @@ pub mod mutant_batch_algorithm {
 }
 
 pub mod mutant_batch_greedy_ordering_heuristic {
-    crate::exclusive_opts! { possible_values where
+    crate::exclusive_opts! { pub(crate) possible_values where
         CONFLICTS = "conflicts";
         REVERSE_CONFLICTS = "reverse-conflicts";
         RANDOM = "random";
@@ -68,7 +68,7 @@ pub mod mutant_batch_greedy_ordering_heuristic {
 }
 
 pub mod print {
-    crate::opts! { ALL, possible_values where
+    crate::opts! { ALL, pub(crate) possible_values where
         TESTS = "tests"; ["Print list of test cases."]
         TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
         CONFLICT_GRAPH = "conflict-graph"; ["Print mutation conflict graph."]
@@ -79,14 +79,14 @@ pub mod print {
 }
 
 pub mod graph_format {
-    crate::exclusive_opts! { possible_values where
+    crate::exclusive_opts! { pub(crate) possible_values where
         SIMPLE = "simple";
         GRAPHVIZ = "graphviz";
     }
 }
 
 pub mod verify {
-    crate::opts! { ALL, possible_values where
+    crate::opts! { ALL, pub(crate) possible_values where
         AST_LOWERING = "ast_lowering";
     }
 }
