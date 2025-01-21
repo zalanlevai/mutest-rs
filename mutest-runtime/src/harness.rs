@@ -3,12 +3,13 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
+use std::iter;
 use std::process;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::MutationSafety;
-use crate::config::{self, Options};
+use crate::config::{self, Options, PrintOptions};
 use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
@@ -192,18 +193,29 @@ fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: 
     *tests = parallelized_tests;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum MutationTestResult {
+    #[default]
     Undetected,
     Detected,
     TimedOut,
     Crashed,
 }
 
-fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResult>, Infallible> {
-    let mut results = HashMap::<u32, MutationTestResult>::with_capacity(mutant.mutations.len());
+#[derive(Default)]
+pub struct MutationTestResults {
+    result: MutationTestResult,
+    results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
+}
+
+fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
+    let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
-        results.insert(mutation.id, MutationTestResult::Undetected);
+        results.insert(mutation.id, MutationTestResults {
+            result: MutationTestResult::Undetected,
+            results_per_test: HashMap::with_capacity(mutation.reachable_from.len()),
+        });
     }
 
     tests.retain(|test| mutant.mutations.iter().any(|m| m.reachable_from.contains_key(test.desc.name.as_slice())));
@@ -220,29 +232,41 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
                 let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
                     .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
 
+                let mutation_results = results.get_mut(&mutation.id).expect("mutation result slot not allocated");
+
                 match test.result {
                     | test_runner::TestResult::Ignored
                     | test_runner::TestResult::Ok => {
+                        mutation_results.results_per_test.insert(test.desc.name.clone(), Some(MutationTestResult::Undetected));
                         return Ok(test_runner::Flow::Continue);
                     }
 
                     | test_runner::TestResult::Failed
                     | test_runner::TestResult::FailedMsg(_) => {
-                        results.insert(mutation.id, MutationTestResult::Detected);
+                        mutation_results.results_per_test.insert(test.desc.name.clone(), Some(MutationTestResult::Detected));
+                        mutation_results.result = MutationTestResult::Detected;
                     }
 
                     test_runner::TestResult::CrashedMsg(_) => {
-                        results.insert(mutation.id, MutationTestResult::Crashed);
+                        mutation_results.results_per_test.insert(test.desc.name.clone(), Some(MutationTestResult::Crashed));
+                        // Only mark mutation with crashed verdict if no other test has detected this mutation in a non-crashing way.
+                        if mutation_results.result != MutationTestResult::Detected {
+                            mutation_results.result = MutationTestResult::Crashed;
+                        }
                     }
 
                     test_runner::TestResult::TimedOut => {
-                        results.insert(mutation.id, MutationTestResult::TimedOut);
+                        mutation_results.results_per_test.insert(test.desc.name.clone(), Some(MutationTestResult::TimedOut));
+                        // Only mark mutation with timed-out verdict if no other test has detected this mutation without timing out.
+                        if mutation_results.result != MutationTestResult::Detected {
+                            mutation_results.result = MutationTestResult::TimedOut;
+                        }
                     }
                 }
 
                 remaining_tests.retain(|(_, test)| !mutation.reachable_from.contains_key(test.desc.name.as_slice()));
 
-                if results.iter().all(|(_, result)| !matches!(result, MutationTestResult::Undetected)) {
+                if results.iter().all(|(_, mutation_results)| !matches!(mutation_results.result, MutationTestResult::Undetected)) {
                     return Ok(test_runner::Flow::Stop);
                 }
             }
@@ -277,13 +301,54 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
     Ok(results)
 }
 
+pub struct MutationDetectionMatrix {
+    inner: Vec<MutationTestResults>,
+}
+
+impl MutationDetectionMatrix {
+    pub fn new(n_mutations: usize) -> Self {
+        let inner = iter::repeat_with(|| Default::default()).take(n_mutations).collect::<Vec<_>>();
+        Self { inner }
+    }
+
+    pub fn insert<I>(&mut self, mutation_id: u32, result: MutationTestResult, results_per_test: I)
+    where
+        I: Iterator<Item = (test::TestName, Option<MutationTestResult>)>,
+    {
+        self.inner[mutation_id as usize - 1].result = result;
+        self.inner[mutation_id as usize - 1].results_per_test.extend(results_per_test);
+    }
+
+    pub fn iter_mutation_ids(&self) -> impl Iterator<Item = u32> {
+        1..=(self.inner.len() as u32)
+    }
+
+    pub fn iter_detections<'a>(&'a self) -> impl Iterator<Item = (u32, MutationTestResult)> + 'a {
+        self.inner.iter().enumerate().map(|(mutation_idx, mutation_results)| {
+            let mutation_id = mutation_idx as u32 + 1;
+            (mutation_id, mutation_results.result)
+        })
+    }
+
+    pub fn iter_test_detections<'a>(&'a self, test_name: &'a test::TestName) -> impl Iterator<Item = (u32, Option<MutationTestResult>)> + 'a {
+        self.inner.iter().enumerate().map(|(mutation_idx, mutation_results)| {
+            let mutation_id = mutation_idx as u32 + 1;
+            let mutation_test_result = mutation_results.results_per_test.get(test_name).copied().flatten();
+            (mutation_id, mutation_test_result)
+        })
+    }
+}
+
 pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
     let opts = Options {
+        verbosity: args.iter().filter(|&arg| *arg == "-v").count() as u8,
+        report_timings: args.contains(&"--timings"),
+        print_opts: PrintOptions {
+            detection_matrix: args.contains(&"--print=detection-matrix").then_some(()),
+        },
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
         use_thread_pool: args.contains(&"--use-thread-pool"),
-        verbosity: args.iter().filter(|&arg| *arg == "-v").count() as u8,
-        report_timings: args.contains(&"--timings"),
     };
 
     let t_start = Instant::now();
@@ -315,7 +380,7 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
     }
     println!();
 
-    let tests = profiled_tests.into_iter()
+    let mut tests = profiled_tests.into_iter()
         .filter(|profiled_test| !matches!(profiled_test.result, test_runner::TestResult::Ignored))
         .map(|profiled_test| {
             let test::TestDescAndFn { desc, testfn: test_fn } = profiled_test.test;
@@ -359,6 +424,8 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
     let mut timed_out_safe_mutations_count = 0;
     let mut crashed_mutations_count = 0;
     let mut crashed_safe_mutations_count = 0;
+
+    let mut mutation_detection_matrix = MutationDetectionMatrix::new(mutants.iter().map(|mutant| mutant.mutations.len()).sum());
 
     #[derive(Clone, Copy, Default)]
     struct MutationOpStats {
@@ -408,7 +475,7 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
         }
 
         match run_tests(tests, mutant, thread_pool.clone()) {
-            Ok(results) => {
+            Ok(mut results) => {
                 for &mutation in mutant.mutations {
                     let op_stats = mutation_op_stats.entry(mutation.op_name).or_default();
 
@@ -418,9 +485,9 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
                         total_safe_mutations_count += 1;
                     }
 
-                    let Some(result) = results.get(&mutation.id) else { unreachable!() };
+                    let Some(mutation_result) = results.remove(&mutation.id) else { unreachable!() };
 
-                    match result {
+                    match mutation_result.result {
                         MutationTestResult::Undetected => {
                             all_test_runs_failed_successfully = false;
 
@@ -450,12 +517,75 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
                             }
                         }
                     }
+
+                    mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
                 }
             }
             Err(_) => { process::exit(ERROR_EXIT_CODE); }
         }
     }
     let mutation_testing_duration = t_mutation_testing_start.elapsed();
+
+    if let Some(()) = &opts.print_opts.detection_matrix {
+        // Tests are printed in name order.
+        tests.sort_unstable_by(|test_a, test_b| Ord::cmp(test_a.desc.name.as_slice(), test_b.desc.name.as_slice()));
+
+        let test_name_w = tests.iter().map(|test| test.desc.name.as_slice().len()).max().unwrap_or(0);
+
+        // Print mutation ID numbers in 10's for matrix heading, like so `1        10        20...`.
+        print!("{:w$}", "", w = test_name_w + "test ".len() + 1);
+        for mutation_idx in mutation_detection_matrix.iter_mutation_ids() {
+            if mutation_idx == 1 {
+                print!("{mutation_idx:<9}");
+            } else if mutation_idx % 10 == 0 {
+                print!("{mutation_idx:<10}");
+            }
+        }
+        println!();
+
+        // Print mutation ID numbers' last digits for matrix heading, like so `12345678901234567890123...`.
+        print!("{:w$}", "", w = test_name_w + "test ".len() + 1);
+        let mut mutation_id_chunks = mutation_detection_matrix.iter_mutation_ids().array_chunks::<10>();
+        while let Some(_) = mutation_id_chunks.next() {
+            print!("1234567890");
+        }
+        if let Some(last_mutation_id_chunk) = mutation_id_chunks.into_remainder() {
+            print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
+        }
+        println!();
+
+        // Print matrix row for overall mutation detection.
+        print!("{:w$}", "total", w = test_name_w + "test ".len() + 1);
+        for (_mutation_id, mutation_test_result) in mutation_detection_matrix.iter_detections() {
+            match mutation_test_result {
+                MutationTestResult::Undetected => print!("-"),
+                MutationTestResult::Detected => print!("D"),
+                MutationTestResult::Crashed => print!("C"),
+                MutationTestResult::TimedOut => print!("T"),
+            }
+        }
+        println!();
+
+        // Print one matrix row for each test for test-mutation detections.
+        for test in &tests {
+            print!("test {:test_name_w$} ", test.desc.name.as_slice());
+            for (_mutation_id, mutation_test_result) in mutation_detection_matrix.iter_test_detections(&test.desc.name) {
+                match mutation_test_result {
+                    None => print!("."),
+                    Some(MutationTestResult::Undetected) => print!("-"),
+                    Some(MutationTestResult::Detected) => print!("D"),
+                    Some(MutationTestResult::Crashed) => print!("C"),
+                    Some(MutationTestResult::TimedOut) => print!("T"),
+                }
+            }
+            println!();
+        }
+        println!();
+
+        // Print legend of symbols used in the matrix.
+        println!("legend: .: not run; -: undetected; D: detected; C: crashed; T: timed out");
+        println!();
+    }
 
     if opts.verbosity >= 1 {
         let mut op_names = mutation_op_stats.keys().collect::<Vec<_>>();

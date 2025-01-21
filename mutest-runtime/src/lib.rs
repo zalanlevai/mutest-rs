@@ -1,6 +1,7 @@
 #![feature(deadline_api)]
 #![feature(decl_macro)]
 #![feature(extract_if)]
+#![feature(iter_array_chunks)]
 #![feature(let_chains)]
 
 #![feature(test)]

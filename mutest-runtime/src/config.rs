@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+pub struct PrintOptions {
+    pub detection_matrix: Option<()>,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TestOrdering {
     ExecTime,
@@ -14,9 +18,10 @@ pub enum TestTimeout {
 }
 
 pub struct Options {
+    pub verbosity: u8,
+    pub report_timings: bool,
+    pub print_opts: PrintOptions,
     pub test_ordering: TestOrdering,
     pub test_timeout: TestTimeout,
     pub use_thread_pool: bool,
-    pub verbosity: u8,
-    pub report_timings: bool,
 }

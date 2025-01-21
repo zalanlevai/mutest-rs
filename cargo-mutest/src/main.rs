@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::process::{self, Command};
 
@@ -23,6 +24,12 @@ fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, l
     }
 }
 
+mod run_print {
+    mutest_driver_cli::opts! { ALL, pub(crate) possible_values where
+        DETECTION_MATRIX = "detection-matrix"; ["Print test-mutation detection matrix."]
+    }
+}
+
 fn main() {
     let args = env::args().skip(2).collect::<Vec<_>>();
 
@@ -34,8 +41,10 @@ fn main() {
         .subcommand(clap::Command::new("run")
             .display_order(0)
             .about("Build and run the test harness.")
-            // Arguments
-            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool."))
+            // Evaluation-related Arguments
+            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").display_order(110))
+            // Printing-related Arguments
+            .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
@@ -62,7 +71,13 @@ fn main() {
         Some(("build", _)) => ("test", &["--no-run"], "build", None),
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
+
             if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
+
+            let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();
+            if print_names.contains("all") { print_names = HashSet::from_iter(run_print::ALL.into_iter().map(|s| *s)); }
+            for print_name in print_names { passed_args.push(format!("--print={print_name}")); }
+
             ("test", &[], "build", Some(passed_args))
         }
         _ => unreachable!(),
