@@ -372,7 +372,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 };
 
                 let t_target_analysis_start = Instant::now();
-                let reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
+                let mut reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
@@ -380,6 +380,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         total = all_mutable_fns_count,
                     );
                 }
+                // HACK: Ensure that targets are in a deterministic, stable order, otherwise
+                //       mutation IDs will not match between repeated invocations.
+                reachable_fns.sort_unstable_by_key(|target| tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)));
                 let targets = reachable_fns.iter().filter(|f| f.distance < opts.mutation_depth);
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
