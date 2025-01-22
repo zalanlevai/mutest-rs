@@ -42,7 +42,8 @@ fn main() {
             .display_order(0)
             .about("Build and run the test harness.")
             // Evaluation-related Arguments
-            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").display_order(110))
+            .arg(clap::arg!(--exhaustive "Evaluate remaining tests, even if the mutation has already been detected by another test.").display_order(110))
+            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").display_order(120))
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
             // Passed arguments
@@ -72,6 +73,7 @@ fn main() {
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
 
+            if matches.get_flag("exhaustive") { passed_args.push("--exhaustive".to_owned()); }
             if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
 
             let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();

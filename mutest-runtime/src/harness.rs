@@ -208,7 +208,7 @@ pub struct MutationTestResults {
     results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
 }
 
-fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
+fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, exhaustive: bool, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
     let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
@@ -264,10 +264,16 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
                     }
                 }
 
-                remaining_tests.retain(|(_, test)| !mutation.reachable_from.contains_key(test.desc.name.as_slice()));
+                // By default, tests for a mutation are only run until one of the tests detects the mutation, and
+                // test evaluation is stopped early if all mutations are detected.
+                if !exhaustive {
+                    // Remove any remaining tests from the queue that are for the just detected mutation.
+                    remaining_tests.retain(|(_, test)| !mutation.reachable_from.contains_key(test.desc.name.as_slice()));
 
-                if results.iter().all(|(_, mutation_results)| !matches!(mutation_results.result, MutationTestResult::Undetected)) {
-                    return Ok(test_runner::Flow::Stop);
+                    // If all mutations have been detected, stop test evaluation early.
+                    if results.iter().all(|(_, mutation_results)| !matches!(mutation_results.result, MutationTestResult::Undetected)) {
+                        return Ok(test_runner::Flow::Stop);
+                    }
                 }
             }
             _ => {}
@@ -346,6 +352,7 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
         print_opts: PrintOptions {
             detection_matrix: args.contains(&"--print=detection-matrix").then_some(()),
         },
+        exhaustive: args.contains(&"--exhaustive"),
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
         use_thread_pool: args.contains(&"--use-thread-pool"),
@@ -474,7 +481,7 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        match run_tests(tests, mutant, thread_pool.clone()) {
+        match run_tests(tests, mutant, opts.exhaustive, thread_pool.clone()) {
             Ok(mut results) => {
                 for &mutation in mutant.mutations {
                     let op_stats = mutation_op_stats.entry(mutation.op_name).or_default();
@@ -585,6 +592,11 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
         // Print legend of symbols used in the matrix.
         println!("legend: .: not run; -: undetected; D: detected; C: crashed; T: timed out");
         println!();
+
+        if !opts.exhaustive {
+            println!("warning: mutation detection matrix is incomplete as not all tests were evaluated, rerun with `--exhaustive`");
+            println!();
+        }
     }
 
     if opts.verbosity >= 1 {
