@@ -687,6 +687,106 @@ fn mutest_isolated_worker<S: SubstMap>(test: test::TestDescAndFn, mutants: &'sta
     test_runner::run_test_in_spawned_subprocess(test);
 }
 
+fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutant: &'static MutantMeta<S>, active_mutant_handle: &'static ActiveMutantHandle<S>) {
+    let _verbosity = args.iter().filter(|&arg| *arg == "-v").count() as u8;
+    let report_timings = args.contains(&"--timings");
+    let use_thread_pool = args.contains(&"--use-thread-pool");
+
+    let t_start = Instant::now();
+
+    let thread_pool = use_thread_pool.then(|| {
+        let concurrency = test_runner::concurrency();
+        ThreadPool::new(concurrency, Some("test_thread_pool".to_owned()), None)
+    });
+
+    print!("running {} tests", tests.len());
+    if let Some(thread_pool) = &thread_pool {
+        print!(" using thread pool of size {}", thread_pool.max_thread_count());
+    }
+    println!();
+
+    let total_tests_count = tests.len();
+    let mut failed_tests_count = 0;
+    let mut ignored_tests_count = 0;
+
+    // SAFETY: No other thread is running yet, no one else is reading from the handle yet.
+    unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
+
+    let tests_to_run = tests.iter()
+        .map(|test| {
+            test_runner::Test {
+                desc: test.desc.clone(),
+                test_fn: make_owned_test_fn(&test.testfn),
+                timeout: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let on_test_event = |event, _remaining_tests: &mut Vec<(test::TestId, test_runner::Test)>| -> Result<_, Infallible> {
+        match event {
+            test_runner::TestEvent::Result(test) => {
+                match test.result {
+                    test_runner::TestResult::Ignored => {
+                        println!("test {} ... \x1b[1;33mignored\x1b[0m", test.desc.name.as_slice());
+                        ignored_tests_count += 1;
+                    }
+
+                    test_runner::TestResult::Ok => {
+                        println!("test {} ... \x1b[1;32mok\x1b[0m", test.desc.name.as_slice());
+                    }
+
+                    | test_runner::TestResult::Failed
+                    | test_runner::TestResult::FailedMsg(_)
+                    | test_runner::TestResult::CrashedMsg(_) => {
+                        println!("test {} ... \x1b[1;31mFAILED\x1b[0m", test.desc.name.as_slice());
+                        failed_tests_count += 1;
+                    }
+
+                    test_runner::TestResult::TimedOut => unreachable!(),
+                }
+            }
+            _ => {}
+        }
+
+        Ok(test_runner::Flow::Continue)
+    };
+
+    let test_run_strategy = match mutant.is_unsafe() {
+        false => test_runner::TestRunStrategy::InProcess(thread_pool),
+        true => test_runner::TestRunStrategy::InIsolatedChildProcess({
+            let mutant_id = mutant.id;
+            Arc::new(move |cmd| {
+                cmd.env(MUTEST_ISOLATED_WORKER_MUTANT_ID, mutant_id.to_string());
+            })
+        }),
+    };
+
+    match test_runner::run_tests(tests_to_run, on_test_event, test_run_strategy, false) {
+        Ok(_) => {}
+        Err(_) => { process::exit(ERROR_EXIT_CODE); }
+    }
+
+    println!("test result: {result}. {passed} passed; {failed} failed; {ignored} ignored",
+        result = match failed_tests_count {
+            0 => "\x1b[1;32mok\x1b[0m",
+            _ => "\x1b[1;31mFAILED\x1b[0m",
+        },
+        passed = total_tests_count - failed_tests_count,
+        failed = failed_tests_count,
+        ignored = ignored_tests_count,
+    );
+
+    if report_timings {
+        println!("\nfinished in {total:.2?}",
+            total = t_start.elapsed(),
+        );
+    }
+
+    if failed_tests_count != 0 {
+        process::exit(ERROR_EXIT_CODE);
+    }
+}
+
 pub fn mutest_main_static<S: SubstMap + Sync>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
         env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION);
@@ -699,8 +799,21 @@ pub fn mutest_main_static<S: SubstMap + Sync>(tests: &[&test::TestDescAndFn], mu
     }
 
     let args = env::args().collect::<Vec<_>>();
-    let args = args.iter().map(String::as_ref).collect::<Vec<_>>();
-    let owned_tests: Vec<_> = tests.iter().map(|test| make_owned_test_def(test)).collect();
+    let args = args.iter().map(String::as_ref).collect::<Vec<&str>>();
+    let owned_tests = tests.iter().map(|test| make_owned_test_def(test)).collect::<Vec<_>>();
+
+    if let Some(mutation_id) = args.iter().flat_map(|arg| arg.strip_prefix("--simulate=")).next().and_then(|mutation_id| mutation_id.parse::<u32>().ok()) {
+        let Some(mutant) = mutants.iter().find(|mutant| mutant.mutations.iter().any(|mutation| mutation.id == mutation_id)) else {
+            println!("cannot find mutation with id {mutation_id}");
+            process::exit(ERROR_EXIT_CODE);
+        };
+        if mutant.mutations.len() > 1 {
+            println!("cannot simulate mutation: mutation is not in a singleton mutant, disable mutation batching");
+            process::exit(ERROR_EXIT_CODE);
+        }
+
+        return mutest_simulate_main(&args, owned_tests, mutant, active_mutant_handle);
+    }
 
     mutest_main(&args, owned_tests, mutants, active_mutant_handle)
 }
