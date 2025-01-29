@@ -27,8 +27,8 @@ pub struct PrintOptions {
 impl PrintOptions {
     pub fn is_empty(&self) -> bool {
         true
-            && self.mutation_targets.is_none()
             && self.tests.is_none()
+            && self.mutation_targets.is_none()
             && self.conflict_graph.is_none()
             && self.mutants.is_none()
             && self.code.is_none()

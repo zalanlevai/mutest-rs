@@ -227,6 +227,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                     }
                     match subcommand {
                         "run" => mutest_subcommand = Some("build"),
+                        "print-tests" => {
+                            mutest_prints.insert("tests");
+                            mutest_subcommand.get_or_insert("print");
+                        }
                         "print-targets" => {
                             mutest_prints.insert("targets");
                             mutest_subcommand.get_or_insert("print");
