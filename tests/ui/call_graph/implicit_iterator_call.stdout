@@ -1,0 +1,7 @@
+tests -(1)-> next_impl at tests/ui/call_graph/implicit_iterator_call.rs:5:1: 5:15 (#0)
+  (1) test
+
+tests -(0)-> <ImplsIterator as std::iter::Iterator>::next at tests/ui/call_graph/implicit_iterator_call.rs:12:5: 12:45 (#0)
+  (0) test
+
+targets: 2 total; 2 safe; 0 unsafe (0 tainted)

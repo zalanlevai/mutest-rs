@@ -693,16 +693,15 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
         let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
         for call in callees.drain() {
-            let Some(local_def_id) = call.def_id.as_local() else { continue; };
-
             let param_env = tcx.param_env(call.def_id);
             // Using the concrete type arguments of this call, we resolve the corresponding definition instance. The
             // type arguments might take a different form at the resolved definition site, so we propagate them
             // instead.
             let instance = tcx.resolve_instance(param_env.and((call.def_id, call.generic_args))).ok().flatten();
-            let (callee_def_id, generic_args) = instance
+            let Some((callee_def_id, generic_args)) = instance
                 .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.args)))
-                .unwrap_or((local_def_id, call.generic_args));
+                .or_else(|| call.def_id.as_local().map(|def_id| (def_id, call.generic_args)))
+            else { continue; };
 
             let call_paths = previously_found_callees.entry((callee_def_id, generic_args)).or_insert_with(Default::default);
             call_paths.insert(test, None);
@@ -761,8 +760,6 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
                 for call in callees.drain() {
-                    let Some(local_def_id) = call.def_id.as_local() else { continue; };
-
                     let param_env = tcx.param_env(call.def_id);
                     // The type arguments from the local, generic scope may still contain type parameters, so we
                     // fold the bound type arguments of the concrete invocation of the enclosing function into it.
@@ -771,9 +768,10 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     // instance. The type arguments might take a different form at the resolved definition site, so
                     // we propagate them instead.
                     let instance = tcx.resolve_instance(param_env.and((call.def_id, generic_args))).ok().flatten();
-                    let (callee_def_id, generic_args) = instance
+                    let Some((callee_def_id, generic_args)) = instance
                         .and_then(|instance| instance.def_id().as_local().map(|def_id| (def_id, instance.args)))
-                        .unwrap_or((local_def_id, call.generic_args));
+                        .or_else(|| call.def_id.as_local().map(|def_id| (def_id, call.generic_args)))
+                    else { continue; };
 
                     let new_call_paths = newly_found_callees.entry((callee_def_id, generic_args)).or_insert_with(Default::default);
 

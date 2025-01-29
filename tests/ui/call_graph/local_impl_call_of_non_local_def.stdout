@@ -1,0 +1,7 @@
+tests -(1)-> clone_impl at tests/ui/call_graph/local_impl_call_of_non_local_def.rs:5:1: 5:16 (#0)
+  (1) test
+
+tests -(0)-> <ImplsClone as std::clone::Clone>::clone at tests/ui/call_graph/local_impl_call_of_non_local_def.rs:10:5: 10:28 (#0)
+  (0) test
+
+targets: 2 total; 2 safe; 0 unsafe (0 tainted)
