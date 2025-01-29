@@ -231,6 +231,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                             mutest_prints.insert("tests");
                             mutest_subcommand.get_or_insert("print");
                         }
+                        "print-call-graph" => {
+                            mutest_prints.insert("call-graph");
+                            mutest_subcommand.get_or_insert("print");
+                        }
                         "print-targets" => {
                             mutest_prints.insert("targets");
                             mutest_subcommand.get_or_insert("print");

@@ -19,6 +19,7 @@ pub struct PrintOptions {
     pub print_headers: bool,
     pub tests: Option<()>,
     pub mutation_targets: Option<()>,
+    pub call_graph: Option<GraphFormat>,
     pub conflict_graph: Option<ConflictGraphOptions>,
     pub mutants: Option<()>,
     pub code: Option<()>,
@@ -29,6 +30,7 @@ impl PrintOptions {
         true
             && self.tests.is_none()
             && self.mutation_targets.is_none()
+            && self.call_graph.is_none()
             && self.conflict_graph.is_none()
             && self.mutants.is_none()
             && self.code.is_none()

@@ -1,9 +1,12 @@
+use std::iter;
 use std::time::{Duration, Instant};
 
 use itertools::Itertools;
+use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
-use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
-use rustc_hash::FxHashMap;
+use mutest_emit::analysis::ty;
+use mutest_emit::codegen::mutation::{CallGraph, Callee, Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
+use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::ty::TyCtxt;
@@ -115,7 +118,127 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
     );
 }
 
-fn print_graph<'trg: 'op, 'm: 'op, 'op, N, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations_iter: N, edge_iter: E, format: config::GraphFormat)
+fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &CallGraph<'tcx>, targets: &[Target<'trg>], format: config::GraphFormat) {
+    let callee_str = |callee: &Callee| {
+        let generic_args_str = callee.generic_args.iter()
+            .filter(|generic_arg| matches!(generic_arg.unpack(), ty::GenericArgKind::Type(_) | ty::GenericArgKind::Const(_)))
+            .map(|generic_arg| generic_arg.to_string())
+            .collect::<Vec<_>>();
+
+        format!("{def}{generic_args}",
+            def = tcx.def_path_str(callee.def_id),
+            generic_args = match generic_args_str.is_empty() {
+                true => "".to_owned(),
+                false => format!(" [{}]", generic_args_str.join(", ")),
+            },
+        )
+    };
+
+    match format {
+        config::GraphFormat::Simple => {
+            let mut tests_in_print_order = tests.iter()
+                .map(|test| (test.path_str(), test))
+                .collect::<Vec<_>>();
+            tests_in_print_order.sort_unstable_by(|(test_a_path_str, _), (test_b_path_str, _)| Ord::cmp(test_a_path_str, test_b_path_str));
+
+            println!("entry points:\n");
+
+            for (test_path_str, test) in tests_in_print_order {
+                println!("test {}", test_path_str);
+
+                for (_, callee) in call_graph.root_calls.iter().filter(|(root_def_id, _)| *root_def_id == test.def_id) {
+                    println!("  -> {} at {:#?}", callee_str(callee), tcx.def_span(callee.def_id));
+                }
+            }
+
+            for (distance, calls) in iter::zip(1.., &call_graph.nested_calls) {
+                println!("\nnested calls at distance {distance}:\n");
+
+                for caller in calls.iter().map(|(caller, _)| caller).collect::<FxHashSet<_>>() {
+                    println!("{} at {:#?}", callee_str(caller), tcx.def_span(caller.def_id));
+
+                    for (_, callee) in calls.iter().filter(|(this_caller, _)| this_caller == caller) {
+                        println!("  -> {} at {:#?}", callee_str(callee), tcx.def_span(callee.def_id));
+                    }
+                }
+            }
+        }
+        config::GraphFormat::Graphviz => {
+            let def_node_id = |def_id: hir::DefId| format!("def_{}_{}", def_id.krate.index(), def_id.index.index());
+
+            let callee_node_id = |callee: &Callee| {
+                let def_id = callee.def_id.to_def_id();
+                format!("def_{}_{}_{}", def_id.krate.index(), def_id.index.index(), &format!("{:p}", callee.generic_args)[2..])
+            };
+
+            println!("strict digraph {{");
+            println!("  layout=dot;");
+            println!("  rankdir=LR;");
+            println!("  concentrate=true;");
+            println!("  ranksep=1;");
+            println!("  forcelabels=true;");
+
+            // Distance markers. Also used as "anchors" for the depth-based ranks.
+            println!("  node [shape=none];");
+            println!("  _ [label=\"distance:\"];");
+            print!("  _");
+            for distance in 0..=call_graph.nested_calls.len() { print!(" -> {distance}"); }
+            println!(" [arrowhead=none];");
+
+            println!("  node [shape=ellipse];");
+
+            println!("  subgraph cluster_tests {{");
+            println!("    label=\"tests (entry points)\";");
+            println!("    rank=same");
+            println!("    style=filled;");
+            println!("    color=lightgray;");
+            println!("    node [style=filled, color=white];");
+
+            for test in tests {
+                // TODO: Use different styling for ignored test, or use strikethrough.
+                println!("    {} [label=\"{}\"];", def_node_id(test.def_id.to_def_id()), test.path_str());
+            }
+
+            println!("  }}");
+
+            let mut defined_callees: FxHashSet<Callee> = Default::default();
+
+            println!("  {{ rank=same; 0;");
+            for callee in call_graph.root_calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
+                if !defined_callees.insert(*callee) { continue; }
+
+                match targets.iter().any(|target| target.def_id == callee.def_id) {
+                    true => println!("    {} [label=\"{}\"];", callee_node_id(callee), callee_str(callee)),
+                    false => println!("    {} [label=\"{}\", shape=plaintext];", callee_node_id(callee), callee_str(callee)),
+                }
+            }
+            println!("  }}");
+            for (root_def_id, callee) in &call_graph.root_calls {
+                println!("  {} -> {}:w;", def_node_id(root_def_id.to_def_id()), callee_node_id(callee));
+            }
+
+            for (distance, calls) in iter::zip(1.., &call_graph.nested_calls) {
+                println!("  {{ rank=same; {};", distance);
+                for callee in calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
+                    if !defined_callees.insert(*callee) { continue; }
+
+                    match targets.iter().any(|target| target.def_id == callee.def_id) {
+                        true => println!("    {} [label=\"{}\"];", callee_node_id(callee), callee_str(callee)),
+                        false => println!("    {} [label=\"{}\", shape=plaintext];", callee_node_id(callee), callee_str(callee)),
+                    }
+                }
+                println!("  }}");
+                for (caller, callee) in calls {
+                    println!("  {} -> {}:w;", callee_node_id(caller), callee_node_id(callee));
+                }
+            }
+
+            println!("}}");
+        }
+    }
+}
+
+fn print_mutation_graph<'trg: 'op, 'm: 'op, 'op, N, E>(mutation_conflict_graph: &MutationConflictGraph<'m>, mutations_iter: N, edge_iter: E, format: config::GraphFormat)
 where
     N: IntoIterator<Item = &'op Mut<'trg, 'm>>,
     E: IntoIterator<Item = (MutId, MutId)>,
@@ -372,7 +495,8 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 };
 
                 let t_target_analysis_start = Instant::now();
-                let mut reachable_fns = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
+
+                let (call_graph, mut reachable_fns) = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
@@ -380,10 +504,28 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         total = all_mutable_fns_count,
                     );
                 }
+
                 // HACK: Ensure that targets are in a deterministic, stable order, otherwise
                 //       mutation IDs will not match between repeated invocations.
                 reachable_fns.sort_unstable_by_key(|target| tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)));
+
+                if let Some(format) = opts.print_opts.call_graph.take() {
+                    if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
+                    print_call_graph(tcx, &tests, &call_graph, &reachable_fns, format);
+                    if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if opts.report_timings {
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?})",
+                                total = t_start.elapsed(),
+                                targets = t_target_analysis_start.elapsed(),
+                            );
+                        }
+                        return Flow::Break;
+                    }
+                    if opts.verbosity >= 1 { println!(); }
+                }
+
                 let targets = reachable_fns.iter().filter(|f| f.distance < opts.mutation_depth);
+
                 target_analysis_duration = t_target_analysis_start.elapsed();
 
                 if let Some(_) = opts.print_opts.mutation_targets.take() {
@@ -467,10 +609,10 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     if opts.print_opts.print_headers { println!("\n@@@ conflict graph @@@\n"); }
                     let mutations_excluding_unsafe = mutations.iter().filter(|m| !mutation_conflict_graph.is_unsafe(m.id));
                     match (compatibility_graph, exclude_unsafe) {
-                        (false, false) => print_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_conflicts(), format),
-                        (false, true) => print_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_conflicts_excluding_unsafe(), format),
-                        (true, false) => print_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_compatibilities(), format),
-                        (true, true) => print_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_compatibilities(), format),
+                        (false, false) => print_mutation_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_conflicts(), format),
+                        (false, true) => print_mutation_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_conflicts_excluding_unsafe(), format),
+                        (true, false) => print_mutation_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_compatibilities(), format),
+                        (true, true) => print_mutation_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_compatibilities(), format),
                     }
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                         if opts.report_timings {

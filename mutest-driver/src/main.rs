@@ -147,26 +147,31 @@ pub fn main() {
                 print_headers: print_names.len() > 1,
                 tests: None,
                 mutation_targets: None,
+                call_graph: None,
                 conflict_graph: None,
                 mutants: None,
                 code: None,
+            };
+
+            let graph_format = {
+                use mutest_driver_cli::graph_format::*;
+
+                match mutest_arg_matches.get_one::<String>("graph-format").map(String::as_str) {
+                    Some(SIMPLE) => config::GraphFormat::Simple,
+                    Some(GRAPHVIZ) => config::GraphFormat::Graphviz,
+                    _ => unreachable!(),
+                }
             };
 
             for print_name in print_names {
                 match print_name {
                     TESTS => print_opts.tests = Some(()),
                     TARGETS => print_opts.mutation_targets = Some(()),
+                    CALL_GRAPH => print_opts.call_graph = Some(graph_format),
                     CONFLICT_GRAPH | COMPATIBILITY_GRAPH => {
-                        use mutest_driver_cli::graph_format::*;
-
                         let compatibility_graph = matches!(print_name, COMPATIBILITY_GRAPH);
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
-                        let format = match mutest_arg_matches.get_one::<String>("graph-format").map(String::as_str) {
-                            Some(SIMPLE) => config::GraphFormat::Simple,
-                            Some(GRAPHVIZ) => config::GraphFormat::Graphviz,
-                            _ => unreachable!(),
-                        };
-                        print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format });
+                        print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format: graph_format });
                     }
                     MUTANTS => print_opts.mutants = Some(()),
                     CODE => print_opts.code = Some(()),
