@@ -756,7 +756,10 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 }
             }
 
-            if distance < depth {
+            // Collect calls of callees, for the next depth iteration.
+            // NOTE: This is not performed on the last depth iteration; calls made by
+            //       callees at the end of the call graph are ignored.
+            if distance < (depth - 1) {
                 let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
 
                 for call in callees.drain() {
