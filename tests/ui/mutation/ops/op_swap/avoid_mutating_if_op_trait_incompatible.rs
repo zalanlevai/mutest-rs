@@ -11,6 +11,7 @@ struct DifferentRhs(usize);
 impl Add for DifferentRhs {
     type Output = Self;
 
+    #[mutest::skip]
     fn add(self, other: Self) -> Self {
         Self(self.0 + other.0)
     }
@@ -19,6 +20,7 @@ impl Add for DifferentRhs {
 impl Sub<usize> for DifferentRhs {
     type Output = Self;
 
+    #[mutest::skip]
     fn sub(self, other: usize) -> Self {
         Self(self.0 - other)
     }
@@ -29,6 +31,7 @@ struct DifferentOutput(usize);
 impl Add for DifferentOutput {
     type Output = Self;
 
+    #[mutest::skip]
     fn add(self, other: Self) -> Self {
         Self(self.0 + other.0)
     }
@@ -37,6 +40,7 @@ impl Add for DifferentOutput {
 impl Sub for DifferentOutput {
     type Output = usize;
 
+    #[mutest::skip]
     fn sub(self, other: Self) -> Self::Output {
         self.0 - other.0
     }

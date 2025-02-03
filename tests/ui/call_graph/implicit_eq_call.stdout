@@ -1,0 +1,13 @@
+tests -(1)-> eq_impl at tests/ui/call_graph/implicit_eq_call.rs:7:1: 7:13 (#0)
+  (1) test_implicit_eq_call
+
+tests -(1)-> ne_impl at tests/ui/call_graph/implicit_eq_call.rs:8:1: 8:13 (#0)
+  (1) test_implicit_ne_call
+
+tests -(0)-> <ImplsEq as std::cmp::PartialEq>::eq at tests/ui/call_graph/implicit_eq_call.rs:11:5: 11:40 (#0)
+  (0) test_implicit_eq_call
+
+tests -(0)-> <ImplsEq as std::cmp::PartialEq>::ne at tests/ui/call_graph/implicit_eq_call.rs:16:5: 16:40 (#0)
+  (0) test_implicit_ne_call
+
+targets: 4 total; 4 safe; 0 unsafe (0 tainted)

@@ -272,7 +272,15 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
             let &ty::TyKind::FnDef(def_id, generic_args) = typeck.node_type(expr.hir_id).kind() else { return None; };
             Some((def_id, generic_args))
         }
-        hir::ExprKind::MethodCall(_, _, _, _) => {
+
+        | hir::ExprKind::MethodCall(_, _, _, _)
+        // NOTE: In addition to explicit function calls and method calls, certain operators
+        //       may also result in implicit calls to corresponding trait functions.
+        | hir::ExprKind::Unary(_, _)
+        | hir::ExprKind::Binary(_, _, _)
+        | hir::ExprKind::AssignOp(_, _, _)
+        | hir::ExprKind::Index(_, _, _)
+        => {
             let Some(def_id) = typeck.type_dependent_def_id(expr.hir_id) else { return None; };
             let generic_args = typeck.node_args(expr.hir_id);
             Some((def_id, generic_args))

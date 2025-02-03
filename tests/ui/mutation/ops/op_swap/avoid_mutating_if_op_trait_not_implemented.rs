@@ -11,6 +11,7 @@ struct S(usize);
 impl Add for S {
     type Output = Self;
 
+    #[mutest::skip]
     fn add(self, other: Self) -> Self {
         Self(self.0 + other.0)
     }
@@ -19,12 +20,14 @@ impl Add for S {
 impl Mul for S {
     type Output = Self;
 
+    #[mutest::skip]
     fn mul(self, other: Self) -> Self {
         Self(self.0 * other.0)
     }
 }
 
 impl MulAssign for S {
+    #[mutest::skip]
     fn mul_assign(&mut self, other: Self) {
         *self = Self(self.0 * other.0);
     }
@@ -33,6 +36,7 @@ impl MulAssign for S {
 impl Div for S {
     type Output = Self;
 
+    #[mutest::skip]
     fn div(self, other: Self) -> Self {
         Self(self.0 / other.0)
     }

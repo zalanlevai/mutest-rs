@@ -1,0 +1,121 @@
+tests -(1)-> add_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#4)
+  (1) test_implicit_add_call
+
+tests -(1)-> sub_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#6)
+  (1) test_implicit_sub_call
+
+tests -(1)-> mul_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#8)
+  (1) test_implicit_mul_call
+
+tests -(1)-> div_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#10)
+  (1) test_implicit_div_call
+
+tests -(1)-> rem_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#12)
+  (1) test_implicit_rem_call
+
+tests -(1)-> bitor_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#14)
+  (1) test_implicit_bit_or_call
+
+tests -(1)-> bitxor_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#16)
+  (1) test_implicit_bit_xor_call
+
+tests -(1)-> bitand_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#18)
+  (1) test_implicit_bit_and_call
+
+tests -(1)-> shl_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#20)
+  (1) test_implicit_shl_call
+
+tests -(1)-> shr_impl at tests/ui/call_graph/implicit_bin_op_call.rs:10:5: 10:21 (#22)
+  (1) test_implicit_shr_call
+
+tests -(0)-> <ImplsAdd as std::ops::Add>::add at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#4)
+  (0) test_implicit_add_call
+
+tests -(0)-> <ImplsSub as std::ops::Sub>::sub at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#6)
+  (0) test_implicit_sub_call
+
+tests -(0)-> <ImplsMul as std::ops::Mul>::mul at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#8)
+  (0) test_implicit_mul_call
+
+tests -(0)-> <ImplsDiv as std::ops::Div>::div at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#10)
+  (0) test_implicit_div_call
+
+tests -(0)-> <ImplsRem as std::ops::Rem>::rem at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#12)
+  (0) test_implicit_rem_call
+
+tests -(0)-> <ImplsBitOr as std::ops::BitOr>::bitor at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#14)
+  (0) test_implicit_bit_or_call
+
+tests -(0)-> <ImplsBitXor as std::ops::BitXor>::bitxor at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#16)
+  (0) test_implicit_bit_xor_call
+
+tests -(0)-> <ImplsBitAnd as std::ops::BitAnd>::bitand at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#18)
+  (0) test_implicit_bit_and_call
+
+tests -(0)-> <ImplsShl as std::ops::Shl>::shl at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#20)
+  (0) test_implicit_shl_call
+
+tests -(0)-> <ImplsShr as std::ops::Shr>::shr at tests/ui/call_graph/implicit_bin_op_call.rs:14:9: 14:52 (#22)
+  (0) test_implicit_shr_call
+
+tests -(1)-> add_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#4)
+  (1) test_implicit_add_call
+
+tests -(1)-> sub_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#6)
+  (1) test_implicit_sub_call
+
+tests -(1)-> mul_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#8)
+  (1) test_implicit_mul_call
+
+tests -(1)-> div_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#10)
+  (1) test_implicit_div_call
+
+tests -(1)-> rem_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#12)
+  (1) test_implicit_rem_call
+
+tests -(1)-> bitor_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#14)
+  (1) test_implicit_bit_or_call
+
+tests -(1)-> bitxor_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#16)
+  (1) test_implicit_bit_xor_call
+
+tests -(1)-> bitand_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#18)
+  (1) test_implicit_bit_and_call
+
+tests -(1)-> shl_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#20)
+  (1) test_implicit_shl_call
+
+tests -(1)-> shr_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:20:5: 20:28 (#22)
+  (1) test_implicit_shr_call
+
+tests -(0)-> <ImplsAdd as std::ops::AddAssign>::add_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#4)
+  (0) test_implicit_add_call
+
+tests -(0)-> <ImplsSub as std::ops::SubAssign>::sub_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#6)
+  (0) test_implicit_sub_call
+
+tests -(0)-> <ImplsMul as std::ops::MulAssign>::mul_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#8)
+  (0) test_implicit_mul_call
+
+tests -(0)-> <ImplsDiv as std::ops::DivAssign>::div_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#10)
+  (0) test_implicit_div_call
+
+tests -(0)-> <ImplsRem as std::ops::RemAssign>::rem_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#12)
+  (0) test_implicit_rem_call
+
+tests -(0)-> <ImplsBitOr as std::ops::BitOrAssign>::bitor_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#14)
+  (0) test_implicit_bit_or_call
+
+tests -(0)-> <ImplsBitXor as std::ops::BitXorAssign>::bitxor_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#16)
+  (0) test_implicit_bit_xor_call
+
+tests -(0)-> <ImplsBitAnd as std::ops::BitAndAssign>::bitand_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#18)
+  (0) test_implicit_bit_and_call
+
+tests -(0)-> <ImplsShl as std::ops::ShlAssign>::shl_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#20)
+  (0) test_implicit_shl_call
+
+tests -(0)-> <ImplsShr as std::ops::ShrAssign>::shr_assign at tests/ui/call_graph/implicit_bin_op_call.rs:22:9: 22:48 (#22)
+  (0) test_implicit_shr_call
+
+targets: 40 total; 40 safe; 0 unsafe (0 tainted)
