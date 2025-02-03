@@ -219,7 +219,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         for directive in &directives {
             match directive.as_str() {
-                subcommand @ ("print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
+                subcommand @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
                     if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
                         results.ignored_tests_count += 1;
                         log_test(&name, TestResult::Ignored, Some("invalid directives"));
