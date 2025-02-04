@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 use itertools::Itertools;
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
-use mutest_emit::analysis::ty;
 use mutest_emit::codegen::mutation::{CallGraph, Callee, Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_interface::run_compiler;
@@ -119,21 +118,6 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
 }
 
 fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &CallGraph<'tcx>, targets: &[Target<'trg>], format: config::GraphFormat) {
-    let callee_str = |callee: &Callee| {
-        let generic_args_str = callee.generic_args.iter()
-            .filter(|generic_arg| matches!(generic_arg.unpack(), ty::GenericArgKind::Type(_) | ty::GenericArgKind::Const(_)))
-            .map(|generic_arg| generic_arg.to_string())
-            .collect::<Vec<_>>();
-
-        format!("{def}{generic_args}",
-            def = tcx.def_path_str(callee.def_id),
-            generic_args = match generic_args_str.is_empty() {
-                true => "".to_owned(),
-                false => format!(" [{}]", generic_args_str.join(", ")),
-            },
-        )
-    };
-
     match format {
         config::GraphFormat::Simple => {
             let mut tests_in_print_order = tests.iter()
@@ -147,7 +131,7 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 println!("test {}", test_path_str);
 
                 for (_, callee) in call_graph.root_calls.iter().filter(|(root_def_id, _)| *root_def_id == test.def_id) {
-                    println!("  -> {} at {:#?}", callee_str(callee), tcx.def_span(callee.def_id));
+                    println!("  -> {} at {:#?}", callee.display_str(tcx), tcx.def_span(callee.def_id));
                 }
             }
 
@@ -155,10 +139,10 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 println!("\nnested calls at distance {distance}:\n");
 
                 for caller in calls.iter().map(|(caller, _)| caller).collect::<FxHashSet<_>>() {
-                    println!("{} at {:#?}", callee_str(caller), tcx.def_span(caller.def_id));
+                    println!("{} at {:#?}", caller.display_str(tcx), tcx.def_span(caller.def_id));
 
                     for (_, callee) in calls.iter().filter(|(this_caller, _)| this_caller == caller) {
-                        println!("  -> {} at {:#?}", callee_str(callee), tcx.def_span(callee.def_id));
+                        println!("  -> {} at {:#?}", callee.display_str(tcx), tcx.def_span(callee.def_id));
                     }
                 }
             }
@@ -209,8 +193,8 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 if !defined_callees.insert(*callee) { continue; }
 
                 match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
-                    true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
-                    false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
+                    true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
+                    false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
                 }
             }
             println!("  }}");
@@ -224,8 +208,8 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                     if !defined_callees.insert(*callee) { continue; }
 
                     match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
-                        true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
-                        false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
+                        true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
+                        false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
                     }
                 }
                 println!("  }}");

@@ -664,6 +664,10 @@ impl<'tcx> Callee<'tcx> {
     pub fn new(def_id: hir::DefId, generic_args: ty::GenericArgsRef<'tcx>) -> Self {
         Self { def_id, generic_args }
     }
+
+    pub fn display_str(&self, tcx: TyCtxt<'tcx>) -> String {
+        tcx.def_path_str_with_args(self.def_id, self.generic_args)
+    }
 }
 
 pub struct CallGraph<'tcx> {
