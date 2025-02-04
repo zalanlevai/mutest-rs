@@ -167,8 +167,7 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             let def_node_id = |def_id: hir::DefId| format!("def_{}_{}", def_id.krate.index(), def_id.index.index());
 
             let callee_node_id = |callee: &Callee| {
-                let def_id = callee.def_id.to_def_id();
-                format!("def_{}_{}_{}", def_id.krate.index(), def_id.index.index(), &format!("{:p}", callee.generic_args)[2..])
+                format!("def_{}_{}_{}", callee.def_id.krate.index(), callee.def_id.index.index(), &format!("{:p}", callee.generic_args)[2..])
             };
 
             println!("strict digraph {{");
@@ -207,7 +206,7 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             for callee in call_graph.root_calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
                 if !defined_callees.insert(*callee) { continue; }
 
-                match targets.iter().any(|target| target.def_id == callee.def_id) {
+                match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
                     true => println!("    {} [label=\"{}\"];", callee_node_id(callee), callee_str(callee)),
                     false => println!("    {} [label=\"{}\", shape=plaintext];", callee_node_id(callee), callee_str(callee)),
                 }
@@ -222,7 +221,7 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 for callee in calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
                     if !defined_callees.insert(*callee) { continue; }
 
-                    match targets.iter().any(|target| target.def_id == callee.def_id) {
+                    match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
                         true => println!("    {} [label=\"{}\"];", callee_node_id(callee), callee_str(callee)),
                         false => println!("    {} [label=\"{}\", shape=plaintext];", callee_node_id(callee), callee_str(callee)),
                     }

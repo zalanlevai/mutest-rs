@@ -285,6 +285,7 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
             let generic_args = typeck.node_args(expr.hir_id);
             Some((def_id, generic_args))
         }
+
         _ => None,
     }
 }

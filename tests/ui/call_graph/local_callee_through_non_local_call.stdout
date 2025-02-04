@@ -1,0 +1,13 @@
+tests -(2)-> from_iter_impl at tests/ui/call_graph/local_callee_through_non_local_call.rs:12:1: 12:20 (#0)
+  (2) test_local_callee_through_std
+
+tests -(1)-> <Collectable as std::iter::FromIterator<()>>::from_iter at tests/ui/call_graph/local_callee_through_non_local_call.rs:14:5: 14:38 (#0)
+  (1) test_local_callee_through_std
+
+tests -(2)-> extern_trait_fn_impl at tests/ui/call_graph/local_callee_through_non_local_call.rs:27:1: 27:26 (#0)
+  (2) test_local_callee_through_extern_crate
+
+tests -(1)-> <ImplsExternTrait as crate_with_calls::ExternTrait>::extern_trait_fn at tests/ui/call_graph/local_callee_through_non_local_call.rs:29:5: 29:25 (#0)
+  (1) test_local_callee_through_extern_crate
+
+targets: 4 total; 4 safe; 0 unsafe (0 tainted)

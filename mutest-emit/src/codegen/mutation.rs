@@ -656,12 +656,12 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Callee<'tcx> {
-    pub def_id: hir::LocalDefId,
+    pub def_id: hir::DefId,
     pub generic_args: ty::GenericArgsRef<'tcx>,
 }
 
 impl<'tcx> Callee<'tcx> {
-    pub fn new(def_id: hir::LocalDefId, generic_args: ty::GenericArgsRef<'tcx>) -> Self {
+    pub fn new(def_id: hir::DefId, generic_args: ty::GenericArgsRef<'tcx>) -> Self {
         Self { def_id, generic_args }
     }
 }
@@ -719,10 +719,10 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             // type arguments might take a different form at the resolved definition site, so we propagate them
             // instead.
             let instance = tcx.resolve_instance(param_env.and((call.def_id, call.generic_args))).ok().flatten();
-            let Some(callee) = instance
-                .and_then(|instance| instance.def_id().as_local().map(|def_id| Callee::new(def_id, instance.args)))
-                .or_else(|| call.def_id.as_local().map(|def_id| Callee::new(def_id, call.generic_args)))
-            else { continue; };
+            let callee = match instance {
+                Some(instance) => Callee::new(instance.def_id(), instance.args),
+                None => Callee::new(call.def_id, call.generic_args),
+            };
 
             call_graph.root_calls.insert((test.def_id, callee));
 
@@ -738,53 +738,67 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
         for (caller, call_paths) in previously_found_callees.drain() {
             // `const` functions, like other `const` scopes, cannot be mutated.
-            if tcx.is_const_fn(caller.def_id.to_def_id()) { continue; }
+            if tcx.is_const_fn(caller.def_id) { continue; }
 
-            let Some(body_id) = tcx.hir_node_by_def_id(caller.def_id).body_id() else { continue; };
-            let body = tcx.hir().body(body_id);
+            let mut callees = match caller.def_id.as_local() {
+                Some(local_def_id) => {
+                    let Some(body_id) = tcx.hir_node_by_def_id(local_def_id).body_id() else { continue; };
+                    let body = tcx.hir().body(body_id);
 
-            let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, caller.def_id, krate) else { continue; };
+                    let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) else { continue; };
 
-            let hir_id = tcx.local_def_id_to_hir_id(caller.def_id);
-            let skip = false
-                // Inner function of #[test] function
-                || res::parent_iter(tcx, caller.def_id.to_def_id()).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
-                // #[cfg(test)] function, or function in #[cfg(test)] module
-                || tests::is_marked_or_in_cfg_test(tcx, hir_id)
-                // #[mutest::skip] function
-                || tool_attr::skip(tcx.hir().attrs(hir_id));
+                    let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
+                    let skip = false
+                        // Inner function of #[test] function
+                        || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                        // #[cfg(test)] function, or function in #[cfg(test)] module
+                        || tests::is_marked_or_in_cfg_test(tcx, hir_id)
+                        // #[mutest::skip] function
+                        || tool_attr::skip(tcx.hir().attrs(hir_id));
 
-            if !skip {
-                let target = targets.entry(caller.def_id).or_insert_with(|| {
-                    Target {
-                        def_id: caller.def_id,
-                        unsafety: check_item_unsafety(caller_def_item),
-                        reachable_from: Default::default(),
-                        distance,
-                    }
-                });
+                    if !skip {
+                        let target = targets.entry(local_def_id).or_insert_with(|| {
+                            Target {
+                                def_id: local_def_id,
+                                unsafety: check_item_unsafety(caller_def_item),
+                                reachable_from: Default::default(),
+                                distance,
+                            }
+                        });
 
-                for (&test, &unsafety) in &call_paths {
-                    let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
-                    target.unsafety = Ord::max(caller_tainting, target.unsafety);
+                        for (&test, &unsafety) in &call_paths {
+                            let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
+                            target.unsafety = Ord::max(caller_tainting, target.unsafety);
 
-                    let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
-                        EntryPointAssociation {
-                            distance,
-                            unsafe_call_path: None,
+                            let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
+                                EntryPointAssociation {
+                                    distance,
+                                    unsafe_call_path: None,
+                                }
+                            });
+
+                            entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
                         }
-                    });
+                    }
 
-                    entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
+                    FxHashSet::from_iter(res::collect_callees(tcx, body))
                 }
-            }
+                None => {
+                    if !tcx.is_mir_available(caller.def_id) { continue; }
+
+                    tcx.mir_inliner_callees(ty::InstanceDef::Item(caller.def_id)).iter()
+                        .map(|&(def_id, generic_args)| {
+                            let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
+                            res::Call { def_id, generic_args, unsafety }
+                        })
+                        .collect::<FxHashSet<_>>()
+                }
+            };
 
             // Collect calls of callees, for the next depth iteration.
             // NOTE: This is not performed on the last depth iteration; calls made by
             //       callees at the end of the call graph are ignored.
             if distance < (depth - 1) {
-                let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
-
                 for call in callees.drain() {
                     let param_env = tcx.param_env(call.def_id);
                     // The type arguments from the local, generic scope may still contain type parameters, so we
@@ -794,10 +808,10 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     // instance. The type arguments might take a different form at the resolved definition site, so
                     // we propagate them instead.
                     let instance = tcx.resolve_instance(param_env.and((call.def_id, generic_args))).ok().flatten();
-                    let Some(callee) = instance
-                        .and_then(|instance| instance.def_id().as_local().map(|def_id| Callee::new(def_id, instance.args)))
-                        .or_else(|| call.def_id.as_local().map(|def_id| Callee::new(def_id, call.generic_args)))
-                    else { continue; };
+                    let callee = match instance {
+                        Some(instance) => Callee::new(instance.def_id(), instance.args),
+                        None => Callee::new(call.def_id, call.generic_args),
+                    };
 
                     call_graph.nested_calls[distance].insert((caller, callee));
 
