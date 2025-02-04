@@ -9,6 +9,7 @@ extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_errors;
 extern crate rustc_feature;
+extern crate rustc_graphviz;
 extern crate rustc_hash;
 extern crate rustc_interface;
 extern crate rustc_lint_defs;

@@ -170,6 +170,8 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 format!("def_{}_{}_{}", callee.def_id.krate.index(), callee.def_id.index.index(), &format!("{:p}", callee.generic_args)[2..])
             };
 
+            let escape_label_str = |label: &str| rustc_graphviz::LabelText::LabelStr(std::borrow::Cow::Borrowed(label)).to_dot_string();
+
             println!("strict digraph {{");
             println!("  layout=dot;");
             println!("  rankdir=LR;");
@@ -207,8 +209,8 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 if !defined_callees.insert(*callee) { continue; }
 
                 match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
-                    true => println!("    {} [label=\"{}\"];", callee_node_id(callee), callee_str(callee)),
-                    false => println!("    {} [label=\"{}\", shape=plaintext];", callee_node_id(callee), callee_str(callee)),
+                    true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
+                    false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
                 }
             }
             println!("  }}");
@@ -222,8 +224,8 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                     if !defined_callees.insert(*callee) { continue; }
 
                     match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
-                        true => println!("    {} [label=\"{}\"];", callee_node_id(callee), callee_str(callee)),
-                        false => println!("    {} [label=\"{}\", shape=plaintext];", callee_node_id(callee), callee_str(callee)),
+                        true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
+                        false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee_str(callee))),
                     }
                 }
                 println!("  }}");
