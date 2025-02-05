@@ -713,9 +713,12 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     for test in tests {
         if test.ignore { continue; }
 
-        let body = tcx.hir().body(tcx.hir_node_by_def_id(test.def_id).body_id().unwrap());
+        let body_hir = tcx.hir().body(tcx.hir_node_by_def_id(test.def_id).body_id().unwrap());
+        let body_mir = tcx.instance_mir(ty::InstanceDef::Item(test.def_id.to_def_id()));
 
-        let mut callees = FxHashSet::from_iter(res::collect_callees(tcx, body));
+        let mut callees = res::collect_callees(tcx, body_hir).into_iter()
+            .chain(res::drop_glue_callees(tcx, body_mir, tcx.mk_args(&[])))
+            .collect::<FxHashSet<_>>();
 
         for call in callees.drain() {
             let param_env = tcx.param_env(call.def_id);
@@ -747,9 +750,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             let mut callees = match caller.def_id.as_local() {
                 Some(local_def_id) => {
                     let Some(body_id) = tcx.hir_node_by_def_id(local_def_id).body_id() else { continue; };
-                    let body = tcx.hir().body(body_id);
-
-                    let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) else { continue; };
+                    let body_hir = tcx.hir().body(body_id);
 
                     let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
                     let skip = false
@@ -760,7 +761,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                         // #[mutest::skip] function
                         || tool_attr::skip(tcx.hir().attrs(hir_id));
 
-                    if !skip {
+                    if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) {
                         let target = targets.entry(local_def_id).or_insert_with(|| {
                             Target {
                                 def_id: local_def_id,
@@ -785,16 +786,22 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                         }
                     }
 
-                    FxHashSet::from_iter(res::collect_callees(tcx, body))
+                    let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
+
+                    res::collect_callees(tcx, body_hir).into_iter()
+                        .chain(res::drop_glue_callees(tcx, &body_mir, caller.generic_args))
+                        .collect::<FxHashSet<_>>()
                 }
                 None => {
                     if !tcx.is_mir_available(caller.def_id) { continue; }
+                    let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
 
                     tcx.mir_inliner_callees(ty::InstanceDef::Item(caller.def_id)).iter()
                         .map(|&(def_id, generic_args)| {
                             let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
                             res::Call { def_id, generic_args, unsafety }
                         })
+                        .chain(res::drop_glue_callees(tcx, body_mir, caller.generic_args))
                         .collect::<FxHashSet<_>>()
                 }
             };

@@ -1,0 +1,17 @@
+tests -(1)-> drop_impl at tests/ui/call_graph/implicit_drop_call.rs:7:1: 7:15 (#0)
+  (1) test_implicit_drop_call
+  (2) test_implicit_generic_drop_call
+  (2) test_implicit_indirect_drop_call
+
+tests -(0)-> <ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:9:5: 9:23 (#0)
+  (0) test_implicit_drop_call
+  (1) test_implicit_generic_drop_call
+  (1) test_implicit_indirect_drop_call
+
+tests -(0)-> drop_impls_drop at tests/ui/call_graph/implicit_drop_call.rs:19:1: 19:21 (#0)
+  (0) test_implicit_indirect_drop_call
+
+tests -(0)-> implicit_drop at tests/ui/call_graph/implicit_drop_call.rs:29:1: 29:26 (#0)
+  (0) test_implicit_generic_drop_call
+
+targets: 4 total; 4 safe; 0 unsafe (0 tainted)

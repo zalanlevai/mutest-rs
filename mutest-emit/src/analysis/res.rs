@@ -4,6 +4,7 @@ use std::num::NonZeroUsize;
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
+use rustc_middle::mir;
 use rustc_session::config::ExternLocation;
 use rustc_session::search_paths::PathKind;
 use smallvec::{SmallVec, smallvec};
@@ -376,6 +377,28 @@ where
     T: ty::TypeFoldable<TyCtxt<'tcx>>,
 {
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
+}
+
+pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> impl Iterator<Item = Call<'tcx>> {
+    let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
+    let param_env = ty::ParamEnv::reveal_all();
+
+    body_mir.mentioned_items.iter()
+        .filter_map(|mentioned_item| {
+            match &mentioned_item.node {
+                mir::MentionedItem::Drop(dropped_ty) => Some(dropped_ty),
+                _ => None,
+            }
+        })
+        .map(move |&dropped_ty| {
+            let dropped_ty = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(dropped_ty));
+            ty::Instance::resolve_drop_in_place(tcx, dropped_ty)
+        })
+        .flat_map(move |drop_in_place| tcx.mir_inliner_callees(drop_in_place.def))
+        .map(move |&(def_id, generic_args)| {
+            let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
+            Call { def_id, generic_args, unsafety }
+        })
 }
 
 #[derive(Clone, Debug)]
