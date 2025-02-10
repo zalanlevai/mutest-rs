@@ -721,15 +721,13 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             .collect::<FxHashSet<_>>();
 
         for call in callees.drain() {
-            let param_env = tcx.param_env(call.def_id);
+            // NOTE: We are post type-checking, querying monomorphic obligations.
+            let param_env = ty::ParamEnv::reveal_all();
             // Using the concrete type arguments of this call, we resolve the corresponding definition instance. The
             // type arguments might take a different form at the resolved definition site, so we propagate them
             // instead.
-            let instance = tcx.resolve_instance(param_env.and((call.def_id, call.generic_args))).ok().flatten();
-            let callee = match instance {
-                Some(instance) => Callee::new(instance.def_id(), instance.args),
-                None => Callee::new(call.def_id, call.generic_args),
-            };
+            let instance = ty::Instance::expect_resolve(tcx, param_env, call.def_id, call.generic_args);
+            let callee = Callee::new(instance.def_id(), instance.args);
 
             call_graph.root_calls.insert((test.def_id, callee));
 
@@ -796,8 +794,12 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     if !tcx.is_mir_available(caller.def_id) { continue; }
                     let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
 
+                    let instance = ty::Instance::new(caller.def_id, caller.generic_args);
+                    let param_env = ty::ParamEnv::reveal_all();
+
                     tcx.mir_inliner_callees(ty::InstanceDef::Item(caller.def_id)).iter()
                         .map(|&(def_id, generic_args)| {
+                            let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
                             let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
                             res::Call { def_id, generic_args, unsafety }
                         })
@@ -811,18 +813,16 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             //       callees at the end of the call graph are ignored.
             if distance < (depth - 1) {
                 for call in callees.drain() {
-                    let param_env = tcx.param_env(call.def_id);
+                    // NOTE: We are post type-checking, querying monomorphic obligations.
+                    let param_env = ty::ParamEnv::reveal_all();
                     // The type arguments from the local, generic scope may still contain type parameters, so we
                     // fold the bound type arguments of the concrete invocation of the enclosing function into it.
                     let generic_args = res::instantiate_generic_args(tcx, call.generic_args, caller.generic_args);
                     // Using the concrete type arguments of this call, we resolve the corresponding definition
                     // instance. The type arguments might take a different form at the resolved definition site, so
                     // we propagate them instead.
-                    let instance = tcx.resolve_instance(param_env.and((call.def_id, generic_args))).ok().flatten();
-                    let callee = match instance {
-                        Some(instance) => Callee::new(instance.def_id(), instance.args),
-                        None => Callee::new(call.def_id, call.generic_args),
-                    };
+                    let instance = ty::Instance::expect_resolve(tcx, param_env, call.def_id, generic_args);
+                    let callee = Callee::new(instance.def_id(), instance.args);
 
                     call_graph.nested_calls[distance].insert((caller, callee));
 
