@@ -161,3 +161,55 @@ pub fn print_mutation_flakiness_epilogue(mutation_flakiness_matrix: &MutationFla
         total = total_test_mutation_pairs_count,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::harness::MutationTestResult;
+
+    use super::compute_flakiness;
+
+    #[test]
+    fn test_no_tests_not_flaky() {
+        assert_eq!(compute_flakiness([]), false);
+    }
+
+    #[test]
+    fn test_always_detected_tests_not_flaky() {
+        assert_eq!(
+            compute_flakiness([MutationTestResult::Detected, MutationTestResult::Detected, MutationTestResult::Detected]),
+            false,
+        );
+    }
+
+    #[test]
+    fn test_always_undetected_tests_not_flaky() {
+        assert_eq!(
+            compute_flakiness([MutationTestResult::Undetected, MutationTestResult::Undetected, MutationTestResult::Undetected]),
+            false,
+        );
+    }
+
+    #[test]
+    fn test_flaky_tests_flaky() {
+        assert_eq!(
+            compute_flakiness([MutationTestResult::Detected, MutationTestResult::Detected, MutationTestResult::Undetected]),
+            true,
+        );
+        assert_eq!(
+            compute_flakiness([MutationTestResult::Undetected, MutationTestResult::Crashed, MutationTestResult::Undetected]),
+            true,
+        );
+        assert_eq!(
+            compute_flakiness([MutationTestResult::Undetected, MutationTestResult::Undetected, MutationTestResult::TimedOut]),
+            true,
+        );
+    }
+
+    #[test]
+    fn test_ignore_detection_reason_flakiness() {
+        assert_eq!(
+            compute_flakiness([MutationTestResult::Detected, MutationTestResult::TimedOut, MutationTestResult::Crashed]),
+            false,
+        );
+    }
+}
