@@ -32,6 +32,8 @@ pub mod build {
 pub mod test_runner;
 pub mod thread_pool;
 
+pub mod detections;
+
 mod config;
 pub use config::*;
 
