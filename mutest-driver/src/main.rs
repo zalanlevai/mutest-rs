@@ -138,10 +138,10 @@ pub fn main() {
         let report_timings = mutest_arg_matches.get_flag("timings");
 
         let print_opts = {
-            use mutest_driver_cli::print::*;
+            use mutest_driver_cli::print as opts;
 
             let mut print_names = mutest_arg_matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<FxHashSet<_>>()).unwrap_or_default();
-            if print_names.contains("all") { print_names = FxHashSet::from_iter(ALL.into_iter().map(|s| *s)); }
+            if print_names.contains("all") { print_names = FxHashSet::from_iter(opts::ALL.into_iter().map(|s| *s)); }
 
             let mut print_opts = config::PrintOptions {
                 print_headers: print_names.len() > 1,
@@ -154,37 +154,37 @@ pub fn main() {
             };
 
             let graph_format = {
-                use mutest_driver_cli::graph_format::*;
+                use mutest_driver_cli::graph_format as opts;
 
                 match mutest_arg_matches.get_one::<String>("graph-format").map(String::as_str) {
-                    Some(SIMPLE) => config::GraphFormat::Simple,
-                    Some(GRAPHVIZ) => config::GraphFormat::Graphviz,
+                    Some(opts::SIMPLE) => config::GraphFormat::Simple,
+                    Some(opts::GRAPHVIZ) => config::GraphFormat::Graphviz,
                     _ => unreachable!(),
                 }
             };
 
             for print_name in print_names {
                 match print_name {
-                    TESTS => print_opts.tests = Some(()),
-                    TARGETS => print_opts.mutation_targets = Some(()),
-                    CALL_GRAPH => {
+                    opts::TESTS => print_opts.tests = Some(()),
+                    opts::TARGETS => print_opts.mutation_targets = Some(()),
+                    opts::CALL_GRAPH => {
                         let non_local_call_view = {
-                            use mutest_driver_cli::call_graph_non_local_call_view::*;
+                            use mutest_driver_cli::call_graph_non_local_call_view as opts;
                             match mutest_arg_matches.get_one::<String>("call-graph-non-local-calls").map(String::as_str) {
-                                Some(COLLAPSE) => config::CallGraphNonLocalCallView::Collapse,
-                                Some(EXPAND) => config::CallGraphNonLocalCallView::Expand,
+                                Some(opts::COLLAPSE) => config::CallGraphNonLocalCallView::Collapse,
+                                Some(opts::EXPAND) => config::CallGraphNonLocalCallView::Expand,
                                 _ => unreachable!(),
                             }
                         };
                         print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, non_local_call_view });
                     }
-                    CONFLICT_GRAPH | COMPATIBILITY_GRAPH => {
-                        let compatibility_graph = matches!(print_name, COMPATIBILITY_GRAPH);
+                    opts::CONFLICT_GRAPH | opts::COMPATIBILITY_GRAPH => {
+                        let compatibility_graph = matches!(print_name, opts::COMPATIBILITY_GRAPH);
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
                         print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format: graph_format });
                     }
-                    MUTANTS => print_opts.mutants = Some(()),
-                    CODE => print_opts.code = Some(()),
+                    opts::MUTANTS => print_opts.mutants = Some(()),
+                    opts::CODE => print_opts.code = Some(()),
                     _ => unreachable!("invalid print information name: `{print_name}`"),
                 }
             }
@@ -201,34 +201,34 @@ pub fn main() {
         };
 
         let mutation_operators = {
-            use mutest_driver_cli::mutation_operators::*;
+            use mutest_driver_cli::mutation_operators as opts;
 
             let mut op_names = mutest_arg_matches.get_many::<String>("mutation-operators").unwrap().map(String::as_str).collect::<FxHashSet<_>>();
-            if op_names.contains("all") { op_names = FxHashSet::from_iter(ALL.into_iter().map(|s| *s)); }
+            if op_names.contains("all") { op_names = FxHashSet::from_iter(opts::ALL.into_iter().map(|s| *s)); }
 
             op_names.into_iter()
                 .map(|op_name| {
                     macro const_op_ref($m:expr) { { const OP: Operators<'_, '_> = &[&$m]; OP[0] } }
 
                     match op_name {
-                        ARG_DEFAULT_SHADOW => const_op_ref!(mutest_operators::ArgDefaultShadow),
-                        BIT_OP_OR_AND_SWAP => const_op_ref!(mutest_operators::BitOpOrAndSwap),
-                        BIT_OP_OR_XOR_SWAP => const_op_ref!(mutest_operators::BitOpOrXorSwap),
-                        BIT_OP_SHIFT_DIR_SWAP => const_op_ref!(mutest_operators::BitOpShiftDirSwap),
-                        BIT_OP_XOR_AND_SWAP => const_op_ref!(mutest_operators::BitOpXorAndSwap),
-                        BOOL_EXPR_NEGATE => const_op_ref!(mutest_operators::BoolExprNegate),
-                        CALL_DELETE => const_op_ref!(mutest_operators::CallDelete { limit_scope_to_local_callees: false }),
-                        CALL_VALUE_DEFAULT_SHADOW => const_op_ref!(mutest_operators::CallValueDefaultShadow { limit_scope_to_local_callees: false }),
-                        CONTINUE_BREAK_SWAP => const_op_ref!(mutest_operators::ContinueBreakSwap),
-                        EQ_OP_INVERT => const_op_ref!(mutest_operators::EqOpInvert),
-                        LOGICAL_OP_AND_OR_SWAP => const_op_ref!(mutest_operators::LogicalOpAndOrSwap),
-                        MATH_OP_ADD_MUL_SWAP => const_op_ref!(mutest_operators::OpAddMulSwap),
-                        MATH_OP_ADD_SUB_SWAP => const_op_ref!(mutest_operators::OpAddSubSwap),
-                        MATH_OP_DIV_REM_SWAP => const_op_ref!(mutest_operators::OpDivRemSwap),
-                        MATH_OP_MUL_DIV_SWAP => const_op_ref!(mutest_operators::OpMulDivSwap),
-                        RANGE_LIMIT_SWAP => const_op_ref!(mutest_operators::RangeLimitSwap),
-                        RELATIONAL_OP_EQ_SWAP => const_op_ref!(mutest_operators::RelationalOpEqSwap),
-                        RELATIONAL_OP_INVERT => const_op_ref!(mutest_operators::RelationalOpInvert),
+                        opts::ARG_DEFAULT_SHADOW => const_op_ref!(mutest_operators::ArgDefaultShadow),
+                        opts::BIT_OP_OR_AND_SWAP => const_op_ref!(mutest_operators::BitOpOrAndSwap),
+                        opts::BIT_OP_OR_XOR_SWAP => const_op_ref!(mutest_operators::BitOpOrXorSwap),
+                        opts::BIT_OP_SHIFT_DIR_SWAP => const_op_ref!(mutest_operators::BitOpShiftDirSwap),
+                        opts::BIT_OP_XOR_AND_SWAP => const_op_ref!(mutest_operators::BitOpXorAndSwap),
+                        opts::BOOL_EXPR_NEGATE => const_op_ref!(mutest_operators::BoolExprNegate),
+                        opts::CALL_DELETE => const_op_ref!(mutest_operators::CallDelete { limit_scope_to_local_callees: false }),
+                        opts::CALL_VALUE_DEFAULT_SHADOW => const_op_ref!(mutest_operators::CallValueDefaultShadow { limit_scope_to_local_callees: false }),
+                        opts::CONTINUE_BREAK_SWAP => const_op_ref!(mutest_operators::ContinueBreakSwap),
+                        opts::EQ_OP_INVERT => const_op_ref!(mutest_operators::EqOpInvert),
+                        opts::LOGICAL_OP_AND_OR_SWAP => const_op_ref!(mutest_operators::LogicalOpAndOrSwap),
+                        opts::MATH_OP_ADD_MUL_SWAP => const_op_ref!(mutest_operators::OpAddMulSwap),
+                        opts::MATH_OP_ADD_SUB_SWAP => const_op_ref!(mutest_operators::OpAddSubSwap),
+                        opts::MATH_OP_DIV_REM_SWAP => const_op_ref!(mutest_operators::OpDivRemSwap),
+                        opts::MATH_OP_MUL_DIV_SWAP => const_op_ref!(mutest_operators::OpMulDivSwap),
+                        opts::RANGE_LIMIT_SWAP => const_op_ref!(mutest_operators::RangeLimitSwap),
+                        opts::RELATIONAL_OP_EQ_SWAP => const_op_ref!(mutest_operators::RelationalOpEqSwap),
+                        opts::RELATIONAL_OP_INVERT => const_op_ref!(mutest_operators::RelationalOpInvert),
                         _ => unreachable!("invalid mutation operator name: `{op_name}`"),
                     }
                 })
@@ -248,22 +248,22 @@ pub fn main() {
         }
 
         let mutation_batching_algorithm = {
-            use mutest_driver_cli::mutant_batch_algorithm::*;
+            use mutest_driver_cli::mutant_batch_algorithm as opts;
 
             match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
-                None | Some(NONE) => config::MutationBatchingAlgorithm::None,
+                None | Some(opts::NONE) => config::MutationBatchingAlgorithm::None,
 
-                Some(RANDOM) => config::MutationBatchingAlgorithm::Random,
+                Some(opts::RANDOM) => config::MutationBatchingAlgorithm::Random,
 
-                Some(GREEDY) => {
+                Some(opts::GREEDY) => {
                     let ordering_heuristic = {
-                        use mutest_driver_cli::mutant_batch_greedy_ordering_heuristic::*;
+                        use mutest_driver_cli::mutant_batch_greedy_ordering_heuristic as opts;
 
                         match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
-                            None | Some(NONE) => None,
-                            Some(RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
-                            Some(CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
-                            Some(REVERSE_CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
+                            None | Some(opts::NONE) => None,
+                            Some(opts::RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
+                            Some(opts::CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
+                            Some(opts::REVERSE_CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
                             _ => unreachable!(),
                         }
                     };
@@ -273,7 +273,7 @@ pub fn main() {
                     config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon }
                 }
 
-                Some(SIMULATED_ANNEALING) => config::MutationBatchingAlgorithm::SimulatedAnnealing,
+                Some(opts::SIMULATED_ANNEALING) => config::MutationBatchingAlgorithm::SimulatedAnnealing,
 
                 _ => unreachable!(),
             }
@@ -291,18 +291,18 @@ pub fn main() {
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
         let verify_opts = {
-            use mutest_driver_cli::verify::*;
+            use mutest_driver_cli::verify as opts;
 
             let mut verify_opts = config::VerifyOptions {
                 ast_lowering: false,
             };
 
             let mut verify_names = mutest_arg_matches.get_many::<String>("Zverify").map(|verify| verify.map(String::as_str).collect::<FxHashSet<_>>()).unwrap_or_default();
-            if verify_names.contains("all") { verify_names = FxHashSet::from_iter(ALL.into_iter().map(|s| *s)); }
+            if verify_names.contains("all") { verify_names = FxHashSet::from_iter(opts::ALL.into_iter().map(|s| *s)); }
 
             for verify_name in verify_names {
                 match verify_name {
-                    AST_LOWERING => verify_opts.ast_lowering = true,
+                    opts::AST_LOWERING => verify_opts.ast_lowering = true,
                     _ => unreachable!("invalid verify name: `{verify_name}`"),
                 }
             }
