@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::MutationSafety;
-use crate::config::{self, Options, PrintOptions};
+use crate::config::{self, Options};
 use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
@@ -204,8 +204,8 @@ pub enum MutationTestResult {
 
 #[derive(Default)]
 pub struct MutationTestResults {
-    result: MutationTestResult,
-    results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
+    pub result: MutationTestResult,
+    pub results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
 }
 
 fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, exhaustive: bool, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
@@ -345,11 +345,271 @@ impl MutationDetectionMatrix {
     }
 }
 
-pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
+fn print_mutation_detection_matrix(mutation_detection_matrix: &MutationDetectionMatrix, tests: &[test_runner::Test], warn_non_exhaustive: bool) {
+    // Tests are printed in name order.
+    let mut test_names = tests.iter().map(|test| test.desc.name.clone()).collect::<Vec<_>>();
+    test_names.sort_unstable_by(|test_name_a, test_name_b| Ord::cmp(test_name_a.as_slice(), test_name_b.as_slice()));
+
+    let test_name_w = test_names.iter().map(|test_name| test_name.as_slice().len()).max().unwrap_or(0);
+
+    // Print mutation ID numbers in 10's for matrix heading, like so `1        10        20...`.
+    print!("{:w$}", "", w = test_name_w + "test ".len() + 1);
+    for mutation_idx in mutation_detection_matrix.iter_mutation_ids() {
+        if mutation_idx == 1 {
+            print!("{mutation_idx:<9}");
+        } else if mutation_idx % 10 == 0 {
+            print!("{mutation_idx:<10}");
+        }
+    }
+    println!();
+
+    // Print mutation ID numbers' last digits for matrix heading, like so `12345678901234567890123...`.
+    print!("{:w$}", "", w = test_name_w + "test ".len() + 1);
+    let mut mutation_id_chunks = mutation_detection_matrix.iter_mutation_ids().array_chunks::<10>();
+    while let Some(_) = mutation_id_chunks.next() {
+        print!("1234567890");
+    }
+    if let Some(last_mutation_id_chunk) = mutation_id_chunks.into_remainder() {
+        print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
+    }
+    println!();
+
+    // Print matrix row for overall mutation detection.
+    print!("{:w$}", "total", w = test_name_w + "test ".len() + 1);
+    for (_mutation_id, mutation_test_result) in mutation_detection_matrix.iter_detections() {
+        match mutation_test_result {
+            MutationTestResult::Undetected => print!("-"),
+            MutationTestResult::Detected => print!("D"),
+            MutationTestResult::Crashed => print!("C"),
+            MutationTestResult::TimedOut => print!("T"),
+        }
+    }
+    println!();
+
+    // Print one matrix row for each test for test-mutation detections.
+    for test_name in test_names {
+        print!("test {:test_name_w$} ", test_name.as_slice());
+        for (_mutation_id, mutation_test_result) in mutation_detection_matrix.iter_test_detections(&test_name) {
+            match mutation_test_result {
+                None => print!("."),
+                Some(MutationTestResult::Undetected) => print!("-"),
+                Some(MutationTestResult::Detected) => print!("D"),
+                Some(MutationTestResult::Crashed) => print!("C"),
+                Some(MutationTestResult::TimedOut) => print!("T"),
+            }
+        }
+        println!();
+    }
+    println!();
+
+    // Print legend of symbols used in the matrix.
+    println!("legend: .: not run; -: undetected; D: detected; C: crashed; T: timed out");
+    println!();
+
+    if warn_non_exhaustive {
+        println!("warning: mutation detection matrix is incomplete as not all tests were evaluated, rerun with `--exhaustive`");
+        println!();
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct MutationOpStats {
+    pub total_mutations_count: usize,
+    pub undetected_mutations_count: usize,
+    pub timed_out_mutations_count: usize,
+    pub crashed_mutations_count: usize,
+}
+
+pub struct MutationAnalysisResults {
+    pub all_test_runs_failed_successfully: bool,
+    pub total_mutations_count: usize,
+    pub total_safe_mutations_count: usize,
+    pub undetected_mutations_count: usize,
+    pub undetected_safe_mutations_count: usize,
+    pub timed_out_mutations_count: usize,
+    pub timed_out_safe_mutations_count: usize,
+    pub crashed_mutations_count: usize,
+    pub crashed_safe_mutations_count: usize,
+    pub mutation_detection_matrix: MutationDetectionMatrix,
+    pub mutation_op_stats: HashMap<&'static str, MutationOpStats>,
+    pub duration: Duration,
+}
+
+fn run_mutation_analysis<S: SubstMap>(opts: &Options, tests: &[test_runner::Test], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>, thread_pool: Option<ThreadPool>) -> MutationAnalysisResults {
+    let mut results = MutationAnalysisResults {
+        all_test_runs_failed_successfully: true,
+        total_mutations_count: 0,
+        total_safe_mutations_count: 0,
+        undetected_mutations_count: 0,
+        undetected_safe_mutations_count: 0,
+        timed_out_mutations_count: 0,
+        timed_out_safe_mutations_count: 0,
+        crashed_mutations_count: 0,
+        crashed_safe_mutations_count: 0,
+        mutation_detection_matrix: MutationDetectionMatrix::new(mutants.iter().map(|mutant| mutant.mutations.len()).sum()),
+        mutation_op_stats: Default::default(),
+        duration: Duration::ZERO,
+    };
+
+    let t_start = Instant::now();
+
+    for &mutant in mutants {
+        // SAFETY: Ideally, since the previous test runs all completed, no other thread is running, no one else is
+        //         reading from the handle.
+        //         As for lingering test cases from previous test runs, their behaviour will change accordingly, but we
+        //         have already marked them as timed out and abandoned them by this point. The behaviour in such cases
+        //         stays the same, regardless of whether the handle performs locking or not.
+        unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
+
+        if opts.verbosity >= 1 {
+            print!("{}: ", mutant.id);
+        }
+        println!("applying mutant with the following mutations:");
+        for mutation in mutant.mutations {
+            print!("- ");
+            if opts.verbosity >= 1 {
+                print!("{}: ", mutation.id);
+            }
+            println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
+                unsafe_marker = match mutation.safety {
+                    MutationSafety::Safe => "",
+                    MutationSafety::Tainted => "(tainted) ",
+                    MutationSafety::Unsafe => "(unsafe) ",
+                },
+                op_name = mutation.op_name,
+                display_name = mutation.display_name,
+                display_location = mutation.display_location,
+            );
+        }
+        println!();
+
+        let mut tests = clone_tests(tests);
+        if let config::TestOrdering::MutationDistance = opts.test_ordering {
+            prioritize_tests_by_distance(&mut tests, mutant.mutations);
+        }
+
+        match run_tests(tests, mutant, opts.exhaustive, thread_pool.clone()) {
+            Ok(mut run_results) => {
+                for &mutation in mutant.mutations {
+                    let op_stats = results.mutation_op_stats.entry(mutation.op_name).or_default();
+
+                    results.total_mutations_count += 1;
+                    op_stats.total_mutations_count += 1;
+                    if let MutationSafety::Safe = mutation.safety {
+                        results.total_safe_mutations_count += 1;
+                    }
+
+                    let Some(mutation_result) = run_results.remove(&mutation.id) else { unreachable!() };
+
+                    match mutation_result.result {
+                        MutationTestResult::Undetected => {
+                            results.all_test_runs_failed_successfully = false;
+
+                            results.undetected_mutations_count += 1;
+                            op_stats.undetected_mutations_count += 1;
+                            if let MutationSafety::Safe = mutation.safety {
+                                results.undetected_safe_mutations_count += 1;
+                            }
+
+                            print!("{}", mutation.undetected_diagnostic);
+                        }
+
+                        MutationTestResult::Detected => {}
+                        MutationTestResult::TimedOut => {
+                            results.timed_out_mutations_count += 1;
+                            op_stats.timed_out_mutations_count += 1;
+                            if let MutationSafety::Safe = mutation.safety {
+                                results.timed_out_safe_mutations_count += 1;
+                            }
+
+                        }
+                        MutationTestResult::Crashed => {
+                            results.crashed_mutations_count += 1;
+                            op_stats.crashed_mutations_count += 1;
+                            if let MutationSafety::Safe = mutation.safety {
+                                results.crashed_safe_mutations_count += 1;
+                            }
+                        }
+                    }
+
+                    results.mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
+                }
+            }
+            Err(_) => { process::exit(ERROR_EXIT_CODE); }
+        }
+    }
+
+    results.duration = t_start.elapsed();
+
+    results
+}
+
+fn print_mutation_analysis_epilogue(results: &MutationAnalysisResults, verbosity: u8) {
+    if verbosity >= 1 {
+        let mut op_names = results.mutation_op_stats.keys().collect::<Vec<_>>();
+        op_names.sort_unstable();
+
+        let op_name_w = op_names.iter().map(|s| s.len()).max().unwrap_or(0);
+        let detected_w = results.mutation_op_stats.values().map(|s| (s.total_mutations_count - s.undetected_mutations_count).checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let timed_out_w = results.mutation_op_stats.values().map(|s| s.timed_out_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let crashed_w = results.mutation_op_stats.values().map(|s| s.crashed_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+        let undetected_w = results.mutation_op_stats.values().map(|s| s.undetected_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
+
+        for op_name in op_names {
+            let op_stats = results.mutation_op_stats.get(op_name).map(|s| *s).unwrap_or_default();
+
+            println!("{op_name:>op_name_w$}: {score:>7}. {detected:>detected_w$} detected ({timed_out:>timed_out_w$} timed out; {crashed:>crashed_w$} crashed); {undetected:>undetected_w$} undetected",
+                score = format!("{:.2}%",(op_stats.total_mutations_count - op_stats.undetected_mutations_count) as f64 / op_stats.total_mutations_count as f64 * 100_f64),
+                detected = op_stats.total_mutations_count - op_stats.undetected_mutations_count,
+                timed_out = op_stats.timed_out_mutations_count,
+                crashed = op_stats.crashed_mutations_count,
+                undetected = op_stats.undetected_mutations_count,
+            );
+        }
+
+        println!();
+    }
+
+    println!("mutations: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
+        score = match results.total_mutations_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%", (results.total_mutations_count - results.undetected_mutations_count) as f64 / results.total_mutations_count as f64 * 100_f64),
+        },
+        detected = results.total_mutations_count - results.undetected_mutations_count,
+        timed_out = results.timed_out_mutations_count,
+        crashed = results.crashed_mutations_count,
+        undetected = results.undetected_mutations_count,
+        total = results.total_mutations_count,
+    );
+    println!("     safe: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
+        score = match results.total_safe_mutations_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%", (results.total_safe_mutations_count - results.undetected_safe_mutations_count) as f64 / results.total_safe_mutations_count as f64 * 100_f64),
+        },
+        detected = results.total_safe_mutations_count - results.undetected_safe_mutations_count,
+        timed_out = results.timed_out_safe_mutations_count,
+        crashed = results.crashed_safe_mutations_count,
+        undetected = results.undetected_safe_mutations_count,
+        total = results.total_safe_mutations_count,
+    );
+    println!("   unsafe: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
+        score = match results.total_mutations_count - results.total_safe_mutations_count {
+            0 => "none".to_owned(),
+            _ => format!("{:.2}%", ((results.total_mutations_count - results.total_safe_mutations_count) - (results.undetected_mutations_count - results.undetected_safe_mutations_count)) as f64 / (results.total_mutations_count - results.total_safe_mutations_count) as f64 * 100_f64),
+        },
+        detected = (results.total_mutations_count - results.total_safe_mutations_count) - (results.undetected_mutations_count - results.undetected_safe_mutations_count),
+        timed_out = results.timed_out_mutations_count - results.timed_out_safe_mutations_count,
+        crashed = results.crashed_mutations_count - results.crashed_safe_mutations_count,
+        undetected = results.undetected_mutations_count - results.undetected_safe_mutations_count,
+        total = results.total_mutations_count - results.total_safe_mutations_count,
+    );
+}
+
+pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
     let opts = Options {
         verbosity: args.iter().filter(|&arg| *arg == "-v").count() as u8,
         report_timings: args.contains(&"--timings"),
-        print_opts: PrintOptions {
+        print_opts: config::PrintOptions {
             detection_matrix: args.contains(&"--print=detection-matrix").then_some(()),
         },
         exhaustive: args.contains(&"--exhaustive"),
@@ -387,7 +647,7 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
     }
     println!();
 
-    let mut tests = profiled_tests.into_iter()
+    let tests = profiled_tests.into_iter()
         .filter(|profiled_test| !matches!(profiled_test.result, test_runner::TestResult::Ignored))
         .map(|profiled_test| {
             let test::TestDescAndFn { desc, testfn: test_fn } = profiled_test.test;
@@ -422,251 +682,23 @@ pub fn mutest_main<S: SubstMap + Sync>(args: &[&str], tests: Vec<test::TestDescA
         println!();
     }
 
-    let mut all_test_runs_failed_successfully = true;
-    let mut total_mutations_count = 0;
-    let mut total_safe_mutations_count = 0;
-    let mut undetected_mutations_count = 0;
-    let mut undetected_safe_mutations_count = 0;
-    let mut timed_out_mutations_count = 0;
-    let mut timed_out_safe_mutations_count = 0;
-    let mut crashed_mutations_count = 0;
-    let mut crashed_safe_mutations_count = 0;
-
-    let mut mutation_detection_matrix = MutationDetectionMatrix::new(mutants.iter().map(|mutant| mutant.mutations.len()).sum());
-
-    #[derive(Clone, Copy, Default)]
-    struct MutationOpStats {
-        total_mutations_count: usize,
-        undetected_mutations_count: usize,
-        timed_out_mutations_count: usize,
-        crashed_mutations_count: usize,
-    }
-
-    let mut mutation_op_stats: HashMap<&str, MutationOpStats> = Default::default();
-
-    let t_mutation_testing_start = Instant::now();
-    for &mutant in mutants {
-        // SAFETY: Ideally, since the previous test runs all completed, no other thread is running, no one else is
-        //         reading from the handle.
-        //         As for lingering test cases from previous test runs, their behaviour will change accordingly, but we
-        //         have already marked them as timed out and abandoned them by this point. The behaviour in such cases
-        //         stays the same, regardless of whether the handle performs locking or not.
-        unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
-
-        if opts.verbosity >= 1 {
-            print!("{}: ", mutant.id);
-        }
-        println!("applying mutant with the following mutations:");
-        for mutation in mutant.mutations {
-            print!("- ");
-            if opts.verbosity >= 1 {
-                print!("{}: ", mutation.id);
-            }
-            println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
-                unsafe_marker = match mutation.safety {
-                    MutationSafety::Safe => "",
-                    MutationSafety::Tainted => "(tainted) ",
-                    MutationSafety::Unsafe => "(unsafe) ",
-                },
-                op_name = mutation.op_name,
-                display_name = mutation.display_name,
-                display_location = mutation.display_location,
-            );
-        }
-        println!();
-
-        let mut tests = clone_tests(&tests);
-
-        if let config::TestOrdering::MutationDistance = opts.test_ordering {
-            prioritize_tests_by_distance(&mut tests, mutant.mutations);
-        }
-
-        match run_tests(tests, mutant, opts.exhaustive, thread_pool.clone()) {
-            Ok(mut results) => {
-                for &mutation in mutant.mutations {
-                    let op_stats = mutation_op_stats.entry(mutation.op_name).or_default();
-
-                    total_mutations_count += 1;
-                    op_stats.total_mutations_count += 1;
-                    if let MutationSafety::Safe = mutation.safety {
-                        total_safe_mutations_count += 1;
-                    }
-
-                    let Some(mutation_result) = results.remove(&mutation.id) else { unreachable!() };
-
-                    match mutation_result.result {
-                        MutationTestResult::Undetected => {
-                            all_test_runs_failed_successfully = false;
-
-                            undetected_mutations_count += 1;
-                            op_stats.undetected_mutations_count += 1;
-                            if let MutationSafety::Safe = mutation.safety {
-                                undetected_safe_mutations_count += 1;
-                            }
-
-                            print!("{}", mutation.undetected_diagnostic);
-                        }
-
-                        MutationTestResult::Detected => {}
-                        MutationTestResult::TimedOut => {
-                            timed_out_mutations_count += 1;
-                            op_stats.timed_out_mutations_count += 1;
-                            if let MutationSafety::Safe = mutation.safety {
-                                timed_out_safe_mutations_count += 1;
-                            }
-
-                        }
-                        MutationTestResult::Crashed => {
-                            crashed_mutations_count += 1;
-                            op_stats.crashed_mutations_count += 1;
-                            if let MutationSafety::Safe = mutation.safety {
-                                crashed_safe_mutations_count += 1;
-                            }
-                        }
-                    }
-
-                    mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
-                }
-            }
-            Err(_) => { process::exit(ERROR_EXIT_CODE); }
-        }
-    }
-    let mutation_testing_duration = t_mutation_testing_start.elapsed();
+    let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool);
 
     if let Some(()) = &opts.print_opts.detection_matrix {
-        // Tests are printed in name order.
-        tests.sort_unstable_by(|test_a, test_b| Ord::cmp(test_a.desc.name.as_slice(), test_b.desc.name.as_slice()));
-
-        let test_name_w = tests.iter().map(|test| test.desc.name.as_slice().len()).max().unwrap_or(0);
-
-        // Print mutation ID numbers in 10's for matrix heading, like so `1        10        20...`.
-        print!("{:w$}", "", w = test_name_w + "test ".len() + 1);
-        for mutation_idx in mutation_detection_matrix.iter_mutation_ids() {
-            if mutation_idx == 1 {
-                print!("{mutation_idx:<9}");
-            } else if mutation_idx % 10 == 0 {
-                print!("{mutation_idx:<10}");
-            }
-        }
-        println!();
-
-        // Print mutation ID numbers' last digits for matrix heading, like so `12345678901234567890123...`.
-        print!("{:w$}", "", w = test_name_w + "test ".len() + 1);
-        let mut mutation_id_chunks = mutation_detection_matrix.iter_mutation_ids().array_chunks::<10>();
-        while let Some(_) = mutation_id_chunks.next() {
-            print!("1234567890");
-        }
-        if let Some(last_mutation_id_chunk) = mutation_id_chunks.into_remainder() {
-            print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
-        }
-        println!();
-
-        // Print matrix row for overall mutation detection.
-        print!("{:w$}", "total", w = test_name_w + "test ".len() + 1);
-        for (_mutation_id, mutation_test_result) in mutation_detection_matrix.iter_detections() {
-            match mutation_test_result {
-                MutationTestResult::Undetected => print!("-"),
-                MutationTestResult::Detected => print!("D"),
-                MutationTestResult::Crashed => print!("C"),
-                MutationTestResult::TimedOut => print!("T"),
-            }
-        }
-        println!();
-
-        // Print one matrix row for each test for test-mutation detections.
-        for test in &tests {
-            print!("test {:test_name_w$} ", test.desc.name.as_slice());
-            for (_mutation_id, mutation_test_result) in mutation_detection_matrix.iter_test_detections(&test.desc.name) {
-                match mutation_test_result {
-                    None => print!("."),
-                    Some(MutationTestResult::Undetected) => print!("-"),
-                    Some(MutationTestResult::Detected) => print!("D"),
-                    Some(MutationTestResult::Crashed) => print!("C"),
-                    Some(MutationTestResult::TimedOut) => print!("T"),
-                }
-            }
-            println!();
-        }
-        println!();
-
-        // Print legend of symbols used in the matrix.
-        println!("legend: .: not run; -: undetected; D: detected; C: crashed; T: timed out");
-        println!();
-
-        if !opts.exhaustive {
-            println!("warning: mutation detection matrix is incomplete as not all tests were evaluated, rerun with `--exhaustive`");
-            println!();
-        }
+        print_mutation_detection_matrix(&results.mutation_detection_matrix, &tests, !opts.exhaustive);
     }
 
-    if opts.verbosity >= 1 {
-        let mut op_names = mutation_op_stats.keys().collect::<Vec<_>>();
-        op_names.sort_unstable();
-
-        let op_name_w = op_names.iter().map(|s| s.len()).max().unwrap_or(0);
-        let detected_w = mutation_op_stats.values().map(|s| (s.total_mutations_count - s.undetected_mutations_count).checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
-        let timed_out_w = mutation_op_stats.values().map(|s| s.timed_out_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
-        let crashed_w = mutation_op_stats.values().map(|s| s.crashed_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
-        let undetected_w = mutation_op_stats.values().map(|s| s.undetected_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1).max().unwrap_or(0);
-
-        for op_name in op_names {
-            let op_stats = mutation_op_stats.get(op_name).map(|s| *s).unwrap_or_default();
-
-            println!("{op_name:>op_name_w$}: {score:>7}. {detected:>detected_w$} detected ({timed_out:>timed_out_w$} timed out; {crashed:>crashed_w$} crashed); {undetected:>undetected_w$} undetected",
-                score = format!("{:.2}%",(op_stats.total_mutations_count - op_stats.undetected_mutations_count) as f64 / op_stats.total_mutations_count as f64 * 100_f64),
-                detected = op_stats.total_mutations_count - op_stats.undetected_mutations_count,
-                timed_out = op_stats.timed_out_mutations_count,
-                crashed = op_stats.crashed_mutations_count,
-                undetected = op_stats.undetected_mutations_count,
-            );
-        }
-
-        println!();
-    }
-
-    println!("mutations: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
-        score = match total_mutations_count {
-            0 => "none".to_owned(),
-            _ => format!("{:.2}%",(total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64 * 100_f64),
-        },
-        detected = total_mutations_count - undetected_mutations_count,
-        timed_out = timed_out_mutations_count,
-        crashed = crashed_mutations_count,
-        undetected = undetected_mutations_count,
-        total = total_mutations_count,
-    );
-    println!("     safe: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
-        score = match total_safe_mutations_count {
-            0 => "none".to_owned(),
-            _ => format!("{:.2}%",(total_safe_mutations_count - undetected_safe_mutations_count) as f64 / total_safe_mutations_count as f64 * 100_f64),
-        },
-        detected = total_safe_mutations_count - undetected_safe_mutations_count,
-        timed_out = timed_out_safe_mutations_count,
-        crashed = crashed_safe_mutations_count,
-        undetected = undetected_safe_mutations_count,
-        total = total_safe_mutations_count,
-    );
-    println!("   unsafe: {score}. {detected} detected ({timed_out} timed out; {crashed} crashed); {undetected} undetected; {total} total",
-        score = match total_mutations_count - total_safe_mutations_count {
-            0 => "none".to_owned(),
-            _ => format!("{:.2}%",((total_mutations_count - total_safe_mutations_count) - (undetected_mutations_count - undetected_safe_mutations_count)) as f64 / (total_mutations_count - total_safe_mutations_count) as f64 * 100_f64),
-        },
-        detected = (total_mutations_count - total_safe_mutations_count) - (undetected_mutations_count - undetected_safe_mutations_count),
-        timed_out = timed_out_mutations_count - timed_out_safe_mutations_count,
-        crashed = crashed_mutations_count - crashed_safe_mutations_count,
-        undetected = undetected_mutations_count - undetected_safe_mutations_count,
-        total = total_mutations_count - total_safe_mutations_count,
-    );
+    print_mutation_analysis_epilogue(&results, opts.verbosity);
 
     if opts.report_timings {
         println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?})",
             total = t_start.elapsed(),
             profiling = test_profiling_duration,
-            tests = mutation_testing_duration,
+            tests = results.duration,
         );
     }
 
-    if !all_test_runs_failed_successfully {
+    if !results.all_test_runs_failed_successfully {
         process::exit(ERROR_EXIT_CODE);
     }
 }
@@ -787,7 +819,7 @@ fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAnd
     }
 }
 
-pub fn mutest_main_static<S: SubstMap + Sync>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
+pub fn mutest_main_static<S: SubstMap>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
         env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION);
 
