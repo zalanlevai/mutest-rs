@@ -86,6 +86,13 @@ pub mod graph_format {
     }
 }
 
+pub mod call_graph_non_local_call_view {
+    crate::exclusive_opts! { pub(crate) possible_values where
+        COLLAPSE = "collapse"; ["Non-local items are hidden, only calls to local items through non-local items are shown."]
+        EXPAND = "expand"; ["All calls to non-local items are shown."]
+    }
+}
+
 pub mod verify {
     crate::opts! { ALL, pub(crate) possible_values where
         AST_LOWERING = "ast_lowering";
@@ -136,6 +143,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--print [PRINT] "Print additional information during analysis. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(print::possible_values()).display_order(101))
         .arg(clap::arg!(--"graph-exclude-unsafe" "Exclude unsafe mutations from the graph, only listing safe mutations.").display_order(102))
         .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(graph_format::possible_values()).default_value(graph_format::SIMPLE).display_order(102))
+        .arg(clap::arg!(--"call-graph-non-local-calls" [CALL_GRAPH_NON_LOCAL_CALL_VIEW] "Mode to display non-local calls in the call graph.").value_parser(call_graph_non_local_call_view::possible_values()).default_value(call_graph_non_local_call_view::COLLAPSE).display_order(103))
         // Experimental Flags
         .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
         .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended.").display_order(500))

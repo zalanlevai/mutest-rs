@@ -18,6 +18,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 extern crate itertools;
+extern crate smallvec;
 
 pub mod config;
 pub mod passes;

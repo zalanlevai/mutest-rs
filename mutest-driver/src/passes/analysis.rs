@@ -11,6 +11,7 @@ use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
+use smallvec::{SmallVec, smallvec};
 
 use crate::config::{self, Config};
 use crate::passes::{Flow, base_compiler_config};
@@ -117,7 +118,7 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
     );
 }
 
-fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &CallGraph<'tcx>, targets: &[Target<'trg>], format: config::GraphFormat) {
+fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &CallGraph<'tcx>, targets: &[Target<'trg>], format: config::GraphFormat, non_local_call_view: config::CallGraphNonLocalCallView) {
     match format {
         config::GraphFormat::Simple => {
             let mut tests_in_print_order = tests.iter()
@@ -151,6 +152,7 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             let def_node_id = |def_id: hir::DefId| format!("def_{}_{}", def_id.krate.index(), def_id.index.index());
 
             let callee_node_id = |callee: &Callee| {
+                if callee.generic_args.is_empty() { return def_node_id(callee.def_id); }
                 format!("def_{}_{}_{}", callee.def_id.krate.index(), callee.def_id.index.index(), &format!("{:p}", callee.generic_args)[2..])
             };
 
@@ -187,10 +189,22 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             println!("  }}");
 
             let mut defined_callees: FxHashSet<Callee> = Default::default();
+            let mut collapsed_call_paths: FxHashMap::<Callee<'tcx>, SmallVec<[SmallVec<[Callee<'tcx>; 3]>; 1]>> = Default::default();
 
             println!("  {{ rank=same; 0;");
             for callee in call_graph.root_calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
                 if !defined_callees.insert(*callee) { continue; }
+
+                // Override non-local callee node rendering.
+                if !callee.def_id.is_local() {
+                    match non_local_call_view {
+                        config::CallGraphNonLocalCallView::Collapse => {}
+                        config::CallGraphNonLocalCallView::Expand => {
+                            println!("    {} [label={}, shape=plaintext, fontcolor=lightgray];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx)));
+                        }
+                    }
+                    continue;
+                }
 
                 match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
                     true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
@@ -199,6 +213,19 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             }
             println!("  }}");
             for (root_def_id, callee) in &call_graph.root_calls {
+                // Override non-local root call edge rendering.
+                if !callee.def_id.is_local() {
+                    match non_local_call_view {
+                        config::CallGraphNonLocalCallView::Collapse => {
+                            collapsed_call_paths.entry(*callee).or_default().push(smallvec![Callee::new(root_def_id.to_def_id(), tcx.mk_args(&[])), *callee]);
+                        }
+                        config::CallGraphNonLocalCallView::Expand => {
+                            println!("  {} -> {}:w [color=lightgray];", def_node_id(root_def_id.to_def_id()), callee_node_id(callee));
+                        }
+                    }
+                    continue;
+                }
+
                 println!("  {} -> {}:w;", def_node_id(root_def_id.to_def_id()), callee_node_id(callee));
             }
 
@@ -207,6 +234,17 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 for callee in calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
                     if !defined_callees.insert(*callee) { continue; }
 
+                    // Override non-local callee node rendering.
+                    if !callee.def_id.is_local() {
+                        match non_local_call_view {
+                            config::CallGraphNonLocalCallView::Collapse => {}
+                            config::CallGraphNonLocalCallView::Expand => {
+                                println!("    {} [label={}, shape=plaintext, fontcolor=lightgray];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx)));
+                            }
+                        }
+                        continue;
+                    }
+
                     match targets.iter().any(|target| target.def_id.to_def_id() == callee.def_id) {
                         true => println!("    {} [label={}];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
                         false => println!("    {} [label={}, shape=plaintext];", callee_node_id(callee), escape_label_str(&callee.display_str(tcx))),
@@ -214,6 +252,49 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 }
                 println!("  }}");
                 for (caller, callee) in calls {
+                    // Override non-local deep call edge rendering.
+                    if !caller.def_id.is_local() || !callee.def_id.is_local() {
+                        match non_local_call_view {
+                            config::CallGraphNonLocalCallView::Collapse => {
+                                match (caller.def_id.is_local(), callee.def_id.is_local()) {
+                                    (true, true) => unreachable!(),
+                                    // Local definition calls into non-local definition.
+                                    (true, false) => {
+                                        // Record new collapsed non-local call path.
+                                        collapsed_call_paths.entry(*callee).or_default().push(smallvec![*caller, *callee]);
+                                    }
+                                    // Non-local definition calls into other non-local definition.
+                                    (false, false) => {
+                                        // Extend collapsed non-local call paths.
+                                        let Some(call_paths) = collapsed_call_paths.get(caller) else { unreachable!() };
+                                        let mut call_paths = call_paths.clone();
+                                        for call_path in &mut call_paths {
+                                            call_path.push(*callee);
+                                        }
+                                        collapsed_call_paths.entry(*callee).or_default().extend(call_paths);
+                                    }
+                                    // Non-local definition calls into local definition.
+                                    (false, true) => {
+                                        // Write out collapsed non-local call paths.
+                                        let Some(call_paths) = collapsed_call_paths.get(caller) else { unreachable!(); };
+                                        for call_path in call_paths {
+                                            let [root_callee, ..] = &call_path[..] else { unreachable!() };
+                                            let tooltip = call_path.iter().chain(iter::once(callee))
+                                                .map(|callee| callee.display_str(tcx))
+                                                .intersperse("\n-> ".to_owned())
+                                                .collect::<String>();
+                                            println!("  {} -> {}:w [label=\"indirect\", color=lightgray, labeltooltip={}];", callee_node_id(root_callee), callee_node_id(callee), escape_label_str(&tooltip));
+                                        }
+                                    }
+                                }
+                            }
+                            config::CallGraphNonLocalCallView::Expand => {
+                                println!("  {} -> {}:w [color=lightgray];", callee_node_id(caller), callee_node_id(callee));
+                            }
+                        }
+                        continue;
+                    }
+
                     println!("  {} -> {}:w;", callee_node_id(caller), callee_node_id(callee));
                 }
             }
@@ -494,9 +575,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 //       mutation IDs will not match between repeated invocations.
                 reachable_fns.sort_unstable_by_key(|target| tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)));
 
-                if let Some(format) = opts.print_opts.call_graph.take() {
+                if let Some(config::CallGraphOptions { format, non_local_call_view }) = opts.print_opts.call_graph.take() {
                     if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
-                    print_call_graph(tcx, &tests, &call_graph, &reachable_fns, format);
+                    print_call_graph(tcx, &tests, &call_graph, &reachable_fns, format, non_local_call_view);
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                         if opts.report_timings {
                             println!("\nfinished in {total:.2?} (targets {targets:.2?})",

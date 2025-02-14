@@ -9,6 +9,17 @@ pub enum GraphFormat {
     Graphviz,
 }
 
+#[derive(Clone, Copy)]
+pub enum CallGraphNonLocalCallView {
+    Collapse,
+    Expand,
+}
+
+pub struct CallGraphOptions {
+    pub format: GraphFormat,
+    pub non_local_call_view: CallGraphNonLocalCallView,
+}
+
 pub struct ConflictGraphOptions {
     pub compatibility_graph: bool,
     pub exclude_unsafe: bool,
@@ -19,7 +30,7 @@ pub struct PrintOptions {
     pub print_headers: bool,
     pub tests: Option<()>,
     pub mutation_targets: Option<()>,
-    pub call_graph: Option<GraphFormat>,
+    pub call_graph: Option<CallGraphOptions>,
     pub conflict_graph: Option<ConflictGraphOptions>,
     pub mutants: Option<()>,
     pub code: Option<()>,

@@ -654,7 +654,7 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
         })
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Callee<'tcx> {
     pub def_id: hir::DefId,
     pub generic_args: ty::GenericArgsRef<'tcx>,

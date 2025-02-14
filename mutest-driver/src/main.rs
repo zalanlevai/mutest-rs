@@ -167,7 +167,17 @@ pub fn main() {
                 match print_name {
                     TESTS => print_opts.tests = Some(()),
                     TARGETS => print_opts.mutation_targets = Some(()),
-                    CALL_GRAPH => print_opts.call_graph = Some(graph_format),
+                    CALL_GRAPH => {
+                        let non_local_call_view = {
+                            use mutest_driver_cli::call_graph_non_local_call_view::*;
+                            match mutest_arg_matches.get_one::<String>("call-graph-non-local-calls").map(String::as_str) {
+                                Some(COLLAPSE) => config::CallGraphNonLocalCallView::Collapse,
+                                Some(EXPAND) => config::CallGraphNonLocalCallView::Expand,
+                                _ => unreachable!(),
+                            }
+                        };
+                        print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, non_local_call_view });
+                    }
                     CONFLICT_GRAPH | COMPATIBILITY_GRAPH => {
                         let compatibility_graph = matches!(print_name, COMPATIBILITY_GRAPH);
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
