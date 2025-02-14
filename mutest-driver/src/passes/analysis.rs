@@ -1,7 +1,6 @@
 use std::iter;
 use std::time::{Duration, Instant};
 
-use itertools::Itertools;
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::mutation::{CallGraph, Callee, Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
@@ -625,8 +624,8 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let t_mutation_analysis_start = Instant::now();
                 let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
                 if opts.verbosity >= 1 {
-                    let mutated_fns = mutations.iter().map(|m| m.target.def_id).unique();
-                    let mutated_fns_count = mutated_fns.count();
+                    let mutated_fns = mutations.iter().map(|m| m.target.def_id).collect::<FxHashSet<_>>();
+                    let mutated_fns_count = mutated_fns.len();
 
                     println!("generated {mutations} mutations in {mutated_pct:.2}% of functions ({mutated} out of {total} functions)",
                         mutations = mutations.len(),
