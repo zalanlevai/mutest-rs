@@ -1,5 +1,10 @@
 use std::time::Duration;
 
+pub enum Mode {
+    Evaluate,
+    Flakes { iterations_count: usize },
+}
+
 pub struct PrintOptions {
     pub detection_matrix: Option<()>,
 }
@@ -18,6 +23,7 @@ pub enum TestTimeout {
 }
 
 pub struct Options {
+    pub mode: Mode,
     pub verbosity: u8,
     pub report_timings: bool,
     pub print_opts: PrintOptions,

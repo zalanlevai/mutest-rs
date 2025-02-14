@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use crate::MutationSafety;
 use crate::config::{self, Options};
 use crate::detections::{MutationDetectionMatrix, print_mutation_detection_matrix};
+use crate::flakiness::{MutationFlakinessMatrix, print_mutation_flakiness_epilogue, print_mutation_flakiness_matrix};
 use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
@@ -193,7 +194,7 @@ fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: 
     *tests = parallelized_tests;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum MutationTestResult {
     #[default]
     Undetected,
@@ -501,7 +502,19 @@ fn print_mutation_analysis_epilogue(results: &MutationAnalysisResults, verbosity
 }
 
 pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
+    let mode = match () {
+        _ if let Some(flakes_arg) = args.iter().flat_map(|arg| arg.strip_prefix("--flakes=")).next() => {
+            let Some(iterations_count) = flakes_arg.parse::<usize>().ok() else {
+                panic!("flaky analysis iterations count must be a valid integer");
+            };
+            config::Mode::Flakes { iterations_count }
+        }
+
+        _ => config::Mode::Evaluate,
+    };
+
     let opts = Options {
+        mode,
         verbosity: args.iter().filter(|&arg| *arg == "-v").count() as u8,
         report_timings: args.contains(&"--timings"),
         print_opts: config::PrintOptions {
@@ -577,24 +590,71 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         println!();
     }
 
-    let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool);
+    match opts.mode {
+        config::Mode::Evaluate => {
+            let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool);
 
-    if let Some(()) = &opts.print_opts.detection_matrix {
-        print_mutation_detection_matrix(&results.mutation_detection_matrix, &tests, !opts.exhaustive);
-    }
+            if let Some(()) = &opts.print_opts.detection_matrix {
+                print_mutation_detection_matrix(&results.mutation_detection_matrix, &tests, !opts.exhaustive);
+            }
 
-    print_mutation_analysis_epilogue(&results, opts.verbosity);
+            print_mutation_analysis_epilogue(&results, opts.verbosity);
 
-    if opts.report_timings {
-        println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?})",
-            total = t_start.elapsed(),
-            profiling = test_profiling_duration,
-            tests = results.duration,
-        );
-    }
+            if opts.report_timings {
+                println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?})",
+                    total = t_start.elapsed(),
+                    profiling = test_profiling_duration,
+                    tests = results.duration,
+                );
+            }
 
-    if !results.all_test_runs_failed_successfully {
-        process::exit(ERROR_EXIT_CODE);
+            if !results.all_test_runs_failed_successfully {
+                process::exit(ERROR_EXIT_CODE);
+            }
+        }
+
+        config::Mode::Flakes { iterations_count } => {
+            let t_flaky_iterations_start = Instant::now();
+
+            let mut results = Vec::with_capacity(iterations_count);
+
+            for iteration in 1..=iterations_count {
+                println!("running iteration {iteration} out of {iterations_count}");
+                println!();
+
+                let iteration_results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool.clone());
+
+                if let Some(()) = &opts.print_opts.detection_matrix {
+                    print_mutation_detection_matrix(&iteration_results.mutation_detection_matrix, &tests, !opts.exhaustive);
+                }
+
+                print_mutation_analysis_epilogue(&iteration_results, opts.verbosity);
+
+                if opts.report_timings {
+                    println!("\nfinished in {tests:.2?}",
+                        tests = iteration_results.duration,
+                    );
+                }
+
+                println!();
+
+                results.push(iteration_results);
+            }
+
+            let total_mutations_count = mutants.iter().map(|mutant| mutant.mutations.len()).sum();
+            let mutation_detection_matrices = results.iter().map(|run_results| &run_results.mutation_detection_matrix).collect::<Vec<_>>();
+            let mutation_flakiness_matrix = MutationFlakinessMatrix::build(total_mutations_count, &mutation_detection_matrices);
+
+            print_mutation_flakiness_matrix(&mutation_flakiness_matrix, &tests);
+
+            print_mutation_flakiness_epilogue(&mutation_flakiness_matrix, &tests);
+
+            println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; iterations {iterations:.2?})",
+                total = t_start.elapsed(),
+                profiling = test_profiling_duration,
+                iterations = t_flaky_iterations_start.elapsed(),
+            );
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 #![feature(deadline_api)]
 #![feature(decl_macro)]
 #![feature(extract_if)]
+#![feature(if_let_guard)]
 #![feature(iter_array_chunks)]
 #![feature(let_chains)]
 
@@ -33,6 +34,7 @@ pub mod test_runner;
 pub mod thread_pool;
 
 pub mod detections;
+pub mod flakiness;
 
 mod config;
 pub use config::*;
