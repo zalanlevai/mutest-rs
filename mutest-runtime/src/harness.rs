@@ -12,6 +12,7 @@ use crate::config::{self, Options};
 use crate::detections::{MutationDetectionMatrix, print_mutation_detection_matrix};
 use crate::flakiness::{MutationFlakinessMatrix, print_mutation_flakiness_epilogue, print_mutation_flakiness_matrix};
 use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta};
+use crate::subsumption::print_mutation_subsumption_matrix;
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
 
@@ -519,6 +520,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         report_timings: args.contains(&"--timings"),
         print_opts: config::PrintOptions {
             detection_matrix: args.contains(&"--print=detection-matrix").then_some(()),
+            subsumption_matrix: args.contains(&"--print=subsumption-matrix").then_some(()),
         },
         exhaustive: args.contains(&"--exhaustive"),
         test_timeout: config::TestTimeout::Auto,
@@ -598,6 +600,10 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 print_mutation_detection_matrix(&results.mutation_detection_matrix, &tests, !opts.exhaustive);
             }
 
+            if let Some(()) = &opts.print_opts.subsumption_matrix {
+                print_mutation_subsumption_matrix(&results.mutation_detection_matrix, &tests, mutants, !opts.exhaustive);
+            }
+
             print_mutation_analysis_epilogue(&results, opts.verbosity);
 
             if opts.report_timings {
@@ -626,6 +632,10 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
                 if let Some(()) = &opts.print_opts.detection_matrix {
                     print_mutation_detection_matrix(&iteration_results.mutation_detection_matrix, &tests, !opts.exhaustive);
+                }
+
+                if let Some(()) = &opts.print_opts.subsumption_matrix {
+                    print_mutation_subsumption_matrix(&iteration_results.mutation_detection_matrix, &tests, mutants, !opts.exhaustive);
                 }
 
                 print_mutation_analysis_epilogue(&iteration_results, opts.verbosity);

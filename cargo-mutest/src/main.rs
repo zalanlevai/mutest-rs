@@ -27,6 +27,7 @@ fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, l
 mod run_print {
     mutest_driver_cli::opts! { ALL, pub(crate) possible_values where
         DETECTION_MATRIX = "detection-matrix"; ["Print test-mutation detection matrix."]
+        SUBSUMPTION_MATRIX = "subsumption-matrix"; ["Print mutation subsumption matrix."]
     }
 }
 

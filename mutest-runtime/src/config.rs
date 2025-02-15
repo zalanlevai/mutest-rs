@@ -7,6 +7,7 @@ pub enum Mode {
 
 pub struct PrintOptions {
     pub detection_matrix: Option<()>,
+    pub subsumption_matrix: Option<()>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

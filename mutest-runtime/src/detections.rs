@@ -1,5 +1,6 @@
 use std::iter;
 
+use crate::data_structures::TestArray;
 use crate::harness::{MutationTestResult, MutationTestResults};
 use crate::test_runner;
 
@@ -23,6 +24,12 @@ impl MutationDetectionMatrix {
 
     pub fn iter_mutation_ids(&self) -> impl Iterator<Item = u32> {
         1..=(self.inner.len() as u32)
+    }
+
+    pub fn write_mutation_test_results(&self, mutation_id: u32, out: &mut TestArray<MutationTestResult>)
+    {
+        let mutation_test_results = &self.inner[mutation_id as usize - 1];
+        out.fill(|test_name| mutation_test_results.results_per_test.get(test_name).copied().flatten());
     }
 
     pub fn iter_detections<'a>(&'a self) -> impl Iterator<Item = (u32, MutationTestResult)> + 'a {

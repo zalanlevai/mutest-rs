@@ -33,8 +33,11 @@ pub mod build {
 pub mod test_runner;
 pub mod thread_pool;
 
+pub mod data_structures;
+
 pub mod detections;
 pub mod flakiness;
+pub mod subsumption;
 
 mod config;
 pub use config::*;
