@@ -1,0 +1,4 @@
+tests -(0)-> make_virtual_trait_call at tests/ui/call_graph/warn_on_virtual_trait_calls.rs:17:1: 17:46 (#0)
+  (0) test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)

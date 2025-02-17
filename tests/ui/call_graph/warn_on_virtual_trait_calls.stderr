@@ -1,0 +1,18 @@
+warning: encountered virtual call during call graph construction
+  --> tests/ui/call_graph/warn_on_virtual_trait_calls.rs:26:5
+   |
+26 |     v.method();
+   |     ^^^^^^^^^^ call to <dyn Trait as Trait>::method
+   |
+   = note: in test
+
+warning: encountered virtual call during call graph construction
+  --> tests/ui/call_graph/warn_on_virtual_trait_calls.rs:18:5
+   |
+18 |     v.method();
+   |     ^^^^^^^^^^ call to <dyn Trait as Trait>::method
+   |
+   = note: in make_virtual_trait_call
+
+warning: 2 warnings emitted
+

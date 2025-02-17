@@ -296,6 +296,7 @@ pub struct Call<'tcx> {
     pub def_id: hir::DefId,
     pub generic_args: ty::GenericArgsRef<'tcx>,
     pub unsafety: hir::Unsafety,
+    pub span: Span,
 }
 
 struct CalleeCollector<'tcx> {
@@ -323,6 +324,7 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
                 def_id,
                 generic_args,
                 unsafety: self.current_scope_unsafety,
+                span: expr.span,
             });
         }
 
@@ -390,6 +392,17 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
             let mir::TerminatorKind::Call { func, args: call_args, .. } = &terminator.kind else { return None; };
 
             let ty = func.ty(&body_mir.local_decls, tcx);
+
+            // HACK: Report here, as we currently discard non-def calls.
+            // TODO: Collect and return both def and non-def calls, and emit warning in `reachable_fns`.
+            if let &ty::TyKind::FnPtr(_fn_sig_tys) = ty.kind() {
+                let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
+                diagnostic.span(terminator.source_info.span);
+                diagnostic.span_label(terminator.source_info.span, format!("call to {ty}"));
+                diagnostic.note(format!("in {}", tcx.def_path_str_with_args(instance.def_id(), generic_args)));
+                diagnostic.emit();
+            }
+
             let &ty::TyKind::FnDef(mut def_id, mut generic_args) = ty.kind() else { return None; };
 
             if tcx.is_intrinsic(def_id, sym::const_eval_select) {
@@ -403,7 +416,8 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
 
             let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
             let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
-            Some(Call { def_id, generic_args, unsafety })
+            let span = terminator.source_info.span;
+            Some(Call { def_id, generic_args, unsafety, span })
         })
         .collect::<FxHashSet<_>>()
 }
@@ -426,7 +440,7 @@ pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx
         .flat_map(move |drop_in_place| tcx.mir_inliner_callees(drop_in_place.def))
         .map(move |&(def_id, generic_args)| {
             let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
-            Call { def_id, generic_args, unsafety }
+            Call { def_id, generic_args, unsafety, span: DUMMY_SP }
         })
 }
 

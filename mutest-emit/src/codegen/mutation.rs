@@ -725,6 +725,15 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             // type arguments might take a different form at the resolved definition site, so we propagate them
             // instead.
             let instance = ty::Instance::expect_resolve(tcx, param_env, call.def_id, call.generic_args);
+
+            if let ty::InstanceDef::Virtual(def_id, _) = instance.def {
+                let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
+                diagnostic.span(call.span);
+                diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
+                diagnostic.note(format!("in {}", tcx.def_path_str(test.def_id)));
+                diagnostic.emit();
+            }
+
             let callee = Callee::new(instance.def_id(), instance.args);
 
             call_graph.root_calls.insert((test.def_id, callee));
@@ -801,6 +810,15 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     // instance. The type arguments might take a different form at the resolved definition site, so
                     // we propagate them instead.
                     let instance = ty::Instance::expect_resolve(tcx, param_env, call.def_id, generic_args);
+
+                    if let ty::InstanceDef::Virtual(def_id, _) = instance.def {
+                        let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
+                        diagnostic.span(call.span);
+                        diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
+                        diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
+                        diagnostic.emit();
+                    }
+
                     let callee = Callee::new(instance.def_id(), instance.args);
 
                     call_graph.nested_calls[distance].insert((caller, callee));

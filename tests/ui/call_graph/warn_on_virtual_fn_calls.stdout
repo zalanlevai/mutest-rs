@@ -1,0 +1,7 @@
+tests -(0)-> make_virtual_fn_call at tests/ui/call_graph/warn_on_virtual_fn_calls.rs:7:1: 7:38 (#0)
+  (0) test
+
+tests -(0)-> make_virtual_fn_mut_call at tests/ui/call_graph/warn_on_virtual_fn_calls.rs:11:1: 11:63 (#0)
+  (0) test
+
+targets: 2 total; 2 safe; 0 unsafe (0 tainted)

@@ -1,0 +1,10 @@
+warning: encountered dynamic call during call graph construction
+ --> tests/ui/call_graph/warn_on_fn_ptr_calls.rs:8:5
+  |
+8 |     f();
+  |     ^^^ call to fn()
+  |
+  = note: in make_fn_ptr_call
+
+warning: 1 warning emitted
+

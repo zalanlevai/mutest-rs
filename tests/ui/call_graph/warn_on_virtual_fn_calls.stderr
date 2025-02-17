@@ -1,0 +1,26 @@
+warning: encountered virtual call during call graph construction
+  --> tests/ui/call_graph/warn_on_virtual_fn_calls.rs:21:5
+   |
+21 |     f();
+   |     ^^^ call to <dyn std::ops::Fn() as std::ops::Fn<()>>::call
+   |
+   = note: in test
+
+warning: encountered virtual call during call graph construction
+ --> tests/ui/call_graph/warn_on_virtual_fn_calls.rs:8:5
+  |
+8 |     f();
+  |     ^^^ call to <dyn std::ops::Fn() as std::ops::Fn<()>>::call
+  |
+  = note: in make_virtual_fn_call
+
+warning: encountered virtual call during call graph construction
+  --> tests/ui/call_graph/warn_on_virtual_fn_calls.rs:12:13
+   |
+12 |     let _ = f(1);
+   |             ^^^^ call to <dyn std::ops::FnMut(usize) -> usize as std::ops::FnMut<(usize,)>>::call_mut
+   |
+   = note: in make_virtual_fn_mut_call
+
+warning: 3 warnings emitted
+

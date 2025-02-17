@@ -1,0 +1,4 @@
+tests -(0)-> make_fn_ptr_call at tests/ui/call_graph/warn_on_fn_ptr_calls.rs:7:1: 7:29 (#0)
+  (0) test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
