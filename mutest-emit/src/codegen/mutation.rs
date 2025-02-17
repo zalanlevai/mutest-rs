@@ -713,14 +713,12 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     for test in tests {
         if test.ignore { continue; }
 
-        let body_hir = tcx.hir().body(tcx.hir_node_by_def_id(test.def_id).body_id().unwrap());
         let body_mir = tcx.instance_mir(ty::InstanceDef::Item(test.def_id.to_def_id()));
 
-        let mut callees = res::collect_callees(tcx, body_hir).into_iter()
-            .chain(res::drop_glue_callees(tcx, body_mir, tcx.mk_args(&[])))
-            .collect::<FxHashSet<_>>();
+        let mut callees = res::mir_callees(tcx, &body_mir, tcx.mk_args(&[]));
+        callees.extend(res::drop_glue_callees(tcx, &body_mir, tcx.mk_args(&[])));
 
-        for call in callees.drain() {
+        for call in callees {
             // NOTE: We are post type-checking, querying monomorphic obligations.
             let param_env = ty::ParamEnv::reveal_all();
             // Using the concrete type arguments of this call, we resolve the corresponding definition instance. The
@@ -745,74 +743,55 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             // `const` functions, like other `const` scopes, cannot be mutated.
             if tcx.is_const_fn(caller.def_id) { continue; }
 
-            let mut callees = match caller.def_id.as_local() {
-                Some(local_def_id) => {
-                    let Some(body_id) = tcx.hir_node_by_def_id(local_def_id).body_id() else { continue; };
-                    let body_hir = tcx.hir().body(body_id);
+            if let Some(local_def_id) = caller.def_id.as_local() {
+                if !tcx.hir_node_by_def_id(local_def_id).body_id().is_some() { continue; }
 
-                    let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
-                    let skip = false
-                        // Inner function of #[test] function
-                        || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
-                        // #[cfg(test)] function, or function in #[cfg(test)] module
-                        || tests::is_marked_or_in_cfg_test(tcx, hir_id)
-                        // #[mutest::skip] function
-                        || tool_attr::skip(tcx.hir().attrs(hir_id));
+                let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
+                let skip = false
+                    // Inner function of #[test] function
+                    || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                    // #[cfg(test)] function, or function in #[cfg(test)] module
+                    || tests::is_marked_or_in_cfg_test(tcx, hir_id)
+                    // #[mutest::skip] function
+                    || tool_attr::skip(tcx.hir().attrs(hir_id));
 
-                    if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) {
-                        let target = targets.entry(local_def_id).or_insert_with(|| {
-                            Target {
-                                def_id: local_def_id,
-                                unsafety: check_item_unsafety(caller_def_item),
-                                reachable_from: Default::default(),
+                if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) {
+                    let target = targets.entry(local_def_id).or_insert_with(|| {
+                        Target {
+                            def_id: local_def_id,
+                            unsafety: check_item_unsafety(caller_def_item),
+                            reachable_from: Default::default(),
+                            distance,
+                        }
+                    });
+
+                    for (&test, &unsafety) in &call_paths {
+                        let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
+                        target.unsafety = Ord::max(caller_tainting, target.unsafety);
+
+                        let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
+                            EntryPointAssociation {
                                 distance,
+                                unsafe_call_path: None,
                             }
                         });
 
-                        for (&test, &unsafety) in &call_paths {
-                            let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
-                            target.unsafety = Ord::max(caller_tainting, target.unsafety);
-
-                            let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
-                                EntryPointAssociation {
-                                    distance,
-                                    unsafe_call_path: None,
-                                }
-                            });
-
-                            entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
-                        }
+                        entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
                     }
-
-                    let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
-
-                    res::collect_callees(tcx, body_hir).into_iter()
-                        .chain(res::drop_glue_callees(tcx, &body_mir, caller.generic_args))
-                        .collect::<FxHashSet<_>>()
                 }
-                None => {
-                    if !tcx.is_mir_available(caller.def_id) { continue; }
-                    let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
-
-                    let instance = ty::Instance::new(caller.def_id, caller.generic_args);
-                    let param_env = ty::ParamEnv::reveal_all();
-
-                    tcx.mir_inliner_callees(ty::InstanceDef::Item(caller.def_id)).iter()
-                        .map(|&(def_id, generic_args)| {
-                            let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
-                            let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
-                            res::Call { def_id, generic_args, unsafety }
-                        })
-                        .chain(res::drop_glue_callees(tcx, body_mir, caller.generic_args))
-                        .collect::<FxHashSet<_>>()
-                }
-            };
+            }
 
             // Collect calls of callees, for the next depth iteration.
             // NOTE: This is not performed on the last depth iteration; calls made by
             //       callees at the end of the call graph are ignored.
             if distance < (depth - 1) {
-                for call in callees.drain() {
+                if !tcx.is_mir_available(caller.def_id) { continue; }
+                let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
+
+                let mut callees = res::mir_callees(tcx, &body_mir, caller.generic_args);
+                callees.extend(res::drop_glue_callees(tcx, &body_mir, caller.generic_args));
+
+                for call in callees {
                     // NOTE: We are post type-checking, querying monomorphic obligations.
                     let param_env = ty::ParamEnv::reveal_all();
                     // The type arguments from the local, generic scope may still contain type parameters, so we

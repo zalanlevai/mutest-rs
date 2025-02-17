@@ -379,6 +379,35 @@ where
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
 }
 
+// Based on `rustc_mir_transform::inline::cycle::mir_inliner_callees`.
+pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> FxHashSet<Call<'tcx>> {
+    let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
+    let param_env = ty::ParamEnv::reveal_all();
+
+    body_mir.basic_blocks.iter()
+        .filter_map(|basic_block| {
+            let terminator = basic_block.terminator();
+            let mir::TerminatorKind::Call { func, args: call_args, .. } = &terminator.kind else { return None; };
+
+            let ty = func.ty(&body_mir.local_decls, tcx);
+            let &ty::TyKind::FnDef(mut def_id, mut generic_args) = ty.kind() else { return None; };
+
+            if tcx.is_intrinsic(def_id, sym::const_eval_select) {
+                let func = &call_args[2].node;
+                let ty = func.ty(&body_mir.local_decls, tcx);
+                let &ty::TyKind::FnDef(inner_def_id, inner_generic_args) = ty.kind() else { return None; };
+
+                def_id = inner_def_id;
+                generic_args = inner_generic_args;
+            }
+
+            let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
+            let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
+            Some(Call { def_id, generic_args, unsafety })
+        })
+        .collect::<FxHashSet<_>>()
+}
+
 pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> impl Iterator<Item = Call<'tcx>> {
     let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
     let param_env = ty::ParamEnv::reveal_all();
