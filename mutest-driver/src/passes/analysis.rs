@@ -130,19 +130,43 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             for (test_path_str, test) in tests_in_print_order {
                 println!("test {}", test_path_str);
 
-                for (_, callee) in call_graph.root_calls.iter().filter(|(root_def_id, _)| *root_def_id == test.def_id) {
-                    println!("  -> {} at {:#?}", callee.display_str(tcx), tcx.def_span(callee.def_id));
+                let mut callees_in_print_order = call_graph.root_calls.iter()
+                    .filter(|(root_def_id, _)| *root_def_id == test.def_id)
+                    .map(|(_, callee)| (callee.display_str(tcx), tcx.def_span(callee.def_id), callee))
+                    .collect::<Vec<_>>();
+                callees_in_print_order.sort_unstable_by(|(callee_a_display_str, callee_a_span, _), (callee_b_display_str, callee_b_span, _)| {
+                    Ord::cmp(callee_a_span, callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
+                });
+
+                for (callee_display_str, callee_span, _callee) in callees_in_print_order {
+                    println!("  -> {} at {:#?}", callee_display_str, callee_span);
                 }
             }
 
             for (distance, calls) in iter::zip(1.., &call_graph.nested_calls) {
                 println!("\nnested calls at distance {distance}:\n");
 
-                for caller in calls.iter().map(|(caller, _)| caller).collect::<FxHashSet<_>>() {
-                    println!("{} at {:#?}", caller.display_str(tcx), tcx.def_span(caller.def_id));
+                let callers = calls.iter().map(|(caller, _)| caller).collect::<FxHashSet<_>>();
+                let mut callers_in_print_order = callers.into_iter()
+                    .map(|caller| (caller.display_str(tcx), tcx.def_span(caller.def_id), caller))
+                    .collect::<Vec<_>>();
+                callers_in_print_order.sort_unstable_by(|(caller_a_display_str, caller_a_span, _), (caller_b_display_str, caller_b_span, _)| {
+                    Ord::cmp(caller_a_span, caller_b_span).then(Ord::cmp(caller_a_display_str, caller_b_display_str))
+                });
 
-                    for (_, callee) in calls.iter().filter(|(this_caller, _)| this_caller == caller) {
-                        println!("  -> {} at {:#?}", callee.display_str(tcx), tcx.def_span(callee.def_id));
+                for (caller_display_str, caller_span, caller) in callers_in_print_order {
+                    println!("{} at {:#?}", caller_display_str, caller_span);
+
+                    let mut callees_in_print_order = calls.iter()
+                        .filter(|(this_caller, _)| this_caller == caller)
+                        .map(|(_, callee)| (callee.display_str(tcx), tcx.def_span(callee.def_id), callee))
+                        .collect::<Vec<_>>();
+                    callees_in_print_order.sort_unstable_by(|(callee_a_display_str, callee_a_span, _), (callee_b_display_str, callee_b_span, _)| {
+                        Ord::cmp(callee_a_span, callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
+                    });
+
+                    for (callee_display_str, callee_span, _callee) in callees_in_print_order {
+                        println!("  -> {} at {:#?}", callee_display_str, callee_span);
                     }
                 }
             }
