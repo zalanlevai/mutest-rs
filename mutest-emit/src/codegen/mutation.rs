@@ -671,8 +671,21 @@ impl<'tcx> Callee<'tcx> {
 }
 
 pub struct CallGraph<'tcx> {
+    pub virtual_calls_count: usize,
+    pub dynamic_calls_count: usize,
     pub root_calls: FxHashSet<(hir::LocalDefId, Callee<'tcx>)>,
     pub nested_calls: Vec<FxHashSet<(Callee<'tcx>, Callee<'tcx>)>>,
+}
+
+impl<'tcx> CallGraph<'tcx> {
+    pub fn total_calls_count(&self) -> usize {
+        let mut total_calls_count = self.root_calls.len() + self.nested_calls.iter().map(|calls| calls.len()).sum::<usize>();
+        // NOTE: Dynamic calls are currently not represented in the call graph, therefore
+        //       we have to add their count manually to the total.
+        total_calls_count += self.dynamic_calls_count;
+
+        total_calls_count
+    }
 }
 
 pub fn reachable_fns<'ast, 'tcx, 'tst>(
@@ -682,6 +695,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     depth: usize,
 ) -> (CallGraph<'tcx>, Vec<Target<'tst>>) {
     let mut call_graph = CallGraph {
+        virtual_calls_count: 0,
+        dynamic_calls_count: 0,
         root_calls: Default::default(),
         nested_calls: iter::repeat_with(|| Default::default()).take(depth - 1).collect(),
     };
@@ -730,6 +745,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     let instance = ty::Instance::expect_resolve(tcx, param_env, def_id, generic_args);
 
                     if let ty::InstanceDef::Virtual(def_id, _) = instance.def {
+                        call_graph.virtual_calls_count += 1;
+
                         let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
                         diagnostic.span(call.span);
                         diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
@@ -741,6 +758,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 }
 
                 res::CallKind::Ptr(fn_sig) => {
+                    call_graph.dynamic_calls_count += 1;
+
                     let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
                     diagnostic.span(call.span);
                     diagnostic.span_label(call.span, format!("call to {fn_sig}"));
@@ -830,6 +849,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                             let instance = ty::Instance::expect_resolve(tcx, param_env, def_id, generic_args);
 
                             if let ty::InstanceDef::Virtual(def_id, _) = instance.def {
+                                call_graph.virtual_calls_count += 1;
+
                                 let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
                                 diagnostic.span(call.span);
                                 diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
@@ -841,6 +862,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                         }
 
                         res::CallKind::Ptr(fn_sig) => {
+                            call_graph.dynamic_calls_count += 1;
+
                             let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
                             diagnostic.span(call.span);
                             diagnostic.span_label(call.span, format!("call to {fn_sig}"));

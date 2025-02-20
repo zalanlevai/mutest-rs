@@ -592,6 +592,16 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         reached = reachable_fns.len(),
                         total = all_mutable_fns_count,
                     );
+
+                    if call_graph.virtual_calls_count >= 1 || call_graph.dynamic_calls_count >= 1 {
+                        let total_calls_count = call_graph.total_calls_count();
+                        println!("could not resolve {unresolved_pct:.2}% of function calls ({virtual} virtual, {dynamic} dynamic out of {total} function calls)",
+                            unresolved_pct = (call_graph.virtual_calls_count + call_graph.dynamic_calls_count) as f64 / total_calls_count as f64 * 100_f64,
+                            virtual = call_graph.virtual_calls_count,
+                            dynamic = call_graph.dynamic_calls_count,
+                            total = total_calls_count,
+                        );
+                    }
                 }
 
                 // HACK: Ensure that targets are in a deterministic, stable order, otherwise
