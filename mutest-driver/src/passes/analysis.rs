@@ -1,9 +1,10 @@
 use std::iter;
 use std::time::{Duration, Instant};
 
+use mutest_emit::analysis::call_graph::{CallGraph, Callee, Target, Unsafety};
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
-use mutest_emit::codegen::mutation::{CallGraph, Callee, Mut, MutId, Mutant, MutationConflictGraph, Target, UnsafeTargeting, Unsafety};
+use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, UnsafeTargeting};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_interface::run_compiler;
 use rustc_interface::interface::Result as CompilerResult;
@@ -571,7 +572,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let crate_res = mutest_emit::analysis::res::CrateResolutions::from_post_analysis_tcx(tcx);
 
-                let all_mutable_fns_count = mutest_emit::codegen::mutation::all_mutable_fns(tcx, &tests).count();
+                let all_mutable_fns_count = mutest_emit::analysis::call_graph::all_mutable_fns(tcx, &tests).count();
 
                 let call_graph_depth = match opts.call_graph_depth {
                     Some(call_graph_depth) => {
@@ -585,7 +586,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let t_target_analysis_start = Instant::now();
 
-                let (call_graph, mut reachable_fns) = mutest_emit::codegen::mutation::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
+                let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,

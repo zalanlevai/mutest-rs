@@ -1,4 +1,5 @@
 pub mod ast_lowering;
+pub mod call_graph;
 pub mod diagnostic;
 pub mod hir;
 pub mod res;

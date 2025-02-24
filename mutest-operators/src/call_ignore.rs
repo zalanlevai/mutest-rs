@@ -1,4 +1,5 @@
 use mutest_emit::{Mutation, Operator};
+use mutest_emit::analysis::call_graph;
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::res;
 use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
@@ -38,7 +39,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     {
         let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
             .filter_map(|call| match call.kind {
-                res::CallKind::Def(def_id, generic_args) => Some((def_id, generic_args)),
+                call_graph::CallKind::Def(def_id, generic_args) => Some((def_id, generic_args)),
                 _ => None,
             })
             .flat_map(|(def_id, generic_args)| tcx.resolve_instance(tcx.param_env(def_id).and((def_id, generic_args))).ok().flatten());

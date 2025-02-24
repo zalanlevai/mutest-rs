@@ -1,15 +1,14 @@
-use std::hash::Hash;
 use std::num::NonZeroUsize;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
-use rustc_middle::mir;
 use rustc_session::config::ExternLocation;
 use rustc_session::search_paths::PathKind;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 
+use crate::analysis::call_graph::{Call, CallKind};
 use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
@@ -291,19 +290,6 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CallKind<'tcx> {
-    Def(hir::DefId, ty::GenericArgsRef<'tcx>),
-    Ptr(ty::PolyFnSig<'tcx>),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Call<'tcx> {
-    pub kind: CallKind<'tcx>,
-    pub unsafety: hir::Unsafety,
-    pub span: Span,
-}
-
 struct CalleeCollector<'tcx> {
     typeck: &'tcx ty::TypeckResults<'tcx>,
     current_scope_unsafety: hir::Unsafety,
@@ -376,76 +362,6 @@ pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> 
     collector.visit_body(body);
 
     collector.callees
-}
-
-pub fn instantiate_generic_args<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, generic_args: ty::GenericArgsRef<'tcx>) -> T
-where
-    T: ty::TypeFoldable<TyCtxt<'tcx>>,
-{
-    ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
-}
-
-// Based on `rustc_mir_transform::inline::cycle::mir_inliner_callees`.
-pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> FxHashSet<Call<'tcx>> {
-    let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
-    let param_env = ty::ParamEnv::reveal_all();
-
-    body_mir.basic_blocks.iter()
-        .filter_map(|basic_block| {
-            let terminator = basic_block.terminator();
-            let mir::TerminatorKind::Call { func, args: call_args, .. } = &terminator.kind else { return None; };
-
-            let ty = func.ty(&body_mir.local_decls, tcx);
-            let span = terminator.source_info.span;
-
-            match ty.kind() {
-                &ty::TyKind::FnDef(mut def_id, mut generic_args) => {
-                    if tcx.is_intrinsic(def_id, sym::const_eval_select) {
-                        let func = &call_args[2].node;
-                        let ty = func.ty(&body_mir.local_decls, tcx);
-                        let &ty::TyKind::FnDef(inner_def_id, inner_generic_args) = ty.kind() else { return None; };
-
-                        def_id = inner_def_id;
-                        generic_args = inner_generic_args;
-                    }
-
-                    let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
-                    let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
-                    Some(Call { kind: CallKind::Def(def_id, generic_args), unsafety, span })
-                }
-
-                &ty::TyKind::FnPtr(fn_sig) => {
-                    let fn_sig = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(fn_sig));
-                    let unsafety = fn_sig.unsafety();
-                    Some(Call { kind: CallKind::Ptr(fn_sig), unsafety, span })
-                }
-
-                _ => None,
-            }
-        })
-        .collect::<FxHashSet<_>>()
-}
-
-pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> impl Iterator<Item = Call<'tcx>> {
-    let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
-    let param_env = ty::ParamEnv::reveal_all();
-
-    body_mir.mentioned_items.iter()
-        .filter_map(|mentioned_item| {
-            match &mentioned_item.node {
-                mir::MentionedItem::Drop(dropped_ty) => Some(dropped_ty),
-                _ => None,
-            }
-        })
-        .map(move |&dropped_ty| {
-            let dropped_ty = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(dropped_ty));
-            ty::Instance::resolve_drop_in_place(tcx, dropped_ty)
-        })
-        .flat_map(move |drop_in_place| tcx.mir_inliner_callees(drop_in_place.def))
-        .map(move |&(def_id, generic_args)| {
-            let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
-            Call { kind: CallKind::Def(def_id, generic_args), unsafety, span: DUMMY_SP }
-        })
 }
 
 #[derive(Clone, Debug)]

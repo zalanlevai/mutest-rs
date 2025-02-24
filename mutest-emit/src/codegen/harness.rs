@@ -5,12 +5,13 @@ use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
 use thin_vec::{ThinVec, thin_vec};
 
+use crate::analysis::call_graph::Unsafety;
 use crate::analysis::diagnostic;
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::expansion::TcxExpansionExt;
-use crate::codegen::mutation::{Mut, Mutant, SubstLoc, UnsafeTargeting, Unsafety};
+use crate::codegen::mutation::{Mut, Mutant, SubstLoc, UnsafeTargeting};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
