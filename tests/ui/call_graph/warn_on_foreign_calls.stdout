@@ -1,0 +1,26 @@
+
+@@@ call graph @@@
+
+entry points:
+
+test test
+  -> make_extern_calls at tests/ui/call_graph/warn_on_foreign_calls.rs:12:1: 12:23 (#0)
+
+nested calls at distance 1:
+
+make_extern_calls at tests/ui/call_graph/warn_on_foreign_calls.rs:12:1: 12:23 (#0)
+  -> foreign at tests/ui/call_graph/warn_on_foreign_calls.rs:7:5: 7:17 (#0)
+  -> not_foreign at tests/ui/call_graph/warn_on_foreign_calls.rs:10:1: 10:35 (#0)
+
+nested calls at distance 2:
+
+
+@@@ targets @@@
+
+tests -(1)-> [unsafe] not_foreign at tests/ui/call_graph/warn_on_foreign_calls.rs:10:1: 10:35 (#0)
+  (1) [tainted] test
+
+tests -(0)-> [unsafe] make_extern_calls at tests/ui/call_graph/warn_on_foreign_calls.rs:12:1: 12:23 (#0)
+  (0) test
+
+targets: 2 total; 0 safe; 2 unsafe (0 tainted)

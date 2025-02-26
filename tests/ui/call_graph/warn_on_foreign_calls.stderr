@@ -1,0 +1,10 @@
+warning: encountered foreign call during call graph construction
+  --> tests/ui/call_graph/warn_on_foreign_calls.rs:13:14
+   |
+13 |     unsafe { foreign() };
+   |              ^^^^^^^^^ call to foreign
+   |
+   = note: in make_extern_calls
+
+warning: 1 warning emitted
+

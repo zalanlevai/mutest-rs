@@ -2,6 +2,7 @@ use std::iter;
 
 use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::mir;
+use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 
 use crate::analysis::ast_lowering;
 use crate::analysis::hir;
@@ -216,6 +217,7 @@ impl<'tcx> Callee<'tcx> {
 pub struct CallGraph<'tcx> {
     pub virtual_calls_count: usize,
     pub dynamic_calls_count: usize,
+    pub foreign_calls_count: usize,
     pub root_calls: FxHashSet<(hir::LocalDefId, Callee<'tcx>)>,
     pub nested_calls: Vec<FxHashSet<(Callee<'tcx>, Callee<'tcx>)>>,
 }
@@ -247,6 +249,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     let mut call_graph = CallGraph {
         virtual_calls_count: 0,
         dynamic_calls_count: 0,
+        foreign_calls_count: 0,
         root_calls: Default::default(),
         nested_calls: iter::repeat_with(|| Default::default()).take(depth - 1).collect(),
     };
@@ -302,6 +305,26 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                         diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
                         diagnostic.note(format!("in {}", tcx.def_path_str(test.def_id)));
                         diagnostic.emit();
+                    }
+
+                    if tcx.is_foreign_item(instance.def_id()) && !tcx.intrinsic(instance.def_id()).is_some() {
+                        let codegen_fn_attrs = tcx.codegen_fn_attrs(instance.def_id());
+                        let is_allocator_intrinsic = codegen_fn_attrs.flags.intersects(
+                            CodegenFnAttrFlags::ALLOCATOR
+                            | CodegenFnAttrFlags::DEALLOCATOR
+                            | CodegenFnAttrFlags::REALLOCATOR
+                            | CodegenFnAttrFlags::ALLOCATOR_ZEROED
+                        );
+
+                        if !is_allocator_intrinsic {
+                            call_graph.foreign_calls_count += 1;
+
+                            let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");
+                            diagnostic.span(call.span);
+                            diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(instance.def_id(), instance.args)));
+                            diagnostic.note(format!("in {}", tcx.def_path_str(test.def_id)));
+                            diagnostic.emit();
+                        }
                     }
 
                     Callee::new(instance.def_id(), instance.args)
@@ -406,6 +429,26 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                                 diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
                                 diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
                                 diagnostic.emit();
+                            }
+
+                            if tcx.is_foreign_item(instance.def_id()) && !tcx.intrinsic(instance.def_id()).is_some() {
+                                let codegen_fn_attrs = tcx.codegen_fn_attrs(instance.def_id());
+                                let is_allocator_intrinsic = codegen_fn_attrs.flags.intersects(
+                                    CodegenFnAttrFlags::ALLOCATOR
+                                    | CodegenFnAttrFlags::DEALLOCATOR
+                                    | CodegenFnAttrFlags::REALLOCATOR
+                                    | CodegenFnAttrFlags::ALLOCATOR_ZEROED
+                                );
+
+                                if !is_allocator_intrinsic {
+                                    call_graph.foreign_calls_count += 1;
+
+                                    let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");
+                                    diagnostic.span(call.span);
+                                    diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(instance.def_id(), instance.args)));
+                                    diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
+                                    diagnostic.emit();
+                                }
                             }
 
                             Callee::new(instance.def_id(), instance.args)
