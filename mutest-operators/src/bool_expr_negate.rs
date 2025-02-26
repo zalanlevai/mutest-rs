@@ -1,7 +1,9 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::codegen::ast::{self, P};
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
+use mutest_emit::codegen::symbols::{Ident, Symbol, sym};
 use mutest_emit::smallvec::smallvec;
+use mutest_emit::thin_vec::thin_vec;
 
 pub const BOOL_EXPR_NEGATE: &str = "bool_expr_negate";
 
@@ -42,7 +44,26 @@ impl<'a> Operator<'a> for BoolExprNegate {
         let expr_ty = typeck.expr_ty(expr_hir);
         if expr_ty != tcx.types.bool { return Mutations::none(); }
 
-        let negated_expr = ast::mk::expr_unary(def, ast::UnOp::Not, P(expr.clone()));
+        let unambiguous_base_expr = match &expr.kind {
+            // NOTE: Calls to generic functions with generic return types (e.g. `Default::default`)
+            //       may not be inferrable once the call is wrapped in a negation, see
+            //       `tests/ui/mutation/ops/bool_expr_negate/rustc_res/cannot_infer_negated_generic_call`.
+            //       To avoid this, we ascribe the `bool` type to the return value of the call expression
+            //       by creating a let binding in a block expression with the binding as its value.
+            ast::ExprKind::Call(_, _) | ast::ExprKind::MethodCall(_) => {
+                let expr_ty_ast = ast::mk::ty_ident(def, None, Ident::new(sym::bool, def));
+
+                // { let v: bool = $expr; v }
+                let v = Ident::new(Symbol::intern("v"), def);
+                ast::mk::expr_block(ast::mk::block(def, thin_vec![
+                    ast::mk::stmt_let(def, false, v, Some(expr_ty_ast), P(expr.clone())),
+                    ast::mk::stmt_expr(ast::mk::expr_ident(def, v)),
+                ]))
+            }
+            _ => P(expr.clone()),
+        };
+
+        let negated_expr = ast::mk::expr_unary(def, ast::UnOp::Not, unambiguous_base_expr);
 
         let mutation = Self::Mutation {
             was_negated: matches!(&expr.kind, ast::ExprKind::Unary(ast::UnOp::Not, _)),

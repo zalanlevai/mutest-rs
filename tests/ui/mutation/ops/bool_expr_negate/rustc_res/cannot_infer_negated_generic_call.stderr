@@ -1,0 +1,9 @@
+error[E0282]: type annotations needed
+ --> tests/ui/mutation/ops/bool_expr_negate/rustc_res/cannot_infer_negated_generic_call.rs:5:19
+  |
+5 |     let _: bool = !Default::default();
+  |                   ^^^^^^^^^^^^^^^^^^^ cannot infer type
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0282`.
