@@ -30,13 +30,20 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
     if callee == res::fns::default(tcx) { return None; }
 
-    // Avoid replacing the call if the type's `Default::default` implementation refers back to this function (the
-    // function this call expression is in). This avoids a case of infinite recursion, resulting in a stack overflow.
+    // Avoid replacing the call with `Default::default`
+    // if the expression-containing function is the type's `Default::default` implementation, or
+    // if the type's `Default::default` implementation refers back to the expression-containing function
+    // (the function this call expression is in).
+    // This avoids a case of infinite recursion, resulting in a stack overflow.
     let ty_default = (res::fns::default(tcx), tcx.mk_args_trait(expr_ty, vec![]));
     if let Some(ty_default_impl) = tcx.resolve_instance(param_env.and(ty_default)).ok().flatten()
         && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
         && let Some(ty_default_impl_body_id) = tcx.hir_node_by_def_id(ty_default_impl_def_id).body_id()
     {
+        // Direct recursion: placing a call to type `T`'s `Default::default` implementation
+        // within type `T`'s `Default::default` implementation is a directly recursive function call.
+        if ty_default_impl_def_id.to_def_id() == f { return None; }
+
         let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
             .filter_map(|call| match call.kind {
                 call_graph::CallKind::Def(def_id, generic_args) => Some((def_id, generic_args)),
