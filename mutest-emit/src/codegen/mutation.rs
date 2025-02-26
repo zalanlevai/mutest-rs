@@ -589,7 +589,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
         collector.target = Some(target);
         collector.is_in_unsafe_block = target.unsafety == Unsafety::Unsafe(UnsafeSource::Unsafe);
 
-        let Some(target_item) = ast_lowering::find_def_in_ast(tcx, target.def_id, krate) else { continue; };
+        let Some(target_item) = ast_lowering::find_def_in_ast(tcx, def_res, target.def_id, krate) else { continue; };
 
         match target_item {
             ast::DefItem::Item(item) => collector.visit_item(item),

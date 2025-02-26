@@ -586,7 +586,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let t_target_analysis_start = Instant::now();
 
-                let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &generated_crate_ast, &tests, call_graph_depth);
+                let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth);
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,

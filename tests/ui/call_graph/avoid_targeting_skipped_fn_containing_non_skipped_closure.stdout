@@ -1,0 +1,24 @@
+
+@@@ call graph @@@
+
+entry points:
+
+test test
+  -> f at tests/ui/call_graph/avoid_targeting_skipped_fn_containing_non_skipped_closure.rs:9:1: 9:7 (#0)
+
+nested calls at distance 1:
+
+f at tests/ui/call_graph/avoid_targeting_skipped_fn_containing_non_skipped_closure.rs:9:1: 9:7 (#0)
+  -> f::{closure#0} at tests/ui/call_graph/avoid_targeting_skipped_fn_containing_non_skipped_closure.rs:10:13: 10:15 (#0)
+
+nested calls at distance 2:
+
+f::{closure#0} at tests/ui/call_graph/avoid_targeting_skipped_fn_containing_non_skipped_closure.rs:10:13: 10:15 (#0)
+  -> impls_g at tests/ui/call_graph/avoid_targeting_skipped_fn_containing_non_skipped_closure.rs:6:1: 6:13 (#0)
+
+@@@ targets @@@
+
+tests -(2)-> impls_g at tests/ui/call_graph/avoid_targeting_skipped_fn_containing_non_skipped_closure.rs:6:1: 6:13 (#0)
+  (2) test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)

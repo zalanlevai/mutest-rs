@@ -242,6 +242,7 @@ where
 
 pub fn reachable_fns<'ast, 'tcx, 'tst>(
     tcx: TyCtxt<'tcx>,
+    def_res: &ast_lowering::DefResolutions,
     krate: &'ast ast::Crate,
     tests: &'tst [Test],
     depth: usize,
@@ -364,6 +365,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
                 let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
                 let skip = false
+                    // Non-functions, including closures
+                    || !matches!(tcx.def_kind(caller.def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
                     // Inner function of #[test] function
                     || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
                     // #[cfg(test)] function, or function in #[cfg(test)] module
@@ -371,7 +374,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     // #[mutest::skip] function
                     || tool_attr::skip(tcx.hir().attrs(hir_id));
 
-                if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, local_def_id, krate) {
+                if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) {
                     let target = targets.entry(local_def_id).or_insert_with(|| {
                         Target {
                             def_id: local_def_id,

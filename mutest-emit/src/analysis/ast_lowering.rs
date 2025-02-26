@@ -4,6 +4,7 @@ use std::iter;
 use itertools::Itertools;
 use rustc_data_structures::sync::HashMapExt;
 use rustc_hash::FxHashMap;
+use rustc_middle::span_bug;
 use rustc_middle::ty::ResolverAstLowering;
 
 use crate::analysis::hir;
@@ -2643,7 +2644,7 @@ impl<'ast, 'hir> ast::visit::Visitor<'ast> for AstDefFinder<'ast, 'hir> {
     }
 }
 
-pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<ast::DefItem<'ast>> {
+pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_res: &DefResolutions, def_id: hir::LocalDefId, krate: &'ast ast::Crate) -> Option<ast::DefItem<'ast>> {
     use ast::visit::Visitor;
 
     // The definition HIR path will contain the full HIR tree walk, including blocks, statements, expressions, etc.
@@ -2662,6 +2663,13 @@ pub fn find_def_in_ast<'ast, 'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId, k
         result: None,
     };
     finder.visit_crate(krate);
+
+    if let Some(def_item) = finder.result {
+        let found_def_id = def_res.node_id_to_def_id.get(&def_item.node_id()).copied();
+        if found_def_id != Some(def_id) {
+            span_bug!(def_item.span(), "found mismatched syntax item for {}", tcx.def_path_str(def_id));
+        }
+    }
 
     finder.result
 }

@@ -120,6 +120,14 @@ pub enum DefItem<'ast> {
 }
 
 impl<'ast> DefItem<'ast> {
+    pub fn node_id(&self) -> NodeId {
+        match self {
+            Self::Item(item) => item.id,
+            Self::ForeignItem(item) => item.id,
+            Self::AssocItem(item, _) => item.id,
+        }
+    }
+
     pub fn ident(&self) -> Ident {
         match self {
             Self::Item(item) => item.ident,
