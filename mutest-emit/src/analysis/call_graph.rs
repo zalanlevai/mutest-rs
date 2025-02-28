@@ -69,6 +69,42 @@ fn check_item_unsafety<'ast>(item: ast::DefItem<'ast>) -> Unsafety {
     checker.unsafety.unwrap_or(Unsafety::None)
 }
 
+fn collect_unsafe_blocks<'tcx>(body_hir: &'tcx hir::Body<'tcx>, root_scope_unsafety: hir::Unsafety) -> Vec<&'tcx hir::Block<'tcx>> {
+    struct BodyUnsafeBlockCollector<'tcx> {
+        current_scope_unsafety: hir::Unsafety,
+        unsafe_blocks: Vec<&'tcx hir::Block<'tcx>>,
+    }
+
+    impl<'tcx> hir::intravisit::Visitor<'tcx> for BodyUnsafeBlockCollector<'tcx> {
+        fn visit_block(&mut self, block: &'tcx hir::Block<'tcx>) {
+            let previous_scope_unsafety = self.current_scope_unsafety;
+            self.current_scope_unsafety = match block.rules {
+                | hir::BlockCheckMode::DefaultBlock
+                // NOTE: We explicitly ignore compiler-generated unsafe blocks.
+                | hir::BlockCheckMode::UnsafeBlock(hir::UnsafeSource::CompilerGenerated)
+                => self.current_scope_unsafety,
+
+                hir::BlockCheckMode::UnsafeBlock(hir::UnsafeSource::UserProvided) => hir::Unsafety::Unsafe,
+            };
+
+            if self.current_scope_unsafety == hir::Unsafety::Unsafe {
+                self.unsafe_blocks.push(block);
+            }
+
+            hir::intravisit::walk_block(self, block);
+
+            self.current_scope_unsafety = previous_scope_unsafety;
+        }
+    }
+
+    let mut collector = BodyUnsafeBlockCollector {
+        current_scope_unsafety: root_scope_unsafety,
+        unsafe_blocks: vec![],
+    };
+    hir::intravisit::Visitor::visit_body(&mut collector, body_hir);
+    collector.unsafe_blocks
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EntryPointAssociation {
     pub distance: usize,
@@ -140,6 +176,17 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
     let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
     let param_env = ty::ParamEnv::reveal_all();
 
+    let body_def_id = body_mir.source.instance.def_id();
+    let body_unsafety = match tcx.def_kind(body_def_id) {
+        hir::DefKind::Closure => hir::Unsafety::Normal,
+        _ => tcx.fn_sig(body_def_id).skip_binder().unsafety(),
+    };
+
+    let body_hir = body_def_id.as_local()
+        .and_then(|local_def_id| tcx.hir_node_by_def_id(local_def_id).body_id())
+        .map(|body_id| tcx.hir().body(body_id));
+    let unsafe_blocks = body_hir.map(|body_hir| collect_unsafe_blocks(body_hir, body_unsafety));
+
     body_mir.basic_blocks.iter()
         .filter_map(|basic_block| {
             let terminator = basic_block.terminator();
@@ -147,6 +194,16 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
 
             let ty = func.ty(&body_mir.local_decls, tcx);
             let span = terminator.source_info.span;
+
+            let mut unsafety = body_unsafety;
+
+            if unsafety != hir::Unsafety::Unsafe {
+                if let Some(unsafe_blocks) = &unsafe_blocks {
+                    if unsafe_blocks.iter().any(|unsafe_block| span.find_ancestor_inside_same_ctxt(unsafe_block.span).is_some()) {
+                        unsafety = hir::Unsafety::Unsafe;
+                    }
+                }
+            }
 
             match ty.kind() {
                 &ty::TyKind::FnDef(mut def_id, mut generic_args) => {
@@ -160,13 +217,21 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
                     }
 
                     let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
-                    let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
+
+                    if unsafety != hir::Unsafety::Unsafe {
+                        unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
+                    }
+
                     Some(Call { kind: CallKind::Def(def_id, generic_args), unsafety, span })
                 }
 
                 &ty::TyKind::FnPtr(fn_sig) => {
                     let fn_sig = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(fn_sig));
-                    let unsafety = fn_sig.unsafety();
+
+                    if unsafety != hir::Unsafety::Unsafe {
+                        unsafety = fn_sig.unsafety();
+                    }
+
                     Some(Call { kind: CallKind::Ptr(fn_sig), unsafety, span })
                 }
 

@@ -1,0 +1,25 @@
+
+@@@ call graph @@@
+
+entry points:
+
+test test
+  -> reserve_inner at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_fns_as_unsafe.rs:8:1: 8:26 (#0)
+
+nested calls at distance 1:
+
+reserve_inner at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_fns_as_unsafe.rs:8:1: 8:26 (#0)
+  -> offset_from at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_fns_as_unsafe.rs:6:1: 6:17 (#0)
+
+nested calls at distance 2:
+
+
+@@@ targets @@@
+
+tests -(1)-> [tainted] offset_from at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_fns_as_unsafe.rs:6:1: 6:17 (#0)
+  (1) [tainted] test
+
+tests -(0)-> [unsafe] reserve_inner at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_fns_as_unsafe.rs:8:1: 8:26 (#0)
+  (0) test
+
+targets: 2 total; 0 safe; 2 unsafe (1 tainted)
