@@ -26,6 +26,15 @@ impl MutationSubsumption {
     pub fn indistinguishable(&self) -> bool {
         matches!(self, MutationSubsumption::Indistinguishable)
     }
+
+    pub fn reverse(&self) -> MutationSubsumption {
+        match self {
+            MutationSubsumption::No => MutationSubsumption::No,
+            MutationSubsumption::Subsumed => MutationSubsumption::Subsumes,
+            MutationSubsumption::Subsumes => MutationSubsumption::Subsumed,
+            MutationSubsumption::Indistinguishable => MutationSubsumption::Indistinguishable,
+        }
+    }
 }
 
 pub fn compute_mutation_subsumption<I1, I2>(mutation_test_results: I1, other_mutation_test_results: I2) -> MutationSubsumption
@@ -72,17 +81,62 @@ where
     }
 }
 
-pub fn print_mutation_subsumption_matrix<S: SubstMap>(mutation_detection_matrix: &MutationDetectionMatrix, tests: &[test_runner::Test], mutants: &[&MutantMeta<S>], warn_non_exhaustive: bool) {
-    let test_index = tests.iter().map(|test| &test.desc.name).collect::<Vec<_>>();
-    let mut mutation_test_results = TestArray::<MutationTestResult>::new(&test_index);
-    let mut other_mutation_test_results = TestArray::<MutationTestResult>::new(&test_index);
+pub struct MutationSubsumptionMatrix {
+    n_mutations: u32,
+    inner: Box<[MutationSubsumption]>,
+}
 
+impl MutationSubsumptionMatrix {
+    pub fn build(mutation_detection_matrix: &MutationDetectionMatrix, tests: &[test_runner::Test]) -> Self {
+        let test_index = tests.iter().map(|test| &test.desc.name).collect::<Vec<_>>();
+        let mut mutation_test_results = TestArray::<MutationTestResult>::new(&test_index);
+        let mut other_mutation_test_results = TestArray::<MutationTestResult>::new(&test_index);
+
+        let n_mutations = mutation_detection_matrix.inner.len() as u32;
+        let mut inner = iter::repeat(MutationSubsumption::No).take(n_mutations as usize * n_mutations as usize).collect::<Box<[_]>>();
+
+        let mut mutation_ids = 1..=n_mutations;
+        while let Some(mutation_id) = mutation_ids.next() {
+            mutation_detection_matrix.write_mutation_test_results(mutation_id, &mut mutation_test_results);
+
+            for other_mutation_id in mutation_ids.clone() {
+                mutation_detection_matrix.write_mutation_test_results(other_mutation_id, &mut other_mutation_test_results);
+
+                let subsumption = compute_mutation_subsumption(mutation_test_results.iter_data().copied(), other_mutation_test_results.iter_data().copied());
+
+                inner[n_mutations as usize * (mutation_id as usize - 1) + (other_mutation_id as usize - 1)] = subsumption;
+                inner[n_mutations as usize * (other_mutation_id as usize - 1) + (mutation_id as usize - 1)] = subsumption.reverse();
+            }
+        }
+
+        Self { n_mutations, inner }
+    }
+
+    pub fn iter_mutation_ids(&self) -> impl Iterator<Item = u32> {
+        1..=(self.n_mutations as u32)
+    }
+
+    pub fn subsumptions_of(&self, mutation_id: u32) -> &[MutationSubsumption] {
+        if mutation_id > self.n_mutations {
+            panic!("index out of bounds: the mutation id is {mutation_id} but the matrix holds data for {} mutations", self.n_mutations);
+        }
+
+        let offset = self.n_mutations as usize * (mutation_id as usize - 1);
+        &self.inner[offset..(offset + self.n_mutations as usize)]
+    }
+
+    pub fn subsumption_between(&self, mutation_id: u32, other_mutation_id: u32) -> Option<MutationSubsumption> {
+        self.inner.get(self.n_mutations as usize * (mutation_id as usize - 1) + (other_mutation_id as usize - 1)).copied()
+    }
+}
+
+pub fn print_mutation_subsumption_matrix<S: SubstMap>(mutation_subsumption_matrix: &MutationSubsumptionMatrix, mutants: &[&MutantMeta<S>], warn_non_exhaustive: bool) {
     let total_mutations_count: usize = mutants.iter().map(|mutant| mutant.mutations.len()).sum();
     let mutation_id_w = total_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1;
 
     // Print mutation ID numbers in 10's for matrix heading, like so `1        10        20...`.
     print!("{:w$}", "", w = mutation_id_w + 1);
-    for mutation_idx in mutation_detection_matrix.iter_mutation_ids() {
+    for mutation_idx in mutation_subsumption_matrix.iter_mutation_ids() {
         if mutation_idx == 1 {
             print!("{mutation_idx:<9}");
         } else if mutation_idx % 10 == 0 {
@@ -93,7 +147,7 @@ pub fn print_mutation_subsumption_matrix<S: SubstMap>(mutation_detection_matrix:
 
     // Print mutation ID numbers' last digits for matrix heading, like so `12345678901234567890123...`.
     print!("{:w$}", "", w = mutation_id_w + 1);
-    let mut mutation_id_chunks = mutation_detection_matrix.iter_mutation_ids().array_chunks::<10>();
+    let mut mutation_id_chunks = mutation_subsumption_matrix.iter_mutation_ids().array_chunks::<10>();
     while let Some(_) = mutation_id_chunks.next() {
         print!("1234567890");
     }
@@ -107,24 +161,20 @@ pub fn print_mutation_subsumption_matrix<S: SubstMap>(mutation_detection_matrix:
     println!();
 
     // Print one matrix row for each mutation for mutation-mutation subsumptions.
-    for mutation_id in mutation_detection_matrix.iter_mutation_ids() {
+    for mutation_id in mutation_subsumption_matrix.iter_mutation_ids() {
         print!("{:>mutation_id_w$} ", mutation_id);
-
-        mutation_detection_matrix.write_mutation_test_results(mutation_id, &mut mutation_test_results);
 
         let mut subsumes_count: usize = 0;
         let mut subsumed_count: usize = 0;
         let mut indistinguishable_count: usize = 0;
 
-        for other_mutation_id in mutation_detection_matrix.iter_mutation_ids() {
+        for (other_mutation_idx, subsumption) in mutation_subsumption_matrix.subsumptions_of(mutation_id).iter().enumerate() {
+            let other_mutation_id = other_mutation_idx as u32 + 1;
             if other_mutation_id == mutation_id {
                 print!(" ");
                 continue;
             }
 
-            mutation_detection_matrix.write_mutation_test_results(other_mutation_id, &mut other_mutation_test_results);
-
-            let subsumption = compute_mutation_subsumption(mutation_test_results.iter_data().copied(), other_mutation_test_results.iter_data().copied());
             match subsumption {
                 MutationSubsumption::No => print!("."),
                 MutationSubsumption::Subsumed => print!("<"),

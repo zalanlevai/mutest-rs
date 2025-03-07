@@ -12,7 +12,7 @@ use crate::config::{self, Options};
 use crate::detections::{MutationDetectionMatrix, print_mutation_detection_matrix};
 use crate::flakiness::{MutationFlakinessMatrix, print_mutation_flakiness_epilogue, print_mutation_flakiness_matrix};
 use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta};
-use crate::subsumption::print_mutation_subsumption_matrix;
+use crate::subsumption::{MutationSubsumptionMatrix, print_mutation_subsumption_matrix};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
 
@@ -601,7 +601,8 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
             }
 
             if let Some(()) = &opts.print_opts.subsumption_matrix {
-                print_mutation_subsumption_matrix(&results.mutation_detection_matrix, &tests, mutants, !opts.exhaustive);
+                let mutation_subsumption_matrix = MutationSubsumptionMatrix::build(&results.mutation_detection_matrix, &tests);
+                print_mutation_subsumption_matrix(&mutation_subsumption_matrix, mutants, !opts.exhaustive);
             }
 
             print_mutation_analysis_epilogue(&results, opts.verbosity);
@@ -635,7 +636,8 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 }
 
                 if let Some(()) = &opts.print_opts.subsumption_matrix {
-                    print_mutation_subsumption_matrix(&iteration_results.mutation_detection_matrix, &tests, mutants, !opts.exhaustive);
+                    let mutation_subsumption_matrix = MutationSubsumptionMatrix::build(&iteration_results.mutation_detection_matrix, &tests);
+                    print_mutation_subsumption_matrix(&mutation_subsumption_matrix, mutants, !opts.exhaustive);
                 }
 
                 print_mutation_analysis_epilogue(&iteration_results, opts.verbosity);
