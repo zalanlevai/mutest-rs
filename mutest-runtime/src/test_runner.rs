@@ -1,9 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::fmt;
-use std::hash::BuildHasherDefault;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic;
@@ -532,7 +530,7 @@ where
     // Reverse the list of remaining tests so that we can `pop` from the queue in order.
     remaining_tests.reverse();
 
-    type RunningTestMap = HashMap<test::TestId, RunningTest, BuildHasherDefault<DefaultHasher>>;
+    type RunningTestMap = HashMap<test::TestId, RunningTest>;
     let mut running_tests: RunningTestMap = Default::default();
     let mut lingering_tests: RunningTestMap = Default::default();
 
