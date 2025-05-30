@@ -210,7 +210,7 @@ pub struct MutationTestResults {
     pub results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
 }
 
-fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, exhaustive: bool, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
+fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, exhaustive: bool, mutation_isolation: config::MutationIsolation, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
     let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
@@ -284,14 +284,17 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
         Ok(test_runner::Flow::Continue)
     };
 
-    let test_run_strategy = match mutant.is_unsafe() {
-        false => test_runner::TestRunStrategy::InProcess(thread_pool),
-        true => test_runner::TestRunStrategy::InIsolatedChildProcess({
+    let test_run_strategy = match (mutation_isolation, mutant.is_unsafe()) {
+        | (config::MutationIsolation::Unsafe, true)
+        | (config::MutationIsolation::All, _)
+        => test_runner::TestRunStrategy::InIsolatedChildProcess({
             let mutant_id = mutant.id;
             Arc::new(move |cmd| {
                 cmd.env(MUTEST_ISOLATED_WORKER_MUTANT_ID, mutant_id.to_string());
             })
         }),
+
+        _ => test_runner::TestRunStrategy::InProcess(thread_pool),
     };
 
     test_runner::run_tests(tests, on_test_event, test_run_strategy, false)?;
@@ -385,7 +388,7 @@ fn run_mutation_analysis<S: SubstMap>(opts: &Options, tests: &[test_runner::Test
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        match run_tests(tests, mutant, opts.exhaustive, thread_pool.clone()) {
+        match run_tests(tests, mutant, opts.exhaustive, opts.mutation_isolation, thread_pool.clone()) {
             Ok(mut run_results) => {
                 for &mutation in mutant.mutations {
                     let op_stats = results.mutation_op_stats.entry(mutation.op_name).or_default();
@@ -525,6 +528,11 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         exhaustive: args.contains(&"--exhaustive"),
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
+        mutation_isolation: match args.iter().flat_map(|arg| arg.strip_prefix("--isolate=")).next() {
+            None | Some("unsafe") => config::MutationIsolation::Unsafe,
+            Some("all") => config::MutationIsolation::All,
+            Some(arg) => panic!("unexpected option: --isolate={arg}"),
+        },
         use_thread_pool: args.contains(&"--use-thread-pool"),
     };
 

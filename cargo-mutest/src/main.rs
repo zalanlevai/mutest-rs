@@ -24,6 +24,13 @@ fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, l
     }
 }
 
+mod run_isolate {
+    mutest_driver_cli::exclusive_opts! { pub(crate) possible_values where
+        UNSAFE = "unsafe"; ["Only isolate tests for unsafe mutations."]
+        ALL = "all"; ["Isolate tests for all mutations."]
+    }
+}
+
 mod run_print {
     mutest_driver_cli::opts! { ALL, pub(crate) possible_values where
         DETECTION_MATRIX = "detection-matrix"; ["Print test-mutation detection matrix."]
@@ -46,6 +53,7 @@ fn main() {
             .arg(clap::arg!(--simulate [MUTATION_ID] "Evaluate tests for a single mutation.").value_parser(clap::value_parser!(u32)).conflicts_with_all(["flakes", "exhaustive", "print"]).display_order(110))
             .arg(clap::arg!(--flakes [ITERATIONS_COUNT] "Perform mutation analysis multiple times to find flaky test-mutation pairs.").value_parser(clap::value_parser!(usize)).display_order(111))
             .arg(clap::arg!(--exhaustive "Evaluate remaining tests, even if the mutation has already been detected by another test.").display_order(115))
+            .arg(clap::arg!(--isolate [ISOLATION_MODE] "Isolate tests of mutations into separate processes.").value_parser(run_isolate::possible_values()).default_value(run_isolate::UNSAFE).display_order(120))
             .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").display_order(120))
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
@@ -80,6 +88,8 @@ fn main() {
             if let Some(iterations_count) = matches.get_one::<usize>("flakes") { passed_args.push(format!("--flakes={iterations_count}")); }
 
             if matches.get_flag("exhaustive") { passed_args.push("--exhaustive".to_owned()); }
+
+            if let Some(isolation_mode) = matches.get_one::<String>("isolate") { passed_args.push(format!("--isolate={isolation_mode}")); }
             if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
 
             let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();

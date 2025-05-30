@@ -23,6 +23,12 @@ pub enum TestTimeout {
     Explicit(Duration),
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MutationIsolation {
+    Unsafe,
+    All,
+}
+
 pub struct Options {
     pub mode: Mode,
     pub verbosity: u8,
@@ -31,5 +37,6 @@ pub struct Options {
     pub exhaustive: bool,
     pub test_ordering: TestOrdering,
     pub test_timeout: TestTimeout,
+    pub mutation_isolation: MutationIsolation,
     pub use_thread_pool: bool,
 }
