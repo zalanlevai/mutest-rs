@@ -168,6 +168,7 @@ pub fn main() {
                     opts::TESTS => print_opts.tests = Some(()),
                     opts::TARGETS => print_opts.mutation_targets = Some(()),
                     opts::CALL_GRAPH => {
+                        let test_filters = mutest_arg_matches.get_many::<String>("call-graph-filter-tests").map(|s| s.map(|f| f.trim().to_owned()).collect::<Vec<_>>()).unwrap_or_default();
                         let non_local_call_view = {
                             use mutest_driver_cli::call_graph_non_local_call_view as opts;
                             match mutest_arg_matches.get_one::<String>("call-graph-non-local-calls").map(String::as_str) {
@@ -176,7 +177,7 @@ pub fn main() {
                                 _ => unreachable!(),
                             }
                         };
-                        print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, non_local_call_view });
+                        print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, test_filters, non_local_call_view });
                     }
                     opts::CONFLICT_GRAPH | opts::COMPATIBILITY_GRAPH => {
                         let compatibility_graph = matches!(print_name, opts::COMPATIBILITY_GRAPH);

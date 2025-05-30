@@ -1,0 +1,17 @@
+entry points:
+
+test test1
+  -> common at tests/ui/call_graph/only_print_filtered_tests.rs:8:1: 8:12 (#0)
+  -> only_test_1 at tests/ui/call_graph/only_print_filtered_tests.rs:18:1: 18:17 (#0)
+
+nested calls at distance 1:
+
+common at tests/ui/call_graph/only_print_filtered_tests.rs:8:1: 8:12 (#0)
+  -> nested_common at tests/ui/call_graph/only_print_filtered_tests.rs:6:1: 6:19 (#0)
+only_test_1 at tests/ui/call_graph/only_print_filtered_tests.rs:18:1: 18:17 (#0)
+  -> nested_only_test_1 at tests/ui/call_graph/only_print_filtered_tests.rs:14:1: 14:24 (#0)
+
+nested calls at distance 2:
+
+nested_only_test_1 at tests/ui/call_graph/only_print_filtered_tests.rs:14:1: 14:24 (#0)
+  -> indirectly_common at tests/ui/call_graph/only_print_filtered_tests.rs:12:1: 12:23 (#0)

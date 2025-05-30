@@ -17,6 +17,7 @@ pub enum CallGraphNonLocalCallView {
 
 pub struct CallGraphOptions {
     pub format: GraphFormat,
+    pub test_filters: Vec<String>,
     pub non_local_call_view: CallGraphNonLocalCallView,
 }
 

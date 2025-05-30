@@ -118,7 +118,9 @@ fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item = &'
     );
 }
 
-fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &CallGraph<'tcx>, targets: &[Target<'trg>], format: config::GraphFormat, non_local_call_view: config::CallGraphNonLocalCallView) {
+fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &CallGraph<'tcx>, targets: &[Target<'trg>], format: config::GraphFormat, test_filters: &[String], non_local_call_view: config::CallGraphNonLocalCallView) {
+    let mut filtered_nodes: FxHashSet<Callee> = Default::default();
+
     match format {
         config::GraphFormat::Simple => {
             let mut tests_in_print_order = tests.iter()
@@ -129,6 +131,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             println!("entry points:\n");
 
             for (test_path_str, test) in tests_in_print_order {
+                if !test_filters.is_empty() {
+                    if !test_filters.iter().any(|test_filter| test_path_str.contains(test_filter)) { continue; }
+                    filtered_nodes.insert(Callee::new(test.def_id.to_def_id(), tcx.mk_args(&[])));
+                }
+
                 println!("test {}", test_path_str);
 
                 let mut callees_in_print_order = call_graph.root_calls.iter()
@@ -139,7 +146,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                     Ord::cmp(callee_a_span, callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
                 });
 
-                for (callee_display_str, callee_span, _callee) in callees_in_print_order {
+                for (callee_display_str, callee_span, callee) in callees_in_print_order {
+                    if !test_filters.is_empty() {
+                        filtered_nodes.insert(*callee);
+                    }
+
                     println!("  -> {} at {:#?}", callee_display_str, callee_span);
                 }
             }
@@ -147,7 +158,10 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             for (distance, calls) in iter::zip(1.., &call_graph.nested_calls) {
                 println!("\nnested calls at distance {distance}:\n");
 
-                let callers = calls.iter().map(|(caller, _)| caller).collect::<FxHashSet<_>>();
+                let callers = calls.iter()
+                    .map(|(caller, _)| caller)
+                    .filter(|caller| test_filters.is_empty() || filtered_nodes.contains(caller))
+                    .collect::<FxHashSet<_>>();
                 let mut callers_in_print_order = callers.into_iter()
                     .map(|caller| (caller.display_str(tcx), tcx.def_span(caller.def_id), caller))
                     .collect::<Vec<_>>();
@@ -166,7 +180,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                         Ord::cmp(callee_a_span, callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
                     });
 
-                    for (callee_display_str, callee_span, _callee) in callees_in_print_order {
+                    for (callee_display_str, callee_span, callee) in callees_in_print_order {
+                        if !test_filters.is_empty() {
+                            filtered_nodes.insert(*callee);
+                        }
+
                         println!("  -> {} at {:#?}", callee_display_str, callee_span);
                     }
                 }
@@ -206,8 +224,15 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             println!("    node [style=filled, color=white];");
 
             for test in tests {
+                let test_path_str = test.path_str();
+
+                if !test_filters.is_empty() {
+                    if !test_filters.iter().any(|test_filter| test_path_str.contains(test_filter)) { continue; }
+                    filtered_nodes.insert(Callee::new(test.def_id.to_def_id(), tcx.mk_args(&[])));
+                }
+
                 // TODO: Use different styling for ignored test, or use strikethrough.
-                println!("    {} [label=\"{}\"];", def_node_id(test.def_id.to_def_id()), test.path_str());
+                println!("    {} [label=\"{}\"];", def_node_id(test.def_id.to_def_id()), test_path_str);
             }
 
             println!("  }}");
@@ -216,7 +241,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             let mut collapsed_call_paths: FxHashMap::<Callee<'tcx>, SmallVec<[SmallVec<[Callee<'tcx>; 3]>; 1]>> = Default::default();
 
             println!("  {{ rank=same; 0;");
-            for callee in call_graph.root_calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
+            let unique_root_callees = call_graph.root_calls.iter()
+                .filter(|(root_def_id, _)| test_filters.is_empty() || filtered_nodes.contains(&Callee::new(root_def_id.to_def_id(), tcx.mk_args(&[]))))
+                .map(|(_, callee)| callee)
+                .collect::<FxHashSet<_>>();
+            for callee in unique_root_callees {
                 if !defined_callees.insert(*callee) { continue; }
 
                 // Override non-local callee node rendering.
@@ -237,6 +266,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
             }
             println!("  }}");
             for (root_def_id, callee) in &call_graph.root_calls {
+                if !test_filters.is_empty() {
+                    if !filtered_nodes.contains(&Callee::new(root_def_id.to_def_id(), tcx.mk_args(&[]))) { continue; }
+                    filtered_nodes.insert(*callee);
+                }
+
                 // Override non-local root call edge rendering.
                 if !callee.def_id.is_local() {
                     match non_local_call_view {
@@ -255,7 +289,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
 
             for (distance, calls) in iter::zip(1.., &call_graph.nested_calls) {
                 println!("  {{ rank=same; {};", distance);
-                for callee in calls.iter().map(|(_, callee)| callee).collect::<FxHashSet<_>>() {
+                let unique_nested_callees = calls.iter()
+                    .filter(|(caller, _)| test_filters.is_empty() || filtered_nodes.contains(caller))
+                    .map(|(_, callee)| callee)
+                    .collect::<FxHashSet<_>>();
+                for callee in unique_nested_callees {
                     if !defined_callees.insert(*callee) { continue; }
 
                     // Override non-local callee node rendering.
@@ -276,6 +314,11 @@ fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_graph: &
                 }
                 println!("  }}");
                 for (caller, callee) in calls {
+                    if !test_filters.is_empty() {
+                        if !filtered_nodes.contains(caller) { continue; }
+                        filtered_nodes.insert(*callee);
+                    }
+
                     // Override non-local deep call edge rendering.
                     if !caller.def_id.is_local() || !callee.def_id.is_local() {
                         match non_local_call_view {
@@ -610,9 +653,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 //       mutation IDs will not match between repeated invocations.
                 reachable_fns.sort_unstable_by_key(|target| tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)));
 
-                if let Some(config::CallGraphOptions { format, non_local_call_view }) = opts.print_opts.call_graph.take() {
+                if let Some(config::CallGraphOptions { format, test_filters, non_local_call_view }) = opts.print_opts.call_graph.take() {
                     if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
-                    print_call_graph(tcx, &tests, &call_graph, &reachable_fns, format, non_local_call_view);
+                    print_call_graph(tcx, &tests, &call_graph, &reachable_fns, format, &test_filters, non_local_call_view);
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                         if opts.report_timings {
                             println!("\nfinished in {total:.2?} (targets {targets:.2?})",
