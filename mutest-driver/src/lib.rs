@@ -23,6 +23,7 @@ extern crate smallvec;
 
 pub mod config;
 pub mod passes;
+pub mod print;
 
 use std::time::Instant;
 
