@@ -1,5 +1,7 @@
 #![feature(decl_macro)]
 
+use std::path::PathBuf;
+
 pub macro opts(
     $all:ident, $possible_values_vis:vis $possible_values:ident where
     $($(#[$attr:meta])* $ident:ident = $name:expr; $([$help:expr])?)*
@@ -146,6 +148,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"call-graph-non-local-calls" [CALL_GRAPH_NON_LOCAL_CALL_VIEW] "Mode to display non-local calls in the call graph.").value_parser(call_graph_non_local_call_view::possible_values()).default_value(call_graph_non_local_call_view::COLLAPSE).display_order(103))
         .arg(clap::arg!(--"call-graph-filter-tests" [CALL_GRAPH_FILTER_TESTS] "Filter tests to display the call graph for. Multiple may be specified, separated by commas.").value_delimiter(',').display_order(103))
         // Experimental Flags
+        .arg(clap::arg!(--"Zwrite-json" [OUT_DIR] "Write JSON metadata files into the specified directory.").value_parser(clap::value_parser!(PathBuf)).display_order(500))
         .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
         .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended.").display_order(500))
         // Information

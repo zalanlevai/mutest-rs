@@ -49,6 +49,10 @@ impl PrintOptions {
     }
 }
 
+pub struct WriteOptions {
+    pub out_dir: PathBuf,
+}
+
 pub enum Mode {
     Print,
     Build,
@@ -97,6 +101,7 @@ pub struct Options<'op, 'm> {
     pub mutation_batching_randomness: MutationBatchingRandomness,
     pub mutant_max_mutations_count: usize,
 
+    pub write_opts: Option<WriteOptions>,
     pub verify_opts: VerifyOptions,
     pub sanitize_macro_expns: bool,
 }

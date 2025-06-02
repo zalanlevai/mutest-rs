@@ -1,0 +1,18 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "mutest-json"
+version = "0.0.0"
+edition = "2021"
+
+[package.metadata.rust-analyzer]
+rustc_private = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+
+smallvec = { version = "1.15", features = ["serde"] }
+
+[features]
+default = []
+rustc = []

@@ -9,14 +9,18 @@ use rustc_span::fatal_error::FatalError;
 use crate::config::{self, Config};
 use crate::passes::{Flow, base_compiler_config};
 use crate::print::{print_call_graph, print_mutants, print_mutation_graph, print_targets, print_tests};
+use crate::write::{write_call_graph, write_mutations, write_tests, write_timings};
 
 pub struct AnalysisPassResult {
     pub duration: Duration,
+    pub test_discovery_duration: Duration,
     pub target_analysis_duration: Duration,
     pub sanitize_macro_expns_duration: Duration,
-    pub mutation_analysis_duration: Duration,
+    pub mutation_generation_duration: Duration,
+    pub mutation_conflict_resolution_duration: Duration,
     pub mutation_batching_duration: Duration,
     pub codegen_duration: Duration,
+    pub write_duration: Duration,
     pub generated_crate_code: String,
 }
 
@@ -45,11 +49,18 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             let sess = &compiler.sess;
 
             let t_start = Instant::now();
-            let mut target_analysis_duration = Duration::ZERO;
-            let mut sanitize_macro_expns_duration = Duration::ZERO;
-            let mut mutation_analysis_duration = Duration::ZERO;
-            let mut mutation_batching_duration = Duration::ZERO;
-            let mut codegen_duration = Duration::ZERO;
+            let mut pass_result = AnalysisPassResult {
+                duration: Duration::ZERO,
+                test_discovery_duration: Duration::ZERO,
+                target_analysis_duration: Duration::ZERO,
+                sanitize_macro_expns_duration: Duration::ZERO,
+                mutation_generation_duration: Duration::ZERO,
+                mutation_conflict_resolution_duration: Duration::ZERO,
+                mutation_batching_duration: Duration::ZERO,
+                codegen_duration: Duration::ZERO,
+                write_duration: Duration::ZERO,
+                generated_crate_code: String::new(),
+            };
 
             let mut crate_ast = {
                 // NOTE: We must register our custom tool attribute namespace before the relevant attribute validation
@@ -74,15 +85,28 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     (generated_crate_ast, def_res)
                 };
 
+                let t_test_discovery_start = Instant::now();
                 let tests = mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res);
+                pass_result.test_discovery_duration = t_test_discovery_start.elapsed();
+
+                if let Some(write_opts) = &opts.write_opts {
+                    let t_write_start = Instant::now();
+                    write_tests(write_opts, tcx, &tests, pass_result.test_discovery_duration);
+                    pass_result.write_duration += t_write_start.elapsed();
+                }
 
                 if let Some(_) = opts.print_opts.tests.take() {
                     if opts.print_opts.print_headers { println!("\n@@@ tests @@@\n"); }
                     print_tests(&tests);
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if let Some(write_opts) = &opts.write_opts {
+                            pass_result.duration = t_start.elapsed();
+                            write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        }
                         if opts.report_timings {
-                            println!("\nfinished in {total:.2?}",
+                            println!("\nfinished in {total:.2?} (write {write:.2?})",
                                 total = t_start.elapsed(),
+                                write = pass_result.write_duration,
                             );
                         }
                         return Flow::Break;
@@ -109,6 +133,11 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let t_target_analysis_start = Instant::now();
 
                 let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth);
+                if let Some(write_opts) = &opts.write_opts {
+                    let t_write_start = Instant::now();
+                    write_call_graph(write_opts, tcx, all_mutable_fns_count, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
+                    pass_result.write_duration += t_write_start.elapsed();
+                }
                 if opts.verbosity >= 1 {
                     println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                         reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
@@ -136,10 +165,16 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
                     print_call_graph(tcx, &tests, &call_graph, &reachable_fns, format, &test_filters, non_local_call_view);
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if let Some(write_opts) = &opts.write_opts {
+                            pass_result.duration = t_start.elapsed();
+                            pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
+                            write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        }
                         if opts.report_timings {
-                            println!("\nfinished in {total:.2?} (targets {targets:.2?})",
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
                                 total = t_start.elapsed(),
-                                targets = t_target_analysis_start.elapsed(),
+                                targets = pass_result.test_discovery_duration + t_target_analysis_start.elapsed(),
+                                write = pass_result.write_duration,
                             );
                         }
                         return Flow::Break;
@@ -149,16 +184,21 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 let targets = reachable_fns.iter().filter(|f| f.distance < opts.mutation_depth);
 
-                target_analysis_duration = t_target_analysis_start.elapsed();
+                pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
 
                 if let Some(_) = opts.print_opts.mutation_targets.take() {
                     if opts.print_opts.print_headers { println!("\n@@@ targets @@@\n"); }
                     print_targets(tcx, targets.clone(), opts.unsafe_targeting);
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if let Some(write_opts) = &opts.write_opts {
+                            pass_result.duration = t_start.elapsed();
+                            write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        }
                         if opts.report_timings {
-                            println!("\nfinished in {total:.2?} (targets {targets:.2?})",
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
                                 total = t_start.elapsed(),
-                                targets = target_analysis_duration,
+                                targets = pass_result.test_discovery_duration + pass_result.target_analysis_duration,
+                                write = pass_result.write_duration,
                             );
                         }
                         return Flow::Break;
@@ -176,10 +216,10 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 if opts.sanitize_macro_expns {
                     let t_sanitize_macro_expns_start = Instant::now();
                     mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &crate_res, &def_res, &body_res, &mut generated_crate_ast);
-                    sanitize_macro_expns_duration = t_sanitize_macro_expns_start.elapsed();
+                    pass_result.sanitize_macro_expns_duration = t_sanitize_macro_expns_start.elapsed();
                 }
 
-                let t_mutation_analysis_start = Instant::now();
+                let t_mutation_generation_start = Instant::now();
                 let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
                 if opts.verbosity >= 1 {
                     let mutated_fns = mutations.iter().map(|m| m.target.def_id).collect::<FxHashSet<_>>();
@@ -192,7 +232,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         total = all_mutable_fns_count,
                     );
                 }
-                mutation_analysis_duration = t_mutation_analysis_start.elapsed();
+                pass_result.mutation_generation_duration = t_mutation_generation_start.elapsed();
 
                 if let Err(errors) = mutest_emit::codegen::mutation::validate_mutations(&mutations) {
                     for error in &errors {
@@ -216,9 +256,10 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     FatalError.raise();
                 }
 
-                let t_mutation_batching_start = Instant::now();
-
+                let t_mutation_conflict_resolution_start = Instant::now();
                 let mutation_conflict_graph = mutest_emit::codegen::mutation::generate_mutation_conflict_graph(&mutations, opts.unsafe_targeting);
+                pass_result.mutation_conflict_resolution_duration = t_mutation_conflict_resolution_start.elapsed();
+
                 if opts.verbosity >= 1 {
                     println!("found {conflicts} conflicts ({conflicts_excluding_unsafe} excluding unsafe mutations), {compatibilities} compatibilities",
                         conflicts = mutation_conflict_graph.iter_conflicts().count(),
@@ -228,7 +269,6 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
 
                 if let Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format }) = opts.print_opts.conflict_graph.take() {
-                    let mutation_conflict_resolution_duration = t_mutation_batching_start.elapsed();
                     if opts.print_opts.print_headers { println!("\n@@@ conflict graph @@@\n"); }
                     let mutations_excluding_unsafe = mutations.iter().filter(|m| !mutation_conflict_graph.is_unsafe(m.id));
                     match (compatibility_graph, exclude_unsafe) {
@@ -238,18 +278,24 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         (true, true) => print_mutation_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_compatibilities(), format),
                     }
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if let Some(write_opts) = &opts.write_opts {
+                            pass_result.duration = t_start.elapsed();
+                            write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        }
                         if opts.report_timings {
-                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?})",
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?}; write {write:.2?})",
                                 total = t_start.elapsed(),
-                                targets = target_analysis_duration,
-                                mutations = mutation_analysis_duration,
-                                conflicts = mutation_conflict_resolution_duration,
+                                targets = pass_result.test_discovery_duration + pass_result.target_analysis_duration,
+                                mutations = pass_result.mutation_generation_duration,
+                                conflicts = pass_result.mutation_conflict_resolution_duration,
+                                write = pass_result.write_duration,
                             );
                         }
                         return Flow::Break;
                     }
                 }
 
+                let t_mutation_batching_start = Instant::now();
                 let mutants = match opts.mutation_batching_algorithm {
                     config::MutationBatchingAlgorithm::None
                     => mutest_emit::codegen::mutation::batch_mutations_dummy(mutations),
@@ -283,8 +329,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         mutants
                     }
                 };
-
-                mutation_batching_duration = t_mutation_batching_start.elapsed();
+                pass_result.mutation_batching_duration = t_mutation_batching_start.elapsed();
 
                 if let Err(errors) = mutest_emit::codegen::mutation::validate_mutation_batches(&mutants, &mutation_conflict_graph) {
                     for error in &errors {
@@ -304,16 +349,27 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     FatalError.raise();
                 }
 
+                if let Some(write_opts) = &opts.write_opts {
+                    let t_write_start = Instant::now();
+                    write_mutations(write_opts, tcx, all_mutable_fns_count, &mutants, opts.unsafe_targeting, &mutation_conflict_graph, &opts.mutation_batching_algorithm, t_mutation_generation_start.elapsed());
+                    pass_result.write_duration += t_write_start.elapsed();
+                }
+
                 if let Some(_) = opts.print_opts.mutants.take() {
                     if opts.print_opts.print_headers { println!("\n@@@ mutants @@@\n"); }
                     print_mutants(tcx, &mutants, opts.unsafe_targeting, opts.verbosity);
                     if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                        if let Some(write_opts) = &opts.write_opts {
+                            pass_result.duration = t_start.elapsed();
+                            write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        }
                         if opts.report_timings {
-                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?})",
+                            println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; write {write:.2?})",
                                 total = t_start.elapsed(),
-                                targets = target_analysis_duration,
-                                mutations = mutation_analysis_duration,
-                                batching = mutation_batching_duration,
+                                targets = pass_result.test_discovery_duration + pass_result.target_analysis_duration,
+                                mutations = pass_result.mutation_generation_duration,
+                                batching = pass_result.mutation_conflict_resolution_duration + pass_result.mutation_batching_duration,
+                                write = pass_result.write_duration,
                             );
                         }
                         return Flow::Break;
@@ -340,14 +396,14 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                 mutest_emit::codegen::harness::generate_harness(tcx, &mutants, &subst_locs, &mut generated_crate_ast, opts.unsafe_targeting);
 
-                codegen_duration = t_codegen_start.elapsed();
+                pass_result.codegen_duration = t_codegen_start.elapsed();
 
                 // HACK: The generated code is currently based on the expanded AST and contains references to the internals
                 //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
                 //       set of crate references (above).
                 struct NoAnn;
                 impl rustc_ast_pretty::pprust::state::PpAnn for NoAnn {}
-                let generated_crate_code = format!("{prelude}\n{code}",
+                pass_result.generated_crate_code = format!("{prelude}\n{code}",
                     prelude = mutest_emit::codegen::expansion::GENERATED_CODE_PRELUDE,
                     code = rustc_ast_pretty::pprust::print_crate(
                         sess.source_map(),
@@ -361,15 +417,8 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     ),
                 );
 
-                Flow::Continue(AnalysisPassResult {
-                    duration: t_start.elapsed(),
-                    target_analysis_duration,
-                    sanitize_macro_expns_duration,
-                    mutation_analysis_duration,
-                    mutation_batching_duration,
-                    codegen_duration,
-                    generated_crate_code,
-                })
+                pass_result.duration = t_start.elapsed();
+                Flow::Continue(pass_result)
             })
         });
 

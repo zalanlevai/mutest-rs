@@ -291,6 +291,14 @@ pub fn main() {
 
         let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
+        let write_opts = 'write_opts: {
+            let Some(out_dir) = mutest_arg_matches.get_one::<PathBuf>("Zwrite-json").cloned() else {
+                break 'write_opts None;
+            };
+
+            Some(config::WriteOptions { out_dir })
+        };
+
         let verify_opts = {
             use mutest_driver_cli::verify as opts;
 
@@ -330,6 +338,7 @@ pub fn main() {
                 mutation_batching_randomness,
                 mutant_max_mutations_count,
 
+                write_opts,
                 verify_opts,
                 sanitize_macro_expns,
             },

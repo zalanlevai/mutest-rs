@@ -24,12 +24,14 @@ extern crate smallvec;
 pub mod config;
 pub mod passes;
 pub mod print;
+pub mod write;
 
 use std::time::Instant;
 
 use rustc_interface::interface::Result as CompilerResult;
 
 use crate::config::Config;
+use crate::write::write_timings;
 
 pub fn run(mut config: Config) -> CompilerResult<()> {
     let t_start = Instant::now();
@@ -41,13 +43,17 @@ pub fn run(mut config: Config) -> CompilerResult<()> {
         println!("{}", analysis_pass.generated_crate_code);
         if config.opts.print_opts.print_headers { println!(); }
         if let config::Mode::Print = config.opts.mode && config.opts.print_opts.is_empty() {
+            if let Some(write_opts) = &config.opts.write_opts {
+                write_timings(write_opts, t_start.elapsed(), &analysis_pass, None);
+            }
             if config.opts.report_timings {
-                println!("finished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?})",
+                println!("finished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?}; write {write:.2?})",
                     total = analysis_pass.duration,
-                    targets = analysis_pass.target_analysis_duration,
-                    mutations = analysis_pass.mutation_analysis_duration,
-                    batching = analysis_pass.mutation_batching_duration,
+                    targets = analysis_pass.test_discovery_duration + analysis_pass.target_analysis_duration,
+                    mutations = analysis_pass.mutation_generation_duration,
+                    batching = analysis_pass.mutation_conflict_resolution_duration + analysis_pass.mutation_batching_duration,
                     codegen = analysis_pass.codegen_duration,
+                    write = analysis_pass.write_duration,
                 );
             }
             return Ok(());
@@ -57,16 +63,20 @@ pub fn run(mut config: Config) -> CompilerResult<()> {
     let compilation_pass = passes::compilation::run(&config, &analysis_pass)?;
 
     if config.opts.report_timings {
+        if let Some(write_opts) = &config.opts.write_opts {
+            write_timings(write_opts, t_start.elapsed(), &analysis_pass, Some(&compilation_pass));
+        }
         println!("finished in {total:.2?}",
             total = t_start.elapsed(),
         );
-        println!("analysis took {analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?})",
+        println!("analysis took {analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?}; write {write:.2?})",
             analysis = analysis_pass.duration,
-            targets = analysis_pass.target_analysis_duration,
-            mutations = analysis_pass.mutation_analysis_duration,
-            batching = analysis_pass.mutation_batching_duration,
+            targets = analysis_pass.test_discovery_duration + analysis_pass.target_analysis_duration,
+            mutations = analysis_pass.mutation_generation_duration,
+            batching = analysis_pass.mutation_conflict_resolution_duration + analysis_pass.mutation_batching_duration,
             hygiene = analysis_pass.sanitize_macro_expns_duration,
             codegen = analysis_pass.codegen_duration,
+            write = analysis_pass.write_duration,
         );
         println!("compilation took {compilation:.2?}",
             compilation = compilation_pass.duration,
