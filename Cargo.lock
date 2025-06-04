@@ -246,6 +246,7 @@ version = "0.0.0"
 dependencies = [
  "atomic-wait",
  "cargo_metadata",
+ "mutest-json",
  "phf",
  "serde",
  "serde_json",

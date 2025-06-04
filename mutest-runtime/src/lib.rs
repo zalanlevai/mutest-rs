@@ -39,6 +39,8 @@ pub mod detections;
 pub mod flakiness;
 pub mod subsumption;
 
+pub mod write;
+
 mod config;
 pub use config::*;
 

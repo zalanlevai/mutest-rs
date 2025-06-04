@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::env;
+use std::path::PathBuf;
 use std::process::{self, Command};
 
 pub mod build {
@@ -204,6 +205,10 @@ fn main() {
         cmd.arg("--");
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
+        if let Some(out_dir) = matches.get_one::<PathBuf>("Zwrite-json") {
+            let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
+            cmd.arg(format!("--Zwrite-json={out_dir}"));
+        }
         cmd.args(&passed_args);
     }
 

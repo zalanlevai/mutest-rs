@@ -3,6 +3,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
+use std::iter;
+use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,6 +17,7 @@ use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta
 use crate::subsumption::{MutationSubsumptionMatrix, print_mutation_subsumption_matrix};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
+use crate::write::write_evaluation;
 
 mod test {
     #![allow(unused_imports)]
@@ -525,6 +528,11 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
             detection_matrix: args.contains(&"--print=detection-matrix").then_some(()),
             subsumption_matrix: args.contains(&"--print=subsumption-matrix").then_some(()),
         },
+        write_opts: args.iter().flat_map(|arg| arg.strip_prefix("--Zwrite-json=")).next().map(|out_dir_str| {
+            config::WriteOptions {
+                out_dir: PathBuf::from(out_dir_str),
+            }
+        }),
         exhaustive: args.contains(&"--exhaustive"),
         test_timeout: config::TestTimeout::Auto,
         test_ordering: config::TestOrdering::ExecTime,
@@ -537,6 +545,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
     };
 
     let t_start = Instant::now();
+    let mut write_duration = Duration::ZERO;
 
     println!("profiling reference test run");
     let t_test_profiling_start = Instant::now();
@@ -557,9 +566,13 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
     sort_profiled_tests_by_exec_time(&mut profiled_tests);
 
+    let mut unmutated_test_exec_times = HashMap::<test::TestName, Duration>::with_capacity(profiled_tests.len());
     for profiled_test in &profiled_tests {
         match profiled_test.exec_time {
-            Some(exec_time) => println!("{} took {:?}", profiled_test.test.desc.name.as_slice(), exec_time),
+            Some(exec_time) => {
+                unmutated_test_exec_times.insert(profiled_test.test.desc.name.clone(), exec_time);
+                println!("{} took {:?}", profiled_test.test.desc.name.as_slice(), exec_time);
+            }
             None => println!("{} was not profiled", profiled_test.test.desc.name.as_slice()),
         }
     }
@@ -604,6 +617,12 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         config::Mode::Evaluate => {
             let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool);
 
+            if let Some(write_opts) = &opts.write_opts {
+                let t_write_start = Instant::now();
+                write_evaluation(write_opts, &tests, &unmutated_test_exec_times, iter::once(&results), None, test_profiling_duration, t_start.elapsed());
+                write_duration += t_write_start.elapsed();
+            }
+
             if let Some(()) = &opts.print_opts.detection_matrix {
                 print_mutation_detection_matrix(&results.mutation_detection_matrix, &tests, !opts.exhaustive);
             }
@@ -616,10 +635,11 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
             print_mutation_analysis_epilogue(&results, opts.verbosity);
 
             if opts.report_timings {
-                println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?})",
+                println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; tests {tests:.2?}; write {write:.2?})",
                     total = t_start.elapsed(),
                     profiling = test_profiling_duration,
                     tests = results.duration,
+                    write = write_duration,
                 );
             }
 
@@ -661,6 +681,12 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 results.push(iteration_results);
             }
 
+            if let Some(write_opts) = &opts.write_opts {
+                let t_write_start = Instant::now();
+                write_evaluation(write_opts, &tests, &unmutated_test_exec_times, &results, None, test_profiling_duration, t_start.elapsed());
+                write_duration += t_write_start.elapsed();
+            }
+
             let total_mutations_count = mutants.iter().map(|mutant| mutant.mutations.len()).sum();
             let mutation_detection_matrices = results.iter().map(|run_results| &run_results.mutation_detection_matrix).collect::<Vec<_>>();
             let mutation_flakiness_matrix = MutationFlakinessMatrix::build(total_mutations_count, &mutation_detection_matrices);
@@ -669,10 +695,11 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
             print_mutation_flakiness_epilogue(&mutation_flakiness_matrix, &tests);
 
-            println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; iterations {iterations:.2?})",
+            println!("\nfinished in {total:.2?} (profiling {profiling:.2?}; iterations {iterations:.2?}; write {write:.2?})",
                 total = t_start.elapsed(),
                 profiling = test_profiling_duration,
                 iterations = t_flaky_iterations_start.elapsed(),
+                write = write_duration,
             );
         }
     }

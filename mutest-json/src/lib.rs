@@ -61,6 +61,7 @@ pub struct Definition {
 }
 
 pub mod call_graph;
+pub mod evaluation;
 pub mod tests;
 pub mod timings;
 pub mod mutations;
