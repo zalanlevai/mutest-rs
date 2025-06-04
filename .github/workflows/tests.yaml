@@ -29,6 +29,9 @@ jobs:
       - name: Install Rust toolchain
         run: rustc --version
 
+      - name: Build mutest-json (without rustc options, as a public consumer)
+        run: cargo build -p mutest-json
+
       - name: Build mutest-runtime
         run: cargo build --release -p mutest-runtime
 
