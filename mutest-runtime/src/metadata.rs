@@ -1,4 +1,11 @@
-pub use phf::phf_map as static_map;
+pub macro static_map($($input:tt)*) {
+    {
+        // NOTE: The `phf` crate name must exist in this generated scope
+        //       for the `phf_map` macro to expand correctly.
+        extern crate __mutest_runtime_public_dep_phf as phf;
+        phf::phf_map!($($input)*)
+    }
+}
 
 pub type TestPath = &'static str;
 

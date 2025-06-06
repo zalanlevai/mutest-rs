@@ -9,6 +9,13 @@
 #![feature(internal_output_capture)]
 extern crate test;
 
+// Injected dependencies:
+// Because public dependencies of mutest-runtime are injected into mutated crates,
+// they are renamed to avoid name collisions.
+// These crates are aliased back to their original names inside of mutest-runtime
+// for convenience, so that their usual names can be used inside of this crate.
+extern crate __mutest_runtime_public_dep_phf as phf;
+
 pub mod build {
     use std::path::Path;
 
