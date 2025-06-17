@@ -331,7 +331,7 @@ fn __rust_begin_short_backtrace<T, F: FnOnce() -> T>(f: F) -> T {
 pub fn run_test_in_spawned_subprocess(test: test::TestDescAndFn) -> ! {
     let builtin_panic_hook = panic::take_hook();
 
-    let exit_with_result = Arc::new(move |panic_info: Option<&panic::PanicInfo<'_>>| -> ! {
+    let exit_with_result = Arc::new(move |panic_info: Option<&panic::PanicHookInfo<'_>>| -> ! {
         let task_result = match panic_info {
             Some(info) => Err(info.payload()),
             None => Ok(()),

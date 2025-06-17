@@ -1,6 +1,26 @@
 pub use rustc_span::*;
 pub use rustc_span::symbol::Ident;
 
+use std::cmp::{Ord, Ordering};
+use std::mem;
+
+pub fn span_diagnostic_ord(a: Span, b: Span) -> Ordering {
+    let a_data = a.data();
+    let b_data = b.data();
+
+    // HACK: There is currently no way of publicly accessing
+    //       the `SyntaxContext`'s underlying `u32`
+    //       without invoking the `Debug` formatter.
+    // SAFETY: `SyntaxContext` is a single `u32`.
+    let a_ctxt_idx = unsafe { mem::transmute::<_, u32>(a_data.ctxt) };
+    // SAFETY: `SyntaxContext` is a single `u32`.
+    let b_ctxt_idx = unsafe { mem::transmute::<_, u32>(b_data.ctxt) };
+
+    Ord::cmp(&a_data.lo, &b_data.lo)
+        .then(Ord::cmp(&a_data.hi, &b_data.hi))
+        .then(Ord::cmp(&a_ctxt_idx, &b_ctxt_idx))
+}
+
 macro symbols($($sym:ident),* $(,)?) {
     use lazy_static::lazy_static;
     use rustc_span::Symbol;

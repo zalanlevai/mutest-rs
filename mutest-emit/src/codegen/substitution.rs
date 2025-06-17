@@ -143,11 +143,11 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
 
         krate.attrs.push(allow_unused_parens_attr);
 
-        ast::mut_visit::noop_visit_crate(krate, self);
+        ast::mut_visit::walk_crate(self, krate);
     }
 
-    fn visit_block(&mut self, block: &mut P<ast::Block>) {
-        ast::mut_visit::noop_visit_block(block, self);
+    fn visit_block(&mut self, block: &mut ast::Block) {
+        ast::mut_visit::walk_block(self, block);
 
         let mut i = 0;
         while i < block.stmts.len() {
@@ -212,7 +212,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
             _ => {}
         }
 
-        ast::mut_visit::noop_visit_expr(expr, self);
+        ast::mut_visit::walk_expr(self, expr);
 
         let expr_id = expr.id;
 
@@ -276,7 +276,7 @@ struct SyntaxAmbiguityResolver<'tcx> {
 
 impl<'tcx> ast::mut_visit::MutVisitor for SyntaxAmbiguityResolver<'tcx> {
     fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
-        ast::mut_visit::noop_visit_expr(expr, self);
+        ast::mut_visit::walk_expr(self, expr);
 
         match &expr.kind {
             // Expressions compared with a cast expression may be misinterpreted as type arguments for the type in the

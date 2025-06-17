@@ -14,13 +14,11 @@ use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 fn entry_point_type(item: &ast::Item, depth: usize) -> EntryPointType {
-    match item.kind {
-        ast::ItemKind::Fn(..) => {
-            if item.attrs.iter().any(|attr| attr.has_name(sym::start)) {
-                EntryPointType::Start
-            } else if item.attrs.iter().any(|attr| attr.has_name(sym::rustc_main)) {
+    match &item.kind {
+        ast::ItemKind::Fn(fn_item) => {
+            if item.attrs.iter().any(|attr| attr.has_name(sym::rustc_main)) {
                 EntryPointType::RustcMainAttr
-            } else if item.ident.name == sym::main {
+            } else if fn_item.ident.name == sym::main {
                 if depth == 0 {
                     EntryPointType::MainNamed
                 } else {
@@ -49,16 +47,18 @@ impl<'tcx> ast::mut_visit::MutVisitor for EntryPointCleaner<'tcx> {
         let g = &self.sess.psess.attr_id_generator;
 
         self.depth += 1;
-        let item = ast::mut_visit::noop_flat_map_item(i, self).expect_one("noop did something");
+        let item = ast::mut_visit::walk_flat_map_item(self, i).expect_one("noop did something");
         self.depth -= 1;
 
         let mut item = item.into_inner();
 
         match entry_point_type(&item, self.depth) {
             // Retain items that are user-defined entry points as dead-code.
-            EntryPointType::MainNamed | EntryPointType::Start => {
-                if item.ident.name == sym::main {
-                    item.ident = Ident::new(Symbol::intern("unused_main"), item.ident.span);
+            EntryPointType::MainNamed => 'arm: {
+                let ast::ItemKind::Fn(fn_item) = &mut item.kind else { break 'arm; };
+
+                if fn_item.ident.name == sym::main {
+                    fn_item.ident = Ident::new(Symbol::intern("unused_main"), fn_item.ident.span);
                 }
 
                 // #[allow(dead_code)]
@@ -111,5 +111,5 @@ pub fn generate_dummy_main<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
 }
 
 pub fn remove_dummy_main(krate: &mut ast::Crate) {
-    krate.items.retain(|item| item.ident.name != sym::main);
+    krate.items.retain(|item| item.kind.ident().is_none_or(|ident| ident.name != sym::main));
 }

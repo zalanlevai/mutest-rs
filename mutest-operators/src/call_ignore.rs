@@ -35,8 +35,10 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     // if the type's `Default::default` implementation refers back to the expression-containing function
     // (the function this call expression is in).
     // This avoids a case of infinite recursion, resulting in a stack overflow.
-    let ty_default = (res::fns::default(tcx), tcx.mk_args_trait(expr_ty, vec![]));
-    if let Some(ty_default_impl) = tcx.resolve_instance(param_env.and(ty_default)).ok().flatten()
+    let ty_default = res::fns::default(tcx);
+    let ty_default_generic_args = tcx.mk_args_trait(expr_ty, vec![]);
+    let typing_env = ty::TypingEnv { typing_mode: ty::TypingMode::PostAnalysis, param_env };
+    if let Some(ty_default_impl) = ty::Instance::try_resolve(tcx, typing_env, ty_default, ty_default_generic_args).ok().flatten()
         && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
         && let Some(ty_default_impl_body_id) = tcx.hir_node_by_def_id(ty_default_impl_def_id).body_id()
     {
@@ -44,12 +46,16 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
         // within type `T`'s `Default::default` implementation is a directly recursive function call.
         if ty_default_impl_def_id.to_def_id() == f { return None; }
 
-        let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir().body(ty_default_impl_body_id)).into_iter()
+        let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir_body(ty_default_impl_body_id)).into_iter()
             .filter_map(|call| match call.kind {
                 call_graph::CallKind::Def(def_id, generic_args) => Some((def_id, generic_args)),
                 _ => None,
             })
-            .flat_map(|(def_id, generic_args)| tcx.resolve_instance(tcx.param_env(def_id).and((def_id, generic_args))).ok().flatten());
+            .flat_map(|(def_id, generic_args)| {
+                let param_env = tcx.param_env(def_id);
+                let typing_env = ty::TypingEnv { typing_mode: ty::TypingMode::PostAnalysis, param_env };
+                ty::Instance::try_resolve(tcx, typing_env, def_id, generic_args).ok().flatten()
+            });
 
         let ty_default_impl_refers_to_call = ty_default_impl_callees.any(|instance| instance.def_id() == f);
         if ty_default_impl_refers_to_call { return None; }
@@ -110,7 +116,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let scope = f_hir.owner_id.def_id.to_def_id();
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns) else { return Mutations::none(); };
+        let Some(expr_ty_ast) = ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns, f_hir.owner_id.to_def_id()) else { return Mutations::none(); };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);

@@ -67,14 +67,16 @@ fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident]
         }
 
         let test_case = item;
-        let test_item = item_iterator.next().expect("test case not followed by the test item");
 
+        let test_item = item_iterator.next().expect("test case not followed by the test item");
         let Some(def_id) = def_res.node_id_to_def_id.get(&test_item.id).copied() else { unreachable!(); };
+
+        let Some(ident) = test_case.kind.ident() else { panic!("encountered test case without ident"); };
 
         let ignore = test_item.attrs.iter().any(|attr| attr.has_name(sym::ignore));
 
         tests.push(Test {
-            path: path.iter().copied().chain(iter::once(test_case.ident)).collect(),
+            path: path.iter().copied().chain(iter::once(ident)).collect(),
             descriptor: test_case.to_owned(),
             item: test_item.to_owned(),
             def_id,
@@ -92,23 +94,25 @@ struct TestCollector<'op> {
 }
 
 impl<'ast, 'op> ast::visit::Visitor<'ast> for TestCollector<'op> {
-    fn visit_crate(&mut self, c: &'ast ast::Crate) {
-        let mut tests = extract_expanded_tests(self.def_res, &self.current_path, &c.items);
+    fn visit_crate(&mut self, krate: &'ast ast::Crate) {
+        let mut tests = extract_expanded_tests(self.def_res, &self.current_path, &krate.items);
         self.tests.append(&mut tests);
 
-        ast::visit::walk_crate(self, c);
+        ast::visit::walk_crate(self, krate);
     }
 
-    fn visit_item(&mut self, i: &'ast ast::Item) {
-        if let ast::ItemKind::Mod(.., ast::ModKind::Loaded(ref items, ..)) = i.kind {
-            self.current_path.push(i.ident);
+    fn visit_item(&mut self, item: &'ast ast::Item) {
+        if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref items, _, _, _)) = item.kind {
+            let ident = item.kind.ident();
+
+            if let Some(ident) = ident { self.current_path.push(ident); }
 
             let mut tests = extract_expanded_tests(self.def_res, &self.current_path, &items);
             self.tests.append(&mut tests);
 
-            ast::visit::walk_item(self, i);
+            ast::visit::walk_item(self, item);
 
-            self.current_path.pop();
+            if let Some(_ident) = ident { self.current_path.pop(); }
         }
     }
 }
@@ -121,9 +125,12 @@ pub fn collect_tests(krate: &ast::Crate, def_res: &ast_lowering::DefResolutions)
 }
 
 pub fn is_marked_or_in_cfg_test<'tcx>(tcx: TyCtxt<'tcx>, id: hir::HirId) -> bool {
-    iter::once(id).chain(tcx.hir().parent_id_iter(id)).any(|parent_id| {
-        tcx.hir().attrs(parent_id).iter().any(|attr| {
-            ast::inspect::is_list_attr_with_ident(attr, None, sym::cfg, sym::test)
+    iter::once(id).chain(tcx.hir_parent_id_iter(id)).any(|parent_id| {
+        tcx.hir_attrs(parent_id).iter().any(|attr| {
+            // NOTE: `cfg(true)` attributes now leave `cfg_trace(true)` attributes behind after expansion.
+            //       This is how we can detect the original cfgs in the source code.
+            //       See https://github.com/rust-lang/rust/pull/138844.
+            hir::attr::is_list_attr_with_ident(attr, None, sym::cfg_trace, sym::test)
         })
     })
 }

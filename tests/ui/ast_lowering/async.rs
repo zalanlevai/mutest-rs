@@ -2,8 +2,6 @@
 //@ verify: ast_lowering
 //@ stderr: empty
 
-#![feature(async_closure)]
-
 #![allow(unused)]
 
 use std::future::Future;

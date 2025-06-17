@@ -11,8 +11,8 @@ use crate::analysis::tests::{self, Test};
 use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
-use crate::codegen::mutation::{UnsafeTargeting};
-use crate::codegen::symbols::{DUMMY_SP, Span, sym};
+use crate::codegen::mutation::UnsafeTargeting;
+use crate::codegen::symbols::{DUMMY_SP, Span, span_diagnostic_ord, sym};
 use crate::codegen::tool_attr;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,7 +38,7 @@ impl Unsafety {
         matches!((unsafe_targeting, self),
             | (_, Unsafety::Unsafe(UnsafeSource::Unsafe) | Unsafety::Tainted(UnsafeSource::Unsafe))
             | (UnsafeTargeting::None, Unsafety::Unsafe(_) | Unsafety::Tainted(_))
-            | (UnsafeTargeting::OnlyEnclosing(hir::Unsafety::Unsafe), Unsafety::Unsafe(UnsafeSource::EnclosingUnsafe) | Unsafety::Tainted(UnsafeSource::EnclosingUnsafe))
+            | (UnsafeTargeting::OnlyEnclosing(hir::Safety::Unsafe), Unsafety::Unsafe(UnsafeSource::EnclosingUnsafe) | Unsafety::Tainted(UnsafeSource::EnclosingUnsafe))
         )
     }
 }
@@ -61,7 +61,7 @@ impl<'ast> ast::visit::Visitor<'ast> for BodyUnsafetyChecker {
 fn check_item_unsafety<'ast>(item: ast::DefItem<'ast>) -> Unsafety {
     let ast::DefItemKind::Fn(target_fn) = item.kind() else { return Unsafety::None };
 
-    let ast::Unsafe::No = target_fn.sig.header.unsafety else { return Unsafety::Unsafe(UnsafeSource::Unsafe) };
+    let (ast::Safety::Default | ast::Safety::Safe(_)) = target_fn.sig.header.safety else { return Unsafety::Unsafe(UnsafeSource::Unsafe) };
 
     let Some(target_body) = &target_fn.body else { return Unsafety::None };
     let mut checker = BodyUnsafetyChecker { unsafety: None };
@@ -69,36 +69,36 @@ fn check_item_unsafety<'ast>(item: ast::DefItem<'ast>) -> Unsafety {
     checker.unsafety.unwrap_or(Unsafety::None)
 }
 
-fn collect_unsafe_blocks<'tcx>(body_hir: &'tcx hir::Body<'tcx>, root_scope_unsafety: hir::Unsafety) -> Vec<&'tcx hir::Block<'tcx>> {
+fn collect_unsafe_blocks<'tcx>(body_hir: &'tcx hir::Body<'tcx>, root_scope_safety: hir::Safety) -> Vec<&'tcx hir::Block<'tcx>> {
     struct BodyUnsafeBlockCollector<'tcx> {
-        current_scope_unsafety: hir::Unsafety,
+        current_scope_safety: hir::Safety,
         unsafe_blocks: Vec<&'tcx hir::Block<'tcx>>,
     }
 
     impl<'tcx> hir::intravisit::Visitor<'tcx> for BodyUnsafeBlockCollector<'tcx> {
         fn visit_block(&mut self, block: &'tcx hir::Block<'tcx>) {
-            let previous_scope_unsafety = self.current_scope_unsafety;
-            self.current_scope_unsafety = match block.rules {
+            let previous_scope_unsafety = self.current_scope_safety;
+            self.current_scope_safety = match block.rules {
                 | hir::BlockCheckMode::DefaultBlock
                 // NOTE: We explicitly ignore compiler-generated unsafe blocks.
                 | hir::BlockCheckMode::UnsafeBlock(hir::UnsafeSource::CompilerGenerated)
-                => self.current_scope_unsafety,
+                => self.current_scope_safety,
 
-                hir::BlockCheckMode::UnsafeBlock(hir::UnsafeSource::UserProvided) => hir::Unsafety::Unsafe,
+                hir::BlockCheckMode::UnsafeBlock(hir::UnsafeSource::UserProvided) => hir::Safety::Unsafe,
             };
 
-            if self.current_scope_unsafety == hir::Unsafety::Unsafe {
+            if self.current_scope_safety == hir::Safety::Unsafe {
                 self.unsafe_blocks.push(block);
             }
 
             hir::intravisit::walk_block(self, block);
 
-            self.current_scope_unsafety = previous_scope_unsafety;
+            self.current_scope_safety = previous_scope_unsafety;
         }
     }
 
     let mut collector = BodyUnsafeBlockCollector {
-        current_scope_unsafety: root_scope_unsafety,
+        current_scope_safety: root_scope_safety,
         unsafe_blocks: vec![],
     };
     hir::intravisit::Visitor::visit_body(&mut collector, body_hir);
@@ -154,7 +154,7 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
                 // #[cfg(test)] functions, or functions in #[cfg(test)] module
                 && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
                 // #[mutest::skip] functions
-                && !tool_attr::skip(tcx.hir().attrs(hir_id))
+                && !tool_attr::skip(tcx.hir_attrs(hir_id))
         })
 }
 
@@ -167,25 +167,25 @@ pub enum CallKind<'tcx> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Call<'tcx> {
     pub kind: CallKind<'tcx>,
-    pub unsafety: hir::Unsafety,
+    pub safety: hir::Safety,
     pub span: Span,
 }
 
 // Based on `rustc_mir_transform::inline::cycle::mir_inliner_callees`.
 pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> FxHashSet<Call<'tcx>> {
     let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
-    let param_env = ty::ParamEnv::reveal_all();
+    let typing_env = ty::TypingEnv::fully_monomorphized();
 
     let body_def_id = body_mir.source.instance.def_id();
-    let body_unsafety = match tcx.def_kind(body_def_id) {
-        hir::DefKind::Closure => hir::Unsafety::Normal,
-        _ => tcx.fn_sig(body_def_id).skip_binder().unsafety(),
+    let body_safety = match tcx.def_kind(body_def_id) {
+        hir::DefKind::Closure => hir::Safety::Safe,
+        _ => tcx.fn_sig(body_def_id).skip_binder().safety(),
     };
 
     let body_hir = body_def_id.as_local()
         .and_then(|local_def_id| tcx.hir_node_by_def_id(local_def_id).body_id())
-        .map(|body_id| tcx.hir().body(body_id));
-    let unsafe_blocks = body_hir.map(|body_hir| collect_unsafe_blocks(body_hir, body_unsafety));
+        .map(|body_id| tcx.hir_body(body_id));
+    let unsafe_blocks = body_hir.map(|body_hir| collect_unsafe_blocks(body_hir, body_safety));
 
     body_mir.basic_blocks.iter()
         .filter_map(|basic_block| {
@@ -195,12 +195,12 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
             let ty = func.ty(&body_mir.local_decls, tcx);
             let span = terminator.source_info.span;
 
-            let mut unsafety = body_unsafety;
+            let mut safety = body_safety;
 
-            if unsafety != hir::Unsafety::Unsafe {
+            if safety != hir::Safety::Unsafe {
                 if let Some(unsafe_blocks) = &unsafe_blocks {
                     if unsafe_blocks.iter().any(|unsafe_block| span.find_ancestor_inside_same_ctxt(unsafe_block.span).is_some()) {
-                        unsafety = hir::Unsafety::Unsafe;
+                        safety = hir::Safety::Unsafe;
                     }
                 }
             }
@@ -216,23 +216,23 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
                         generic_args = inner_generic_args;
                     }
 
-                    let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(generic_args));
+                    let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(generic_args));
 
-                    if unsafety != hir::Unsafety::Unsafe {
-                        unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
+                    if safety != hir::Safety::Unsafe {
+                        safety = tcx.fn_sig(def_id).skip_binder().safety();
                     }
 
-                    Some(Call { kind: CallKind::Def(def_id, generic_args), unsafety, span })
+                    Some(Call { kind: CallKind::Def(def_id, generic_args), safety, span })
                 }
 
-                &ty::TyKind::FnPtr(fn_sig) => {
-                    let fn_sig = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(fn_sig));
+                &ty::TyKind::FnPtr(fn_sig_tys, fn_header) => {
+                    let fn_sig_tys = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(fn_sig_tys));
 
-                    if unsafety != hir::Unsafety::Unsafe {
-                        unsafety = fn_sig.unsafety();
+                    if safety != hir::Safety::Unsafe {
+                        safety = fn_header.safety;
                     }
 
-                    Some(Call { kind: CallKind::Ptr(fn_sig), unsafety, span })
+                    Some(Call { kind: CallKind::Ptr(fn_sig_tys.with(fn_header)), safety, span })
                 }
 
                 _ => None,
@@ -243,9 +243,9 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
 
 pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, generic_args: ty::GenericArgsRef<'tcx>) -> impl Iterator<Item = Call<'tcx>> {
     let instance = ty::Instance { def: body_mir.source.instance, args: generic_args };
-    let param_env = ty::ParamEnv::reveal_all();
+    let typing_env = ty::TypingEnv::fully_monomorphized();
 
-    body_mir.mentioned_items.iter()
+    body_mir.mentioned_items.iter().flatten()
         .filter_map(|mentioned_item| {
             match &mentioned_item.node {
                 mir::MentionedItem::Drop(dropped_ty) => Some(dropped_ty),
@@ -253,13 +253,13 @@ pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx
             }
         })
         .map(move |&dropped_ty| {
-            let dropped_ty = instance.instantiate_mir_and_normalize_erasing_regions(tcx, param_env, ty::EarlyBinder::bind(dropped_ty));
+            let dropped_ty = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(dropped_ty));
             ty::Instance::resolve_drop_in_place(tcx, dropped_ty)
         })
         .flat_map(move |drop_in_place| tcx.mir_inliner_callees(drop_in_place.def))
         .map(move |&(def_id, generic_args)| {
-            let unsafety = tcx.fn_sig(def_id).skip_binder().unsafety();
-            Call { kind: CallKind::Def(def_id, generic_args), unsafety, span: DUMMY_SP }
+            let safety = tcx.fn_sig(def_id).skip_binder().safety();
+            Call { kind: CallKind::Def(def_id, generic_args), safety, span: DUMMY_SP }
         })
 }
 
@@ -347,23 +347,27 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     for test in tests {
         if test.ignore { continue; }
 
-        let body_mir = tcx.instance_mir(ty::InstanceDef::Item(test.def_id.to_def_id()));
+        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(test.def_id.to_def_id()));
 
         let mut callees = mir_callees(tcx, &body_mir, tcx.mk_args(&[]));
         callees.extend(drop_glue_callees(tcx, &body_mir, tcx.mk_args(&[])));
 
-        for call in callees {
+        // HACK: We must sort the calls into a stable order for the corresponding diagnostics to be printed in a stable order.
+        let mut calls = callees.into_iter().collect::<Vec<_>>();
+        calls.sort_unstable_by(|call_a, call_b| span_diagnostic_ord(call_a.span, call_b.span));
+
+        for call in calls {
             // NOTE: We are post type-checking, querying monomorphic obligations.
-            let param_env = ty::ParamEnv::reveal_all();
+            let typing_env = ty::TypingEnv::fully_monomorphized();
 
             let callee = match call.kind {
                 CallKind::Def(def_id, generic_args) => {
                     // Using the concrete type arguments of this call, we resolve the corresponding definition instance. The
                     // type arguments might take a different form at the resolved definition site, so we propagate them
                     // instead.
-                    let instance = ty::Instance::expect_resolve(tcx, param_env, def_id, generic_args);
+                    let instance = ty::Instance::expect_resolve(tcx, typing_env, def_id, generic_args, DUMMY_SP);
 
-                    if let ty::InstanceDef::Virtual(def_id, _) = instance.def {
+                    if let ty::InstanceKind::Virtual(def_id, _) = instance.def {
                         call_graph.virtual_calls_count += 1;
 
                         let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
@@ -421,7 +425,15 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     for distance in 0..depth {
         let mut newly_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
 
-        for (caller, call_paths) in previously_found_callees.drain() {
+        // HACK: We must sort the callees into a stable order for the corresponding diagnostics to be printed in a stable order.
+        let mut callees = previously_found_callees.drain().collect::<Vec<_>>();
+        callees.sort_unstable_by(|(caller_a, _), (caller_b, _)| {
+            let caller_a_span = tcx.def_span(caller_a.def_id);
+            let caller_b_span = tcx.def_span(caller_b.def_id);
+            span_diagnostic_ord(caller_a_span, caller_b_span)
+        });
+
+        for (caller, call_paths) in callees {
             // `const` functions, like other `const` scopes, cannot be mutated.
             if tcx.is_const_fn(caller.def_id) { continue; }
 
@@ -437,7 +449,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     // #[cfg(test)] function, or function in #[cfg(test)] module
                     || tests::is_marked_or_in_cfg_test(tcx, hir_id)
                     // #[mutest::skip] function
-                    || tool_attr::skip(tcx.hir().attrs(hir_id));
+                    || tool_attr::skip(tcx.hir_attrs(hir_id));
 
                 if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) {
                     let target = targets.entry(local_def_id).or_insert_with(|| {
@@ -470,14 +482,18 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             //       callees at the end of the call graph are ignored.
             if distance < (depth - 1) {
                 if !tcx.is_mir_available(caller.def_id) { continue; }
-                let body_mir = tcx.instance_mir(ty::InstanceDef::Item(caller.def_id));
+                let body_mir = tcx.instance_mir(ty::InstanceKind::Item(caller.def_id));
 
                 let mut callees = mir_callees(tcx, &body_mir, caller.generic_args);
                 callees.extend(drop_glue_callees(tcx, &body_mir, caller.generic_args));
 
-                for call in callees {
+                // HACK: We must sort the calls into a stable order for the corresponding diagnostics to be printed in a stable order.
+                let mut calls = callees.into_iter().collect::<Vec<_>>();
+                calls.sort_unstable_by(|call_a, call_b| span_diagnostic_ord(call_a.span, call_b.span));
+
+                for call in calls {
                     // NOTE: We are post type-checking, querying monomorphic obligations.
-                    let param_env = ty::ParamEnv::reveal_all();
+                    let typing_env = ty::TypingEnv::fully_monomorphized();
 
                     let callee = match call.kind {
                         CallKind::Def(def_id, generic_args) => {
@@ -487,9 +503,9 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                             // Using the concrete type arguments of this call, we resolve the corresponding definition
                             // instance. The type arguments might take a different form at the resolved definition site, so
                             // we propagate them instead.
-                            let instance = ty::Instance::expect_resolve(tcx, param_env, def_id, generic_args);
+                            let instance = ty::Instance::expect_resolve(tcx, typing_env, def_id, generic_args, DUMMY_SP);
 
-                            if let ty::InstanceDef::Virtual(def_id, _) = instance.def {
+                            if let ty::InstanceKind::Virtual(def_id, _) = instance.def {
                                 call_graph.virtual_calls_count += 1;
 
                                 let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
@@ -540,9 +556,9 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     let new_call_paths = newly_found_callees.entry(callee).or_insert_with(Default::default);
 
                     for (&test, &unsafety) in &call_paths {
-                        let unsafe_source = match call.unsafety {
-                            hir::Unsafety::Normal => unsafety,
-                            hir::Unsafety::Unsafe => Some(UnsafeSource::Unsafe),
+                        let unsafe_source = match call.safety {
+                            hir::Safety::Safe => unsafety,
+                            hir::Safety::Unsafe => Some(UnsafeSource::Unsafe),
                         };
 
                         let new_unsafety = new_call_paths.entry(test).or_insert(unsafety);

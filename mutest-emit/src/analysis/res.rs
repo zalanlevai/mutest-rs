@@ -66,9 +66,9 @@ impl<'tcx> CrateResolutions<'tcx> {
                 (Symbol::intern(name), renamed_cnum)
             })
             .collect::<FxHashMap<_, _>>();
-        if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_core)) {
+        if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_core)) {
             extern_crate_name_to_cnum.insert(sym::core, None);
-            if !tcx.hir().krate_attrs().iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::no_std)) {
+            if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
                 extern_crate_name_to_cnum.insert(sym::alloc, None);
                 extern_crate_name_to_cnum.insert(sym::std, None);
             }
@@ -190,7 +190,7 @@ pub fn def_path_res<'tcx>(tcx: TyCtxt<'tcx>, path: &[Symbol]) -> Res {
             if let Some(item) = item_child_by_symbol(tcx, def_id, segment) {
                 Some(item.res)
             } else if matches!(res, Res::Def(DefKind::Enum | DefKind::Struct, _)) {
-                tcx.inherent_impls(def_id).unwrap().iter()
+                tcx.inherent_impls(def_id).iter()
                     .find_map(|&impl_def_id| item_child_by_symbol(tcx, impl_def_id, segment))
                     .map(|child| child.res)
             } else {
@@ -244,10 +244,10 @@ pub fn def_id_path<'tcx>(tcx: TyCtxt<'tcx>, mut def_id: hir::DefId) -> Vec<hir::
     path
 }
 
-pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hir::HirId, hir::Node)> {
+pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hir::HirId, hir::Node<'tcx>)> {
     let def_hir_id = tcx.local_def_id_to_hir_id(def_id);
 
-    let mut path = tcx.hir().parent_iter(def_hir_id).collect::<Vec<_>>();
+    let mut path = tcx.hir_parent_iter(def_hir_id).collect::<Vec<_>>();
     path.reverse();
 
     let def_node = tcx.hir_node(def_hir_id);
@@ -292,28 +292,28 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
 
 struct CalleeCollector<'tcx> {
     typeck: &'tcx ty::TypeckResults<'tcx>,
-    current_scope_unsafety: hir::Unsafety,
+    current_scope_safety: hir::Safety,
     callees: Vec<Call<'tcx>>,
 }
 
 impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
     fn visit_block(&mut self, block: &'tcx hir::Block<'tcx>) {
-        let previous_scope_unsafety = self.current_scope_unsafety;
-        self.current_scope_unsafety = match block.rules {
-            hir::BlockCheckMode::DefaultBlock => self.current_scope_unsafety,
-            hir::BlockCheckMode::UnsafeBlock(_) => hir::Unsafety::Unsafe,
+        let previous_scope_safety = self.current_scope_safety;
+        self.current_scope_safety = match block.rules {
+            hir::BlockCheckMode::DefaultBlock => self.current_scope_safety,
+            hir::BlockCheckMode::UnsafeBlock(_) => hir::Safety::Unsafe,
         };
 
         hir::intravisit::walk_block(self, block);
 
-        self.current_scope_unsafety = previous_scope_unsafety;
+        self.current_scope_safety = previous_scope_safety;
     }
 
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
         if let Some((def_id, generic_args)) = callee(self.typeck, expr) {
             self.callees.push(Call {
                 kind: CallKind::Def(def_id, generic_args),
-                unsafety: self.current_scope_unsafety,
+                safety: self.current_scope_safety,
                 span: expr.span,
             });
         }
@@ -325,38 +325,45 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for CalleeCollector<'tcx> {
 pub fn collect_callees<'tcx>(tcx: TyCtxt<'tcx>, body: &'tcx hir::Body<'tcx>) -> Vec<Call<'tcx>> {
     let typeck = tcx.typeck_body(body.id());
 
-    let body_owner = tcx.hir_node(tcx.hir().body_owner(body.id()));
-    let body_unsafety = match body_owner {
+    fn header_safety(header_safety: hir::HeaderSafety) -> hir::Safety {
+        match header_safety {
+            hir::HeaderSafety::Normal(safety) => safety,
+            hir::HeaderSafety::SafeTargetFeatures => hir::Safety::Unsafe,
+        }
+    }
+
+    let body_owner = tcx.hir_node(tcx.hir_body_owner(body.id()));
+    let body_safety = match body_owner {
         hir::Node::Item(item) => {
             match &item.kind {
-                hir::ItemKind::Fn(sig, _, _) => sig.header.unsafety,
-                _ => hir::Unsafety::Normal,
+                hir::ItemKind::Fn { sig, .. } => header_safety(sig.header.safety),
+                _ => hir::Safety::Safe,
             }
         }
         hir::Node::ForeignItem(item) => {
             match &item.kind {
-                hir::ForeignItemKind::Fn(_, _, _) => hir::Unsafety::Unsafe,
-                _ => hir::Unsafety::Normal,
+                hir::ForeignItemKind::Fn(_, _, _) => hir::Safety::Unsafe,
+                _ => hir::Safety::Safe,
             }
         }
         hir::Node::TraitItem(item) => {
             match &item.kind {
-                hir::TraitItemKind::Fn(sig, _) => sig.header.unsafety,
-                _ => hir::Unsafety::Normal,
+                hir::TraitItemKind::Fn(sig, _) => header_safety(sig.header.safety),
+                _ => hir::Safety::Safe,
             }
         }
         hir::Node::ImplItem(item) => {
             match &item.kind {
-                hir::ImplItemKind::Fn(sig, _) => sig.header.unsafety,
-                _ => hir::Unsafety::Normal,
+                hir::ImplItemKind::Fn(sig, _) => header_safety(sig.header.safety),
+                _ => hir::Safety::Safe,
             }
         }
-        _ => hir::Unsafety::Normal,
+        _ => hir::Safety::Safe,
     };
 
     let mut collector = CalleeCollector {
         typeck,
-        current_scope_unsafety: body_unsafety,
+        current_scope_safety: body_safety,
         callees: vec![],
     };
     collector.visit_body(body);
@@ -455,7 +462,7 @@ impl<'tcx> DefPath<'tcx> {
     }
 }
 
-pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId) -> Option<DefPath> {
+pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId) -> Option<DefPath<'tcx>> {
     if !tcx.is_descendant_of(def_id, scope) { return None; }
 
     if def_id == scope {
@@ -490,14 +497,14 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     let mut def_path = DefPath::new(root, Vec::with_capacity(relative_def_id_path.len()));
     for &def_id in relative_def_id_path {
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
-        let name = tcx.opt_item_name(def_id).unwrap_or(kw::Empty);
+        let name = tcx.opt_item_name(def_id).unwrap_or(sym::empty);
         def_path.segments.push(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None });
     }
 
     Some(def_path)
 }
 
-pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut scope: hir::DefId) -> Result<DefPath, hir::DefId> {
+pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut scope: hir::DefId) -> Result<DefPath<'tcx>, hir::DefId> {
     if !tcx.is_descendant_of(def_id, scope) {
         'fail: {
             // For some scopes, we can make an adjustment and try to find a relative path from the parent scope.

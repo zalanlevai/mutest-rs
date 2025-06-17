@@ -2,6 +2,7 @@ use std::iter;
 
 use mutest_emit::analysis::call_graph::{CallGraph, Callee, Target, Unsafety};
 use mutest_emit::analysis::tests::Test;
+use mutest_emit::codegen::symbols::span_diagnostic_ord;
 use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, UnsafeTargeting};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::ty::TyCtxt;
@@ -45,9 +46,9 @@ pub fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, targets: impl Iterator<Item 
 
     // Targets are printed in source span order.
     let mut targets_in_print_order = targets
-        .map(|target| (tcx.hir().span(tcx.local_def_id_to_hir_id(target.def_id)), target))
+        .map(|target| (tcx.hir_span(tcx.local_def_id_to_hir_id(target.def_id)), target))
         .collect::<Vec<_>>();
-    targets_in_print_order.sort_unstable_by_key(|(target_span, _)| *target_span);
+    targets_in_print_order.sort_unstable_by(|(target_a_span, _), (target_b_span, _)| span_diagnostic_ord(*target_a_span, *target_b_span));
 
     let targets_count = targets_in_print_order.len();
 
@@ -127,7 +128,7 @@ pub fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_grap
                     .map(|(_, callee)| (callee.display_str(tcx), tcx.def_span(callee.def_id), callee))
                     .collect::<Vec<_>>();
                 callees_in_print_order.sort_unstable_by(|(callee_a_display_str, callee_a_span, _), (callee_b_display_str, callee_b_span, _)| {
-                    Ord::cmp(callee_a_span, callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
+                    span_diagnostic_ord(*callee_a_span, *callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
                 });
 
                 for (callee_display_str, callee_span, callee) in callees_in_print_order {
@@ -150,7 +151,7 @@ pub fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_grap
                     .map(|caller| (caller.display_str(tcx), tcx.def_span(caller.def_id), caller))
                     .collect::<Vec<_>>();
                 callers_in_print_order.sort_unstable_by(|(caller_a_display_str, caller_a_span, _), (caller_b_display_str, caller_b_span, _)| {
-                    Ord::cmp(caller_a_span, caller_b_span).then(Ord::cmp(caller_a_display_str, caller_b_display_str))
+                    span_diagnostic_ord(*caller_a_span, *caller_b_span).then(Ord::cmp(caller_a_display_str, caller_b_display_str))
                 });
 
                 for (caller_display_str, caller_span, caller) in callers_in_print_order {
@@ -161,7 +162,7 @@ pub fn print_call_graph<'tcx, 'trg>(tcx: TyCtxt<'tcx>, tests: &[Test], call_grap
                         .map(|(_, callee)| (callee.display_str(tcx), tcx.def_span(callee.def_id), callee))
                         .collect::<Vec<_>>();
                     callees_in_print_order.sort_unstable_by(|(callee_a_display_str, callee_a_span, _), (callee_b_display_str, callee_b_span, _)| {
-                        Ord::cmp(callee_a_span, callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
+                        span_diagnostic_ord(*callee_a_span, *callee_b_span).then(Ord::cmp(callee_a_display_str, callee_b_display_str))
                     });
 
                     for (callee_display_str, callee_span, callee) in callees_in_print_order {

@@ -9,4 +9,4 @@ edition = "2021"
 rustc_private = true
 
 [dependencies]
-rand = "0.8"
+rand = "0.9"

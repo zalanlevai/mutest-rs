@@ -1,11 +1,8 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
-use std::sync::Arc;
-use std::sync::atomic::{self, AtomicBool};
 
 use rustc_interface::Config as CompilerConfig;
-use rustc_interface::interface::Result as CompilerResult;
 use rustc_session::config::{ExternEntry, ExternLocation, Externs, Input};
 use rustc_session::parse::ParseSess;
 use rustc_span::Symbol;
@@ -84,15 +81,16 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
         output_dir: config.output_dir.clone(),
         ice_file: config.ice_file.clone(),
         file_loader: Some(Box::new(RealFileLoader)),
-        locale_resources: config.locale_resources,
+        locale_resources: config.locale_resources.clone(),
         lint_caps: config.lint_caps.clone(),
         psess_created: None,
         hash_untracked_state: None,
         register_lints: None,
         override_queries: None,
+        extra_symbols: config.extra_symbols.clone(),
         make_codegen_backend: None,
         registry: rustc_driver::diagnostics_registry(),
-        using_internal_features: Arc::new(AtomicBool::new(config.using_internal_features.load(atomic::Ordering::Relaxed))),
+        using_internal_features: config.using_internal_features,
         expanded_args: config.expanded_args.clone(),
     }
 }
@@ -106,19 +104,19 @@ impl rustc_driver::Callbacks for RustcConfigCallbacks {
         self.config = Some(copy_compiler_settings(config));
     }
 
-    fn after_crate_root_parsing<'tcx>(
+    fn after_crate_root_parsing(
         &mut self,
         _compiler: &rustc_interface::interface::Compiler,
-        _queries: &'tcx rustc_interface::Queries<'tcx>,
+        _krate: &mut rustc_ast::Crate,
     ) -> rustc_driver::Compilation {
         rustc_driver::Compilation::Stop
     }
 }
 
-pub fn parse_compiler_args(args: &[String]) -> CompilerResult<Option<CompilerConfig>> {
+pub fn parse_compiler_args(args: &[String]) -> Option<CompilerConfig> {
     let mut callbacks = RustcConfigCallbacks { config: None };
-    rustc_driver::RunCompiler::new(args, &mut callbacks).run()?;
-    Ok(callbacks.config)
+    rustc_driver::run_compiler(args, &mut callbacks);
+    callbacks.config
 }
 
 pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_fingerprint: &Option<String>) {
@@ -135,6 +133,12 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
     compiler_config.psess_created = Some(Box::new(move |parse_sess| {
         track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
     }));
+
+    // Register #[cfg(test)] as a valid cfg.
+    // See the rustc change https://github.com/rust-lang/rust/pull/131729, and
+    // the Cargo change https://github.com/rust-lang/cargo/pull/14963
+    // for more details.
+    compiler_config.crate_check_cfg.push("cfg(test)".to_owned());
 
     // Register #[cfg(mutest)] as a valid cfg.
     compiler_config.crate_check_cfg.push("cfg(mutest, values(none()))".to_owned());

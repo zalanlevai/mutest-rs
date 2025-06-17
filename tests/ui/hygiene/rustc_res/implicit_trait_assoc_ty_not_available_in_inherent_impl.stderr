@@ -2,7 +2,16 @@ error[E0223]: ambiguous associated type
   --> tests/ui/hygiene/rustc_res/implicit_trait_assoc_ty_not_available_in_inherent_impl.rs:15:23
    |
 15 |     fn copy(&self) -> Self::Target { self.0 }
-   |                       ^^^^^^^^^^^^ help: use fully-qualified syntax: `<DerefOnly as std::ops::Deref>::Target`
+   |                       ^^^^^^^^^^^^
+   |
+help: use fully-qualified syntax
+   |
+15 -     fn copy(&self) -> Self::Target { self.0 }
+15 +     fn copy(&self) -> <DerefOnly as std::ops::Deref>::Target { self.0 }
+   |
+15 -     fn copy(&self) -> Self::Target { self.0 }
+15 +     fn copy(&self) -> <DerefOnly as std::ops::Receiver>::Target { self.0 }
+   |
 
 error: aborting due to 1 previous error
 

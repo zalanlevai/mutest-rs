@@ -1,15 +1,16 @@
 use std::iter;
 use std::mem;
+use std::ops::DerefMut;
 use std::panic;
+use std::sync::Arc;
 
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
-use rustc_data_structures::sync::Lrc;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_hash::FxHashSet;
-use rustc_hir_analysis::collect::ItemCtxt;
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::span_bug;
+use rustc_middle::ty::TypingMode;
 use rustc_span::edition::Edition;
 use rustc_trait_selection::traits::{ImplSource, Obligation, ObligationCause, SelectionContext};
 use smallvec::{SmallVec, smallvec};
@@ -19,7 +20,7 @@ use crate::analysis::ast_lowering;
 use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};
 use crate::analysis::res;
 use crate::analysis::ty::{self, Ty, TyCtxt};
-use crate::codegen::ast::{self, AstDeref, P};
+use crate::codegen::ast::{self, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
 use crate::codegen::symbols::hygiene::{ExpnData, ExpnId, MacroKind, Transparency};
@@ -57,7 +58,7 @@ fn sanitize_ident_if_from_expansion(ident: &mut Ident, ident_res_kind: IdentResK
         // Some identifiers produced by semi-transparent expansions (e.g. macro_rules macros)
         // may be resolved at call-site, rather than at definition-site, meaning that
         // they are not actually hygienic.
-        if let Transparency::SemiTransparent = transparency {
+        if let Transparency::SemiOpaque = transparency {
             // Local variables and labels get resolved at definition-site (i.e. hygienic),
             // everything else at call-site (i.e. not hygienic).
             // NOTE: `$crate` also gets resolved at definition-site but is handled
@@ -229,11 +230,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                 let mut segment = ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None };
 
-                match segments_with_generics.extract_if(|(segment_def_id, _)| *segment_def_id == def_id).next() {
+                match segments_with_generics.extract_if(.., |(segment_def_id, _)| *segment_def_id == def_id).next() {
                     // Copy matching generic args from the corresponding segment in the original path.
                     Some((_, Some(mut args))) => {
                         // Sanitize associated constraint idents.
-                        match args.ast_deref_mut() {
+                        match args.deref_mut() {
                             ast::GenericArgs::AngleBracketed(args) => 'arm: {
                                 // Skip sanitization if it is only an argument list and there are no references to assoc items.
                                 // NOTE: This is also needed to avoid attempting to fetch assoc items for e.g. generic function calls.
@@ -244,19 +245,19 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 for arg in &mut args.args {
                                     match arg {
                                         ast::AngleBracketedArg::Constraint(assoc_constraint) => {
-                                            let assoc_kind = match &assoc_constraint.kind {
-                                                ast::AssocConstraintKind::Equality { term } => {
+                                            let assoc_tag = match &assoc_constraint.kind {
+                                                ast::AssocItemConstraintKind::Equality { term } => {
                                                     match term {
-                                                        ast::Term::Ty(..) => ty::AssocKind::Type,
-                                                        ast::Term::Const(..) => ty::AssocKind::Const,
+                                                        ast::Term::Ty(..) => ty::AssocTag::Type,
+                                                        ast::Term::Const(..) => ty::AssocTag::Const,
                                                     }
                                                 }
-                                                ast::AssocConstraintKind::Bound { .. } => ty::AssocKind::Type,
+                                                ast::AssocItemConstraintKind::Bound { .. } => ty::AssocTag::Type,
                                             };
 
                                             if let Some(assoc_item) = assoc_items
                                                 .filter_by_name_unhygienic(assoc_constraint.ident.name)
-                                                .find(|assoc_item| assoc_item.kind == assoc_kind)
+                                                .find(|assoc_item| assoc_item.as_tag() == assoc_tag)
                                             {
                                                 // Copy and sanitize assoc item definition ident.
                                                 let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
@@ -268,7 +269,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     }
                                 }
                             }
-                            ast::GenericArgs::Parenthesized(_) => {}
+                            ast::GenericArgs::Parenthesized(_) | ast::GenericArgs::ParenthesizedElided(_) => {}
                         }
 
                         // Copy modified args.
@@ -435,7 +436,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let Some(hir_id) = self.body_res.hir_id(node_id) else {
                     self.bug_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", ast::print::path_to_string(path)));
                 };
-                let def_ident = self.tcx.hir().ident(hir_id);
+                let def_ident = self.tcx.hir_ident(hir_id);
 
                 let [ident_segment] = &mut path.segments[..] else { unreachable!() };
                 copy_def_span_ctxt(&mut ident_segment.ident, def_ident.span);
@@ -497,6 +498,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::GlobalAsm
                     | hir::DefKind::Impl { .. }
                     | hir::DefKind::Closure
+                    | hir::DefKind::SyntheticCoroutineBody
                     => None
                 }
             }
@@ -539,12 +541,14 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        let icx = ItemCtxt::new(self.tcx, ty_hir.hir_id.owner.def_id);
-        icx.lower_ty(ty_hir)
+        // HACK: `ItemCtxt` and its `lower_ty` method are no longer public,
+        //       so we have to use the only remaining accessible workaround,
+        //       even though it is marked as "quasi-deprecated".
+        rustc_hir_analysis::lower_ty(self.tcx, ty_hir)
     }
 
-    fn sanitize_region(&self, region: ty::Region<'tcx>) -> Option<ast::Lifetime> {
-        let span = match ty::region_opt_param_def_id(region) {
+    fn sanitize_region(&self, region: ty::Region<'tcx>, binding_item_def_id: hir::DefId) -> Option<ast::Lifetime> {
+        let span = match region.opt_param_def_id(self.tcx, binding_item_def_id) {
             Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
             None => DUMMY_SP,
         };
@@ -554,26 +558,26 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         Some(ast::mk::lifetime(DUMMY_SP, ident))
     }
 
-    fn sanitize_ty(&self, ty: Ty<'tcx>, span: Span) -> P<ast::Ty> {
+    fn sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> P<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true) else {
+        let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true, binding_item_def_id) else {
             span_bug!(span, "cannot construct AST representation of type `{ty:?}`");
         };
 
         ty_ast
     }
 
-    fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], span: Span) -> Option<P<ast::GenericArgs>> {
+    fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], binding_item_def_id: hir::DefId, span: Span) -> Option<P<ast::GenericArgs>> {
         let args_ast = generic_args.into_iter()
             .filter_map(|generic_arg| {
-                match generic_arg.unpack() {
+                match generic_arg.kind() {
                     ty::GenericArgKind::Lifetime(region) => {
-                        let lifetime = self.sanitize_region(region)?;
+                        let lifetime = self.sanitize_region(region, binding_item_def_id)?;
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
                     }
                     ty::GenericArgKind::Type(ty) => {
-                        let ty_ast = self.sanitize_ty(ty, span);
+                        let ty_ast = self.sanitize_ty(ty, binding_item_def_id, span);
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
                     }
                     ty::GenericArgKind::Const(_) => {
@@ -592,7 +596,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
     fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, span: Span) -> Option<P<ast::GenericArgs>> {
-        let (generic_predicates, param_index) = match param_res {
+        let (parent_def_id, generic_predicates, param_index) = match param_res {
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
                 let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
 
@@ -606,18 +610,18 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let args = self.tcx.mk_args_trait(dummy_self_param_ty, trait_ref.skip_binder().args.iter().skip(1));
                 let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, args);
 
-                (generic_predicates, 0)
+                (impl_def_id, generic_predicates, 0)
             }
             | hir::Res::SelfTyAlias { alias_to: trait_def_id, is_trait_impl: false, .. }
             | hir::Res::SelfTyParam { trait_: trait_def_id } => {
                 let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx);
-                (generic_predicates, 0)
+                (trait_def_id, generic_predicates, 0)
             }
             hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
                 let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
                 let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
                 let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id)).instantiate_identity(self.tcx);
-                (generic_predicates, param_index)
+                (self.tcx.parent(param_def_id), generic_predicates, param_index)
             }
             _ => { return None; }
         };
@@ -635,7 +639,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return None;
         };
 
-        self.sanitize_generic_args(&trait_predicate.trait_ref.args[1..], span)
+        self.sanitize_generic_args(&trait_predicate.trait_ref.args[1..], parent_def_id, span)
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
@@ -676,19 +680,35 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             }
                         };
                         if let hir::Res::Err = qres {
-                            match self.tcx.hir_node(node_hir_id) {
-                                hir::Node::Ty(ty_hir) => {
-                                    let icx = ItemCtxt::new(self.tcx, node_hir_id.owner.def_id);
-                                    let ty = icx.lower_ty(ty_hir);
-                                    let ty::TyKind::Alias(ty::AliasTyKind::Projection, alias_ty) = ty.kind() else { unreachable!() };
+                            'fixup: {
+                                let node_hir = self.tcx.hir_node(node_hir_id);
 
-                                    let trait_item_def_id = alias_ty.def_id;
-                                    let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
-
-                                    qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
+                                // NOTE: In the case of expression patterns, the type dependent def
+                                //       is associated with the pattern expression node, not the pattern node itself.
+                                if let hir::Node::Pat(pat_hir) = node_hir && let hir::PatKind::Expr(pat_expr_hir) = &pat_hir.kind {
+                                    // NOTE: Patterns can only be found in bodies.
+                                    let Some(typeck) = self.typeck_for(node_hir_id.owner) else { unreachable!() };
+                                    qres = typeck.qpath_res(&qpath_hir, pat_expr_hir.hir_id);
                                 }
 
-                                _ => span_bug!(path.span, "path `{}` cannot be resolved", ast::print::qpath_to_string(qself.as_deref(), path)),
+                                if !matches!(qres, hir::Res::Err) { break 'fixup; }
+
+                                match node_hir {
+                                    hir::Node::Ty(ty_hir) => {
+                                        // HACK: `ItemCtxt` and its `lower_ty` method are no longer public,
+                                        //       so we have to use the only remaining accessible workaround,
+                                        //       even though it is marked as "quasi-deprecated".
+                                        let ty = rustc_hir_analysis::lower_ty(self.tcx, ty_hir);
+                                        let ty::TyKind::Alias(ty::AliasTyKind::Projection, alias_ty) = ty.kind() else { unreachable!() };
+
+                                        let trait_item_def_id = alias_ty.def_id;
+                                        let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
+
+                                        qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
+                                    }
+
+                                    _ => span_bug!(path.span, "path `{}` cannot be resolved", ast::print::qpath_to_string(qself.as_deref(), path)),
+                                }
                             }
                         }
 
@@ -698,7 +718,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let parent_def_id = self.tcx.parent(qres.def_id());
                         match self.tcx.def_kind(parent_def_id) {
                             hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, parent_def_id, qself_ty_hir.span);
 
                                 let parent_path_segment_res = match &path.segments[..] {
                                     [.., parent_path_segment, _] => self.def_res.node_res(parent_path_segment.id),
@@ -717,7 +737,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             let trait_generics = self.tcx.generics_of(parent_def_id);
                                             let trait_args = &node_args[(trait_generics.has_self as usize)..trait_generics.count()];
 
-                                            self.sanitize_generic_args(trait_args, qself_ty_hir.span)
+                                            self.sanitize_generic_args(trait_args, parent_def_id, qself_ty_hir.span)
                                         }
 
                                         // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
@@ -767,11 +787,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             };
 
                                             // Retrieve explicit arguments to trait.
-                                            let user_args = match canonical_user_ty.value {
-                                                ty::UserType::TypeOf(_, user_args) => user_args,
+                                            let user_args = match canonical_user_ty.value.kind {
+                                                ty::UserTypeKind::TypeOf(_, user_args) => user_args,
 
                                                 // Ignore type annotations (i.e. `: $ty`), as their res is never used, see above.
-                                                ty::UserType::Ty(_) => { return qres.expect_non_local(); }
+                                                ty::UserTypeKind::Ty(_) => { return qres.expect_non_local(); }
                                             };
                                             let Some(user_self_ty) = user_args.user_self_ty else { unreachable!() };
                                             let ty::TyKind::Alias(_, alias_ty) = user_self_ty.self_ty.kind() else { unreachable!() };
@@ -782,7 +802,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             let assoc_item_trait_predicate = ty::TraitPredicate { trait_ref: assoc_item_trait_ref, polarity: ty::PredicatePolarity::Positive };
 
                                             let param_env = self.tcx.param_env(node_hir_id.owner.to_def_id());
-                                            let infcx = self.tcx.infer_ctxt().build();
+                                            let infcx = self.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
                                             let mut selcx = SelectionContext::new(&infcx);
                                             let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else {
                                                 span_bug!(path.span, "cannot resolve impl for `{qself_ty}` of the trait of the associated item {}", self.tcx.def_path_str(trait_item_def_id))
@@ -826,7 +846,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             else { span_bug!(path.span, "cannot find trait predicate related to the trait of associated item {}", self.tcx.def_path_str(trait_item_def_id)) };
 
                                             let param_env = self.tcx.param_env(impl_def_id);
-                                            let infcx = self.tcx.infer_ctxt().build();
+                                            let infcx = self.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
                                             let mut selcx = SelectionContext::new(&infcx);
                                             let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else {
                                                 span_bug!(path.span, "cannot resolve impl for `Self` of the trait of the associated item {}", self.tcx.def_path_str(trait_item_def_id))
@@ -844,7 +864,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             }
 
                             hir::DefKind::Impl { of_trait: false } => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty, qself_ty_hir.span);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, parent_def_id, qself_ty_hir.span);
 
                                 // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
                                 let _ = self.sanitize_path(path, qres.expect_non_local(), None);
@@ -1224,25 +1244,29 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<
 }
 
 macro def_flat_map_item_fns(
-    $(fn $ident:ident: $item_kind:ident |$self:ident, $item:ident| {
-        $(check $check:block)?
+    $(fn $ident:ident(&mut $self:ident, $item:ident: $item_kind:ident $(,$($args:tt)*)?) |$def_id:ident| {
+        walk_item: $walk_item:expr,
+        $(check_item $check_item:block)?
+        $(check_def $check_def:block)?
     });+;
 ) {
     $(
-        fn $ident(&mut $self, mut $item: P<ast::Item<ast::$item_kind>>) -> SmallVec<[P<ast::Item<ast::$item_kind>>; 1]> {
+        fn $ident(&mut $self, mut $item: P<ast::Item<ast::$item_kind>> $(, $($args)*)?) -> SmallVec<[P<ast::Item<ast::$item_kind>>; 1]> {
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
             if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
-            $($check)?
+            $($check_item)?
 
-            let Some(&def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
+            let Some(&$def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
+
+            $($check_def)?
 
             // Store new context scope.
-            let previous_scope = mem::replace(&mut $self.current_scope, Some(def_id.to_def_id()));
+            let previous_scope = mem::replace(&mut $self.current_scope, Some($def_id.to_def_id()));
 
             // Store new typeck scope, if needed.
             let previous_typeck_ctx = $self.current_typeck_ctx;
-            let typeck_root_def_id = $self.tcx.typeck_root_def_id(def_id.to_def_id());
+            let typeck_root_def_id = $self.tcx.typeck_root_def_id($def_id.to_def_id());
             let Some(typeck_root_local_def_id) = typeck_root_def_id.as_local() else { unreachable!() };
             if let Some(typeck_root_body_id) = $self.tcx.hir_node_by_def_id(typeck_root_local_def_id).body_id() {
                 if !previous_typeck_ctx.is_some_and(|previous_typeck_ctx| typeck_root_def_id == previous_typeck_ctx.hir_owner.to_def_id()) {
@@ -1250,41 +1274,23 @@ macro def_flat_map_item_fns(
                 }
             }
 
-            // Match definition ident if this is an assoc item corresponding to a trait.
-            if let Some(assoc_item) = $self.tcx.opt_associated_item(def_id.to_def_id()) {
-                match assoc_item.container {
-                    ty::AssocItemContainer::TraitContainer => {
-                        // Trait items make new standalone definitions rather than referring to another definition,
-                        // and so their ident does not have to be adjusted to another definition's.
-                    }
-                    ty::AssocItemContainer::ImplContainer => {
-                        // Adjustment only needed if this assoc item is in a trait impl, not a bare impl.
-                        if let Some(trait_item_def_id) = assoc_item.trait_item_def_id {
-                            // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
-                            let Some(trait_item_ident_span) = $self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
-                            copy_def_span_ctxt(&mut $item.ident, trait_item_ident_span);
-                        }
-                    }
-                }
-            }
-
-            let item = ast::mut_visit::noop_flat_map_item($item, $self);
+            $walk_item;
 
             // Restore previous context.
             $self.current_typeck_ctx = previous_typeck_ctx;
             $self.current_scope = previous_scope;
 
-            item
+            smallvec![$item]
         }
     )+
 }
 
 impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op> {
     def_flat_map_item_fns! {
-        fn flat_map_item: ItemKind |self, item| {
-            check {
+        fn flat_map_item(&mut self, item: ItemKind) |def_id| {
+            walk_item: ast::mut_visit::walk_item(self, &mut item),
+            check_item {
                 let id = item.id;
-                let name = item.ident.name;
                 let span = item.span;
 
                 let macros_2_0_ctxt = item.span.ctxt().normalize_to_macros_2_0();
@@ -1293,7 +1299,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 if let ExpnKind::Macro(MacroKind::Bang, _) = macros_2_0_expn.kind {
                     match (self.macros_2_0_top_level_relative_path_res_hack, &item.kind) {
                         (Macros2_0TopLevelRelativePathResHack::InNestedMacros2_0Scope(expn_id), _) if expn_id == macros_2_0_expn_id => {}
-                        (_, ast::ItemKind::Mod(_, _)) => {
+                        (_, ast::ItemKind::Mod(_, _, _)) => {
                             self.macros_2_0_top_level_relative_path_res_hack = Macros2_0TopLevelRelativePathResHack::InNestedMacros2_0Scope(macros_2_0_expn_id);
                         }
                         _ => {
@@ -1304,12 +1310,12 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     }
                 }
 
-                if let ast::ItemKind::ExternCrate(symbol) = &mut item.kind {
+                if let ast::ItemKind::ExternCrate(symbol, ident) = &mut item.kind {
                     // Retain original crate name if not already aliased.
-                    if symbol.is_none() { *symbol = Some(name); }
+                    if symbol.is_none() { *symbol = Some(ident.name); }
 
                     // Sanitize local name of extern.
-                    sanitize_ident_if_from_expansion(&mut item.ident, IdentResKind::Def);
+                    sanitize_ident_if_from_expansion(ident, IdentResKind::Def);
 
                     return smallvec![item];
                 }
@@ -1321,8 +1327,39 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             }
         };
 
-        fn flat_map_trait_item: AssocItemKind |self, item| {};
-        fn flat_map_impl_item: AssocItemKind |self, item| {};
+        fn flat_map_assoc_item(&mut self, item: AssocItemKind, assoc_ctxt: ast::visit::AssocCtxt) |def_id| {
+            walk_item: ast::mut_visit::walk_assoc_item(self, &mut item, assoc_ctxt),
+            check_def {
+                let ident = match &mut item.kind {
+                    ast::AssocItemKind::Const(const_item) => Some(&mut const_item.ident),
+                    ast::AssocItemKind::Type(ty_alias) => Some(&mut ty_alias.ident),
+                    ast::AssocItemKind::Fn(fn_item) => Some(&mut fn_item.ident),
+                    ast::AssocItemKind::MacCall(_) => None,
+                    ast::AssocItemKind::Delegation(delegation) => Some(&mut delegation.ident),
+                    ast::AssocItemKind::DelegationMac(_) => None,
+                };
+
+                if let Some(ident) = ident {
+                    // Match definition ident if this is an assoc item corresponding to a trait.
+                    if let Some(assoc_item) = self.tcx.opt_associated_item(def_id.to_def_id()) {
+                        match assoc_item.container {
+                            ty::AssocItemContainer::Trait => {
+                                // Trait items make new standalone definitions rather than referring to another definition,
+                                // and so their ident does not have to be adjusted to another definition's.
+                            }
+                            ty::AssocItemContainer::Impl => {
+                                // Adjustment only needed if this assoc item is in a trait impl, not a bare impl.
+                                if let Some(trait_item_def_id) = assoc_item.trait_item_def_id {
+                                    // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
+                                    let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
+                                    copy_def_span_ctxt(ident, trait_item_ident_span);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {
@@ -1330,7 +1367,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         if is_macro_helper_attr(&self.syntax_extensions, attr) {
             // Disable attribute by overriding it with an empty doc-comment.
             // This is easier than modifying every visit function to properly remove the attribute nodes.
-            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, kw::Empty)
+            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, sym::empty)
         }
     }
 
@@ -1345,15 +1382,15 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             _ => {}
         }
 
-        ast::mut_visit::noop_visit_ty(ty, self);
+        ast::mut_visit::walk_ty(self, ty);
     }
 
-    fn visit_constraint(&mut self, assoc_constraint: &mut ast::AssocConstraint) {
-        // NOTE: We do not alter the idents of associated constraints here.
+    fn visit_assoc_item_constraint(&mut self, assoc_item_constraint: &mut ast::AssocItemConstraint) {
+        // NOTE: We do not alter the idents of associated item constraints here.
         //       These get resolved in `adjust_path_from_expansion`.
-        self.protected_idents.insert(assoc_constraint.ident);
-        ast::mut_visit::noop_visit_constraint(assoc_constraint, self);
-        self.protected_idents.remove(&assoc_constraint.ident);
+        self.protected_idents.insert(assoc_item_constraint.ident);
+        ast::mut_visit::walk_assoc_item_constraint(self, assoc_item_constraint);
+        self.protected_idents.remove(&assoc_item_constraint.ident);
     }
 
     fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
@@ -1368,7 +1405,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 return;
             }
             ast::ExprKind::Struct(struct_expr) => {
-                let struct_expr = struct_expr.ast_deref_mut();
+                let struct_expr = struct_expr.deref_mut();
                 let res = self.sanitize_qualified_path(&mut struct_expr.qself, &mut struct_expr.path, expr_id);
 
                 let variant_def = match res {
@@ -1453,7 +1490,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         }
 
         if let Some(protected_ident) = protected_ident { self.protected_idents.insert(protected_ident); }
-        ast::mut_visit::noop_visit_expr(expr, self);
+        ast::mut_visit::walk_expr(self, expr);
         if let Some(protected_ident) = protected_ident { self.protected_idents.remove(&protected_ident); }
     }
 
@@ -1515,7 +1552,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         }
 
         if let Some(protected_ident) = protected_ident { self.protected_idents.insert(protected_ident); }
-        ast::mut_visit::noop_visit_pat(pat, self);
+        ast::mut_visit::walk_pat(self, pat);
         if let Some(protected_ident) = protected_ident { self.protected_idents.remove(&protected_ident); }
     }
 
@@ -1533,7 +1570,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             self.current_typeck_ctx = Some(self.tcx.typeck_body(typeck_root_body_id));
         }
 
-        ast::mut_visit::noop_visit_anon_const(anon_const, self);
+        ast::mut_visit::walk_anon_const(self, anon_const);
 
         // Restore previous context.
         self.current_typeck_ctx = previous_typeck_ctx;
@@ -1569,13 +1606,13 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
                 };
             }
-            _ => ast::mut_visit::noop_visit_vis(vis, self),
+            _ => ast::mut_visit::walk_vis(self, vis),
         }
     }
 }
 
 fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
-    fn dummy_syntax_extension(name: Symbol, helper_attrs: Vec<Symbol>, allow_internal_unstable: Option<Lrc<[Symbol]>>) -> SyntaxExtension {
+    fn dummy_syntax_extension(name: Symbol, helper_attrs: Vec<Symbol>, allow_internal_unstable: Option<Arc<[Symbol]>>) -> SyntaxExtension {
         SyntaxExtension {
             kind: SyntaxExtensionKind::NonMacroAttr,
             span: DUMMY_SP,
@@ -1636,15 +1673,15 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
             match cstore.load_macro_untracked(def_id, tcx) {
                 LoadedMacro::ProcMacro(syntax_extension) => Some(syntax_extension),
                 // TODO: Generate syntax extensions from regular macros.
-                LoadedMacro::MacroDef(..) => None,
+                LoadedMacro::MacroDef { def: _, ident: _, attrs: _, span: _, edition: _ } => None,
             }
         })
         .collect_into(&mut syntax_extensions);
 
     // Find the prelude module of this crate, whose contents are available in every module.
-    let prelude_mod = tcx.hir().root_module().item_ids.iter().find_map(|&item_id| {
-        let hir::ItemKind::Use(use_path, hir::UseKind::Glob) = tcx.hir().item(item_id).kind else { return None; };
-        if !tcx.hir().attrs(item_id.hir_id()).iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::prelude_import)) { return None; }
+    let prelude_mod = tcx.hir_root_module().item_ids.iter().find_map(|&item_id| {
+        let hir::ItemKind::Use(use_path, hir::UseKind::Glob) = tcx.hir_item(item_id).kind else { return None; };
+        if !tcx.hir_attrs(item_id.hir_id()).iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::prelude_import)) { return None; }
         let [.., last_segment] = use_path.segments else { unreachable!() };
         Some(last_segment.res.def_id())
     });
@@ -1665,9 +1702,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
 
     let g = &tcx.sess.psess.attr_id_generator;
 
-    // NOTE: Sanitization of paths may cause paths in struct expressions and patterns
-    //       to become fully qualified paths, which are currently only supported with
-    //       the `more_qualified_paths` feature.
+    // NOTE: Sanitization of paths may cause paths in struct expressions and patterns to become fully qualified paths,
+    //       which are currently only supported with the `more_qualified_paths` feature.
     //       See https://github.com/rust-lang/rust/issues/86935.
     // #![feature(more_qualified_paths)]
     if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, sym::more_qualified_paths)) {

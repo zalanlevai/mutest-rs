@@ -69,6 +69,7 @@ fn test() {
     //       mutation-based test cases into.
     //       This function must also not be in a #[cfg(test)] context.
     fn f() {
+        #![allow(missing_abi)]
         #![allow(improper_ctypes_definitions)]
 
         use std::cmp::Ordering;

@@ -1,7 +1,6 @@
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
-#![feature(lint_reasons)]
 #![feature(round_char_boundary)]
 
 use std::collections::BTreeSet;

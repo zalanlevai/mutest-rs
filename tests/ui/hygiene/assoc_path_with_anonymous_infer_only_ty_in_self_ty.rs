@@ -2,7 +2,6 @@
 //@ stderr: empty
 
 #![feature(decl_macro)]
-#![feature(async_closure)]
 #![feature(coroutines)]
 
 macro m() {

@@ -92,7 +92,8 @@ fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
     // pub(crate) type SubstMap = [Option<SubstMeta>; $subst_locs_count];
     let vis = ast::mk::vis_pub_crate(sp);
     let ident = Ident::new(*sym::SubstMap, sp);
-    ast::mk::item(sp, thin_vec![], vis, ident, ast::ItemKind::TyAlias(Box::new(ast::TyAlias {
+    ast::mk::item(sp, thin_vec![], vis, ast::ItemKind::TyAlias(Box::new(ast::TyAlias {
+        ident,
         defaultness: ast::Defaultness::Final,
         generics: Default::default(),
         where_clauses: Default::default(),
@@ -243,7 +244,7 @@ struct HarnessGenerator<'tcx, 'trg, 'm> {
 
 impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg, 'm> {
     fn visit_crate(&mut self, c: &mut ast::Crate) {
-        ast::mut_visit::noop_visit_crate(c, self);
+        ast::mut_visit::walk_crate(self, c);
 
         let g = &self.sess.psess.attr_id_generator;
 

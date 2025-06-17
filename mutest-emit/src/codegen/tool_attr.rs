@@ -1,5 +1,6 @@
 use rustc_session::Session;
 
+use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, sym};
 
@@ -27,14 +28,14 @@ pub fn register(sess: &Session, krate: &mut ast::Crate) {
 
 pub fn ignore<'tcx, I>(attrs: I) -> bool
 where
-    I: IntoIterator<Item = &'tcx ast::Attribute>,
+    I: IntoIterator<Item = &'tcx hir::Attribute>,
 {
-    attrs.into_iter().any(|attr| ast::inspect::is_word_attr(attr, Some(*sym::mutest), sym::ignore))
+    attrs.into_iter().any(|attr| hir::attr::is_word_attr(attr, Some(*sym::mutest), sym::ignore))
 }
 
 pub fn skip<'tcx, I>(attrs: I) -> bool
 where
-    I: IntoIterator<Item = &'tcx ast::Attribute>,
+    I: IntoIterator<Item = &'tcx hir::Attribute>,
 {
-    attrs.into_iter().any(|attr| ast::inspect::is_word_attr(attr, Some(*sym::mutest), sym::skip))
+    attrs.into_iter().any(|attr| hir::attr::is_word_attr(attr, Some(*sym::mutest), sym::skip))
 }

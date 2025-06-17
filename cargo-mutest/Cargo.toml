@@ -11,7 +11,7 @@ mutest-driver-cli = { path = "../mutest-driver-cli" }
 mutest-driver = { path = "../mutest-driver" }
 mutest-operators = { path = "../mutest-operators" }
 
-cargo_metadata = "0.18"
+cargo_metadata = "0.20"
 clap = { version = "4", features = ["cargo"] }
 
 [build-dependencies]

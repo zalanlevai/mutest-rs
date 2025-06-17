@@ -1,18 +1,17 @@
 #![feature(assert_matches)]
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
-#![feature(extract_if)]
 #![feature(f16)]
 #![feature(f128)]
 #![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(never_type)]
 
 #![feature(rustc_private)]
+extern crate rustc_abi;
 extern crate rustc_apfloat;
 extern crate rustc_ast;
 extern crate rustc_ast_lowering;

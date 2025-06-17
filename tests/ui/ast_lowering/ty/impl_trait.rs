@@ -15,6 +15,7 @@ fn f_impl_trait_in_param_ty_position(_msg: impl Into<String>) {}
 
 // TEST: `impl Trait` ty alias.
 type ImplTraitInTyAlias = impl Fn(usize) -> usize;
+#[define_opaque(ImplTraitInTyAlias)]
 fn f_ty_alias_impl_trait_in_return_ty_position() -> ImplTraitInTyAlias { |v| v }
 fn f_ty_alias_impl_trait_in_param_ty_position(_f: ImplTraitInTyAlias) {}
 

@@ -1,6 +1,5 @@
 #![feature(deadline_api)]
 #![feature(decl_macro)]
-#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(iter_array_chunks)]
 #![feature(let_chains)]

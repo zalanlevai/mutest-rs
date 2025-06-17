@@ -14,13 +14,14 @@ fn find_ident_pats<'ast>(pat: &'ast ast::Pat) -> Vec<&'ast ast::Pat> {
         }
 
         match &pat.kind {
+            | ast::PatKind::Missing
             | ast::PatKind::Wild
             | ast::PatKind::Never
-            | ast::PatKind::Lit(_)
             | ast::PatKind::Ident(_, _, None)
             | ast::PatKind::Path(_, _)
             | ast::PatKind::Rest
             | ast::PatKind::Range(_, _, _)
+            | ast::PatKind::Expr(_)
             | ast::PatKind::MacCall(_)
             | ast::PatKind::Err(_)
             => {}
@@ -30,6 +31,7 @@ fn find_ident_pats<'ast>(pat: &'ast ast::Pat) -> Vec<&'ast ast::Pat> {
             | ast::PatKind::Box(inner_pat)
             | ast::PatKind::Ref(inner_pat, _)
             | ast::PatKind::Deref(inner_pat)
+            | ast::PatKind::Guard(inner_pat, _)
             => find_ident_pats_impl(inner_pat, ident_pats),
 
             | ast::PatKind::Tuple(pats)
@@ -94,7 +96,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         let ident_pats = find_ident_pats(&param.pat);
         if ident_pats.is_empty() { return Mutations::none(); };
 
-        let Some(body) = &f.body else { return Mutations::none(); };
+        let Some(body) = &f.fn_data.body else { return Mutations::none(); };
         let Some(first_valid_stmt) = body.stmts.iter().filter(|stmt| stmt.id != ast::DUMMY_NODE_ID).next() else { return Mutations::none(); };
 
         let param_env = tcx.param_env(f_hir.owner_id.def_id);
@@ -124,7 +126,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
                 let scope = f_hir.owner_id.def_id.to_def_id();
                 let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
                 let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, param_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns)
+                ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, param_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns, f_hir.owner_id.to_def_id())
             }) else { continue; };
 
             // Default::default();

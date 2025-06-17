@@ -136,7 +136,7 @@ fn profile_tests(tests: Vec<test::TestDescAndFn>) -> Result<Vec<ProfiledTest>, I
         match event {
             test_runner::TestEvent::Result(test) => {
                 let test_desc_and_fn = remaining_tests
-                    .extract_if(|t| t.desc.name == test.desc.name)
+                    .extract_if(.., |t| t.desc.name == test.desc.name)
                     .next().expect("completed test not found amongst remaining tests");
 
                 profiled_tests.push(ProfiledTest {

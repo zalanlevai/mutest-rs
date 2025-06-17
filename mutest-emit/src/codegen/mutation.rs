@@ -8,7 +8,7 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::analysis::ast_lowering;
 use crate::analysis::call_graph::{Target, UnsafeSource, Unsafety};
-use crate::analysis::diagnostic::{self, SessionRcSourceMap};
+use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::ty::TyCtxt;
@@ -235,7 +235,7 @@ impl<'trg, 'm> Mut<'trg, 'm> {
             ));
         }
 
-        diagnostic::emit_str(diagnostic, sess.rc_source_map())
+        diagnostic::emit_str(diagnostic, sess.psess.clone_source_map())
     }
 
     pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
@@ -265,7 +265,7 @@ impl<'trg, 'm> Hash for Mut<'trg, 'm> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnsafeTargeting {
     None,
-    OnlyEnclosing(hir::Unsafety),
+    OnlyEnclosing(hir::Safety),
     All,
 }
 
@@ -343,8 +343,8 @@ fn report_unmatched_ast_node<'tcx>(tcx: TyCtxt<'tcx>, node_kind: &str, def_id: h
 
 impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
     fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
-        let ast::visit::FnKind::Fn(ctx, ident, sig, vis, generics, body) = kind else { return; };
-        let fn_ast = ast::FnItem { id, span, ctx, vis, ident, generics, sig, body };
+        let ast::visit::FnKind::Fn(ctx, vis, fn_item) = kind else { return; };
+        let fn_ast = ast::FnItem { id, span, ctx, vis, fn_data: fn_item };
 
         let Some(fn_def_id) = self.def_res.node_id_to_def_id.get(&fn_ast.id).copied() else { unreachable!() };
         let Some(fn_hir) = hir::FnItem::from_node(self.tcx, self.tcx.hir_node_by_def_id(fn_def_id)) else { unreachable!() };
@@ -375,7 +375,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         };
 
         if !is_local_span(self.tcx.sess.source_map(), param.span) { return; };
-        if tool_attr::ignore(self.tcx.hir().attrs(param_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir_attrs(param_hir.hir_id)) { return; }
 
         // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
         //        avoid generating leaking, malformed mutations.
@@ -405,7 +405,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         };
 
         if !is_local_span(self.tcx.sess.source_map(), block.span) { return; };
-        if tool_attr::ignore(self.tcx.hir().attrs(block_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir_attrs(block_hir.hir_id)) { return; }
         if !self.unsafe_targeting.inside_unsafe() && let ast::BlockCheckMode::Unsafe(_) = block.rules { return; }
 
         let is_in_unsafe_block = self.is_in_unsafe_block;
@@ -434,7 +434,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         };
 
         if !is_local_span(self.tcx.sess.source_map(), stmt.span) { return; };
-        if tool_attr::ignore(self.tcx.hir().attrs(stmt_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir_attrs(stmt_hir.hir_id)) { return; }
 
         // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
         //        avoid generating leaking, malformed mutations.
@@ -470,7 +470,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         };
 
         if !is_local_span(self.tcx.sess.source_map(), expr.span) { return; };
-        if tool_attr::ignore(self.tcx.hir().attrs(expr_hir.hir_id)) { return; }
+        if tool_attr::ignore(self.tcx.hir_attrs(expr_hir.hir_id)) { return; }
 
         // FIXME: Nested function bodies are currently not represented in `MutLoc`, so we skip them for now to
         //        avoid generating leaking, malformed mutations.
@@ -882,7 +882,7 @@ pub fn batch_mutations_greedy<'trg, 'm>(
                 // When using epsilon greedy batching, a random choice with probability epsilon is made for every
                 // mutation. If the random choice is true, then instead of making a greedy choice, a random compatible
                 // mutant is picked the same way as in random batching.
-                if rng.gen_bool(epsilon) {
+                if rng.random_bool(epsilon) {
                     break 'mutant_candidate choose_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
                 }
             }
@@ -945,7 +945,7 @@ pub fn optimize_batches_simulated_annealing<'trg, 'm>(
                 Self::MoveMutation { mutation_id, old_mutant_id, new_mutant_id } => {
                     let Some(old_mutant_idx) = mutants.iter().position(|m| m.id == *old_mutant_id) else { unreachable!(); };
                     let old_mutant = &mut mutants[old_mutant_idx];
-                    let Some(mutation) = old_mutant.mutations.extract_if(|m| m.id == *mutation_id).next() else { unreachable!() };
+                    let Some(mutation) = old_mutant.mutations.extract_if(.., |m| m.id == *mutation_id).next() else { unreachable!() };
                     if old_mutant.mutations.is_empty() { mutants.remove(old_mutant_idx); }
 
                     let Some(new_mutant) = mutants.iter_mut().find(|m| m.id == *new_mutant_id) else { unreachable!(); };
@@ -1009,7 +1009,7 @@ pub fn optimize_batches_simulated_annealing<'trg, 'm>(
 
         let state_change = random_neighbour_state(mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
         let next_energy = energy(mutants, Some(state_change));
-        if acceptance_probability(curr_energy, next_energy, temp) >= rng.gen_range(0_f64..1_f64) {
+        if acceptance_probability(curr_energy, next_energy, temp) >= rng.random_range(0_f64..1_f64) {
             state_change.apply(mutants);
         }
     }

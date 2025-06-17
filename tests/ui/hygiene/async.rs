@@ -1,7 +1,6 @@
 //@ build
 //@ stderr: empty
 
-#![feature(async_closure)]
 #![feature(decl_macro)]
 
 #![allow(unused)]

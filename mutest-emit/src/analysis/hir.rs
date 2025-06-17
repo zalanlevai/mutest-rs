@@ -26,16 +26,16 @@ pub struct FnItem<'hir> {
 impl<'tcx: 'hir, 'hir> FnItem<'hir> {
     pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
         match node {
-            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ident, ref kind }) => {
-                let hir::ItemKind::Fn(sig, generics, body) = kind else { return None; };
-                let body = Some(tcx.hir().body(*body));
-                let fn_kind = hir::intravisit::FnKind::ItemFn(ident, generics, sig.header);
-                Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
+            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ref kind }) => {
+                let hir::ItemKind::Fn { sig, ident, generics, body, has_body: _ } = kind else { return None; };
+                let body = Some(tcx.hir_body(*body));
+                let fn_kind = hir::intravisit::FnKind::ItemFn(*ident, generics, sig.header);
+                Some(FnItem { owner_id, span, ident: *ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
             }
             hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness: _ }) => {
                 let hir::TraitItemKind::Fn(sig, trait_fn) = kind else { return None; };
                 let body = match trait_fn {
-                    hir::TraitFn::Provided(body) => Some(tcx.hir().body(*body)),
+                    hir::TraitFn::Provided(body) => Some(tcx.hir_body(*body)),
                     hir::TraitFn::Required(_param_idents) => None,
                 };
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
@@ -43,7 +43,7 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
             }
             hir::Node::ImplItem(&hir::ImplItem { owner_id, span, vis_span, ident, ref generics, ref kind, defaultness: _ }) => {
                 let hir::ImplItemKind::Fn(sig, body) = kind else { return None; };
-                let body = Some(tcx.hir().body(*body));
+                let body = Some(tcx.hir_body(*body));
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
                 Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
             }
@@ -54,8 +54,8 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct ConstItem<'hir> {
-    pub ty: &'hir hir::Ty<'hir>,
     pub generics: Option<&'hir hir::Generics<'hir>>,
+    pub ty: &'hir hir::Ty<'hir>,
     pub body: Option<&'hir hir::Body<'hir>>,
 }
 
@@ -63,19 +63,19 @@ impl<'tcx: 'hir, 'hir> ConstItem<'hir> {
     pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
         match node {
             hir::Node::Item(&hir::Item { ref kind, .. }) => {
-                let hir::ItemKind::Const(ty, generics, body) = kind else { return None; };
-                let body = Some(tcx.hir().body(*body));
-                Some(ConstItem { ty, generics: Some(generics), body })
+                let hir::ItemKind::Const(_, generics, ty, body) = kind else { return None; };
+                let body = Some(tcx.hir_body(*body));
+                Some(ConstItem { generics: Some(generics), ty, body })
             }
             hir::Node::TraitItem(&hir::TraitItem { ref kind, .. }) => {
                 let hir::TraitItemKind::Const(ty, body) = kind else { return None; };
-                let body = body.map(|body| tcx.hir().body(body));
-                Some(ConstItem { ty, generics: None, body })
+                let body = body.map(|body| tcx.hir_body(body));
+                Some(ConstItem { generics: None, ty, body })
             }
             hir::Node::ImplItem(&hir::ImplItem { ref kind, .. }) => {
                 let hir::ImplItemKind::Const(ty, body) = kind else { return None; };
-                let body = Some(tcx.hir().body(*body));
-                Some(ConstItem { ty, generics: None, body })
+                let body = Some(tcx.hir_body(*body));
+                Some(ConstItem { generics: None, ty, body })
             }
             _ => None,
         }
@@ -84,8 +84,8 @@ impl<'tcx: 'hir, 'hir> ConstItem<'hir> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct StaticItem<'hir> {
-    pub ty: &'hir hir::Ty<'hir>,
     pub mutability: ast::Mutability,
+    pub ty: &'hir hir::Ty<'hir>,
     pub body: Option<&'hir hir::Body<'hir>>,
 }
 
@@ -93,9 +93,9 @@ impl<'tcx: 'hir, 'hir> StaticItem<'hir> {
     pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
         match node {
             hir::Node::Item(&hir::Item { ref kind, .. }) => {
-                let hir::ItemKind::Static(ty, mutability, body) = kind else { return None; };
-                let body = Some(tcx.hir().body(*body));
-                Some(StaticItem { ty, mutability: *mutability, body })
+                let hir::ItemKind::Static(mutability, _, ty, body) = kind else { return None; };
+                let body = Some(tcx.hir_body(*body));
+                Some(StaticItem { mutability: *mutability, ty, body })
             }
             _ => None,
         }
@@ -104,7 +104,7 @@ impl<'tcx: 'hir, 'hir> StaticItem<'hir> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum TyAliasItem<'hir> {
-    Item(&'hir hir::Ty<'hir>, &'hir hir::Generics<'hir>),
+    Item(&'hir hir::Generics<'hir>, &'hir hir::Ty<'hir>),
     TraitItem(hir::GenericBounds<'hir>, Option<&'hir hir::Ty<'hir>>),
     ImplItem(&'hir hir::Ty<'hir>),
 }
@@ -113,8 +113,8 @@ impl<'hir> TyAliasItem<'hir> {
     pub fn from_node(node: hir::Node<'hir>) -> Option<Self> {
         match node {
             hir::Node::Item(&hir::Item { ref kind, .. }) => {
-                let hir::ItemKind::TyAlias(ty, generics) = kind else { return None; };
-                Some(TyAliasItem::Item(ty, generics))
+                let hir::ItemKind::TyAlias(_, generics, ty) = kind else { return None; };
+                Some(TyAliasItem::Item(generics, ty))
             }
             hir::Node::TraitItem(&hir::TraitItem { ref kind, .. }) => {
                 let hir::TraitItemKind::Type(generic_bounds, ty) = kind else { return None; };
@@ -130,7 +130,7 @@ impl<'hir> TyAliasItem<'hir> {
 
     pub fn ty(&self) -> Option<&'hir hir::Ty<'hir>> {
         match self {
-            Self::Item(ty, _) => Some(ty),
+            Self::Item(_, ty) => Some(ty),
             Self::TraitItem(_, ty) => *ty,
             Self::ImplItem(ty) => Some(ty),
         }
@@ -153,7 +153,7 @@ impl<'hir> NodeExt<'hir> for hir::Node<'hir> {
             }
             hir::Node::Pat(pat_hir) => {
                 match &pat_hir.kind {
-                    hir::PatKind::Path(qpath_hir) => Some(qpath_hir),
+                    hir::PatKind::Expr(hir::PatExpr { kind: hir::PatExprKind::Path(qpath_hir), .. }) => Some(qpath_hir),
                     hir::PatKind::Struct(qpath_hir, _, _) => Some(qpath_hir),
                     hir::PatKind::TupleStruct(qpath_hir, _, _) => Some(qpath_hir),
                     _ => None,
@@ -200,7 +200,8 @@ impl<'hir> DefItem<'hir> {
 
     pub fn ident(&self) -> Ident {
         match self {
-            Self::Item(item) => item.ident,
+            Self::Item(item) if let Some(ident) = item.kind.ident() => ident,
+            Self::Item(item) => panic!("{} does not have ident", item.kind.descr()),
             Self::ForeignItem(item) => item.ident,
             Self::TraitItem(item) => item.ident,
             Self::ImplItem(item) => item.ident,
@@ -248,6 +249,7 @@ impl<'hir> Descr for hir::ExprKind<'hir> {
             hir::ExprKind::Match(..) => "match",
             hir::ExprKind::Closure(..) => "closure",
             hir::ExprKind::Block(..) => "block",
+            hir::ExprKind::Use(..) => "use",
             hir::ExprKind::Assign(..) => "assignment",
             hir::ExprKind::AssignOp(..) => "assignment with operator",
             hir::ExprKind::Field(..) => "field access",
@@ -263,6 +265,7 @@ impl<'hir> Descr for hir::ExprKind<'hir> {
             hir::ExprKind::Struct(..) => "struct literal",
             hir::ExprKind::Repeat(..) => "array from repetition",
             hir::ExprKind::Yield(..) => "yield",
+            hir::ExprKind::UnsafeBinderCast(..) => "unsafe binder cast",
             hir::ExprKind::Err(..) => "error",
         }
     }
@@ -271,10 +274,9 @@ impl<'hir> Descr for hir::ExprKind<'hir> {
 impl<'hir> Descr for hir::PatKind<'hir> {
     fn descr(&self) -> &'static str {
         match self {
+            hir::PatKind::Missing => "missing",
             hir::PatKind::Wild => "_",
             hir::PatKind::Never => "!",
-            hir::PatKind::Lit(..) => "literal",
-            hir::PatKind::Path(..) => "path",
             hir::PatKind::Binding(..) => "binding",
             hir::PatKind::Tuple(..) => "tuple",
             hir::PatKind::Struct(..) => "struct",
@@ -285,6 +287,8 @@ impl<'hir> Descr for hir::PatKind<'hir> {
             hir::PatKind::Or(..) => "or",
             hir::PatKind::Range(..) => "range",
             hir::PatKind::Slice(..) => "slice",
+            hir::PatKind::Expr(..) => "expression",
+            hir::PatKind::Guard(..) => "guard",
             hir::PatKind::Err(..) => "error",
         }
     }
@@ -303,12 +307,60 @@ impl<'hir> Descr for hir::TyKind<'hir> {
             hir::TyKind::BareFn(..) => "fn pointer",
             hir::TyKind::OpaqueDef(..) => "opaque definition",
             hir::TyKind::TraitObject(..) => "trait object",
+            hir::TyKind::TraitAscription(..) => "trait ascription",
             hir::TyKind::Typeof(..) => "typeof",
-            hir::TyKind::Infer => "infer",
+            hir::TyKind::Infer(..) => "infer",
             hir::TyKind::InferDelegation(..) => "infer delegation",
-            hir::TyKind::AnonAdt(..) => "anon adt",
+            hir::TyKind::UnsafeBinder(..) => "unsafe binder",
             hir::TyKind::Pat(..) => "pattern",
             hir::TyKind::Err(..) => "error",
         }
+    }
+}
+
+pub mod attr {
+    use std::iter;
+
+    use rustc_ast as ast;
+    use rustc_hir as hir;
+    use rustc_span::symbol::Symbol;
+
+    pub fn match_attr_name(attr: &hir::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
+        let hir::Attribute::Unparsed(attr_item) = attr else { return false; };
+        match (tool, &attr_item.path.segments[..]) {
+            (None, [path_name]) => path_name.name == name,
+            (Some(tool), [path_tool, path_name]) => path_tool.name == tool && path_name.name == name,
+            _ => false,
+        }
+    }
+
+    pub fn is_word_attr(attr: &hir::Attribute, tool: Option<Symbol>, word: Symbol) -> bool {
+        let hir::Attribute::Unparsed(attr_item) = &attr else { return false; };
+        let hir::AttrArgs::Empty = &attr_item.args else { return false; };
+        match_attr_name(attr, tool, word)
+    }
+
+    pub fn is_name_value_attr(attr: &hir::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::LitKind) -> bool {
+        let hir::Attribute::Unparsed(attr_item) = &attr else { return false; };
+        let hir::AttrArgs::Eq { expr: lit, .. } = &attr_item.args else { return false; };
+        match_attr_name(attr, tool, name) && lit.kind == *value
+    }
+
+    pub fn is_list_attr_with_path(attr: &hir::Attribute, tool: Option<Symbol>, name: Symbol, path: &ast::Path) -> bool {
+        let hir::Attribute::Unparsed(attr_item) = &attr else { return false; };
+        let hir::AttrArgs::Delimited(_delimited_args) = &attr_item.args else { return false; };
+        match_attr_name(attr, tool, name) && attr.meta_item_list().iter().flatten().any(|meta_item| {
+            let hir::MetaItemInner::MetaItem(ast::MetaItem { path: meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item else { return false };
+            iter::zip(&meta_path.segments, &path.segments).all(|(a, b)| a.ident.name == b.ident.name)
+        })
+    }
+
+    pub fn is_list_attr_with_ident(attr: &hir::Attribute, tool: Option<Symbol>, name: Symbol, ident: Symbol) -> bool {
+        let hir::Attribute::Unparsed(attr_item) = &attr else { return false; };
+        let hir::AttrArgs::Delimited(_delimited_args) = &attr_item.args else { return false; };
+        match_attr_name(attr, tool, name) && attr.meta_item_list().iter().flatten().any(|meta_item| {
+            let hir::MetaItemInner::MetaItem(ast::MetaItem { path: meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item else { return false };
+            meta_path.segments.len() == 1 && meta_path.segments[0].ident.name == ident
+        })
     }
 }

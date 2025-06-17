@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 use mutest_driver::config::{self, Config};
-use mutest_emit::analysis::hir::Unsafety;
+use mutest_emit::analysis::hir::Safety;
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
@@ -97,7 +97,7 @@ pub fn main() {
         args[0] = "rustc".to_string();
 
         process::exit(rustc_driver::catch_with_exit_code(|| {
-            rustc_driver::RunCompiler::new(&args, &mut DefaultCallbacks).run()
+            rustc_driver::run_compiler(&args, &mut DefaultCallbacks)
         }));
     }
 
@@ -111,7 +111,7 @@ pub fn main() {
 
     if normal_rustc || !primary_package || !test_target {
         process::exit(rustc_driver::catch_with_exit_code(|| {
-            rustc_driver::RunCompiler::new(&args, &mut RustcCallbacks { mutest_args }).run()
+            rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args })
         }));
     }
 
@@ -120,7 +120,7 @@ pub fn main() {
         .get_matches_from(mutest_args.as_deref().unwrap_or_default().split(" "));
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
-        let compiler_config = mutest_driver::passes::parse_compiler_args(&args)?.expect("no compiler configuration was generated");
+        let compiler_config = mutest_driver::passes::parse_compiler_args(&args).expect("no compiler configuration was generated");
 
         let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 
@@ -195,8 +195,8 @@ pub fn main() {
 
         let unsafe_targeting = match () {
             _ if mutest_arg_matches.get_flag("safe") => UnsafeTargeting::None,
-            _ if mutest_arg_matches.get_flag("cautious") => UnsafeTargeting::OnlyEnclosing(Unsafety::Unsafe),
-            _ if mutest_arg_matches.get_flag("risky") => UnsafeTargeting::OnlyEnclosing(Unsafety::Normal),
+            _ if mutest_arg_matches.get_flag("cautious") => UnsafeTargeting::OnlyEnclosing(Safety::Unsafe),
+            _ if mutest_arg_matches.get_flag("risky") => UnsafeTargeting::OnlyEnclosing(Safety::Safe),
             _ if mutest_arg_matches.get_flag("unsafe") => UnsafeTargeting::All,
             _ => UnsafeTargeting::None,
         };
@@ -344,7 +344,6 @@ pub fn main() {
             },
         };
 
-        mutest_driver::run(config)?;
-        Ok(())
+        mutest_driver::run(config).unwrap();
     }));
 }

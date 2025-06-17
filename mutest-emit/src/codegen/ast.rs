@@ -15,53 +15,43 @@ pub struct FnItem<'ast> {
     pub span: Span,
     pub ctx: visit::FnCtxt,
     pub vis: &'ast ast::Visibility,
-    pub ident: Ident,
-    pub generics: &'ast ast::Generics,
-    pub sig: &'ast ast::FnSig,
-    pub body: Option<&'ast ast::Block>,
+    pub fn_data: &'ast ast::Fn,
 }
 
 impl<'ast> FnItem<'ast> {
     pub fn from_item(item: &'ast ast::Item) -> Option<Self> {
-        let &ast::Item { id, span, ref vis, ident, ref kind, .. } = item;
+        let &ast::Item { id, span, ref vis, ref kind, .. } = item;
         let ast::ItemKind::Fn(fn_item) = kind else { return None; };
-        let ast::Fn { generics, sig, body, .. } = &**fn_item;
         let ctx = visit::FnCtxt::Free;
-        Some(Self { id, span, ctx, vis, ident, generics, sig, body: body.as_deref() })
+        Some(Self { id, span, ctx, vis, fn_data: fn_item })
     }
 
     pub fn from_assoc_item(item: &'ast ast::AssocItem) -> Option<Self> {
-        let &ast::Item { id, span, ref vis, ident, ref kind, .. } = item;
+        let &ast::Item { id, span, ref vis, ref kind, .. } = item;
         let ast::AssocItemKind::Fn(fn_item) = kind else { return None; };
-        let ast::Fn { generics, sig, body, .. } = &**fn_item;
         let ctx = visit::FnCtxt::Free; // FIXME
-        Some(Self { id, span, ctx, vis, ident, generics, sig, body: body.as_deref() })
+        Some(Self { id, span, ctx, vis, fn_data: fn_item })
     }
 }
 
-pub enum StaticItemKind<'ast> {
-    Local(&'ast ast::StaticItem),
-    Foreign(&'ast ast::StaticForeignItem),
-}
-
 pub enum DefItemKind<'ast> {
-    ExternCrate(Option<Symbol>),
+    ExternCrate(Option<Symbol>, Ident),
     Use(&'ast ast::UseTree),
-    Static(StaticItemKind<'ast>),
+    Static(&'ast ast::StaticItem),
     Const(&'ast ast::ConstItem),
     Fn(&'ast ast::Fn),
-    Mod(ast::Unsafe, &'ast ast::ModKind),
+    Mod(ast::Safety, Ident, &'ast ast::ModKind),
     ForeignMod(&'ast ast::ForeignMod),
     GlobalAsm(&'ast ast::InlineAsm),
     TyAlias(&'ast ast::TyAlias),
-    Enum(&'ast ast::EnumDef, &'ast ast::Generics),
-    Struct(&'ast ast::VariantData, &'ast ast::Generics),
-    Union(&'ast ast::VariantData, &'ast ast::Generics),
+    Enum(Ident, &'ast ast::Generics, &'ast ast::EnumDef),
+    Struct(Ident, &'ast ast::Generics, &'ast ast::VariantData),
+    Union(Ident, &'ast ast::Generics, &'ast ast::VariantData),
     Trait(&'ast ast::Trait),
-    TraitAlias(&'ast ast::Generics, &'ast ast::GenericBounds),
+    TraitAlias(Ident, &'ast ast::Generics, &'ast ast::GenericBounds),
     Impl(&'ast ast::Impl),
     MacCall(&'ast ast::MacCall),
-    MacroDef(&'ast ast::MacroDef),
+    MacroDef(Ident, &'ast ast::MacroDef),
     Delegation(&'ast ast::Delegation),
     DelegationMac(&'ast ast::DelegationMac),
 }
@@ -69,23 +59,23 @@ pub enum DefItemKind<'ast> {
 impl<'ast> DefItemKind<'ast> {
     pub fn from_item_kind(item_kind: &'ast ast::ItemKind) -> Self {
         match item_kind {
-            ast::ItemKind::ExternCrate(symbol) => Self::ExternCrate(*symbol),
+            ast::ItemKind::ExternCrate(symbol, ident) => Self::ExternCrate(*symbol, *ident),
             ast::ItemKind::Use(use_tree) => Self::Use(use_tree),
-            ast::ItemKind::Static(static_item) => Self::Static(StaticItemKind::Local(static_item)),
+            ast::ItemKind::Static(static_item) => Self::Static(static_item),
             ast::ItemKind::Const(const_item) => Self::Const(const_item),
-            ast::ItemKind::Fn(fn_) => Self::Fn(fn_),
-            ast::ItemKind::Mod(unsafety, mod_kind) => Self::Mod(*unsafety, mod_kind),
+            ast::ItemKind::Fn(fn_item) => Self::Fn(fn_item),
+            ast::ItemKind::Mod(safety, ident, mod_kind) => Self::Mod(*safety, *ident, mod_kind),
             ast::ItemKind::ForeignMod(foreign_mod) => Self::ForeignMod(foreign_mod),
             ast::ItemKind::GlobalAsm(inline_asm) => Self::GlobalAsm(inline_asm),
             ast::ItemKind::TyAlias(ty_alias) => Self::TyAlias(ty_alias),
-            ast::ItemKind::Enum(enum_def, generics) => Self::Enum(enum_def, generics),
-            ast::ItemKind::Struct(variant_data, generics) => Self::Struct(variant_data, generics),
-            ast::ItemKind::Union(variant_data, generics) => Self::Union(variant_data, generics),
+            ast::ItemKind::Enum(ident, generics, enum_def) => Self::Enum(*ident, generics, enum_def),
+            ast::ItemKind::Struct(ident, generics, variant_data) => Self::Struct(*ident, generics, variant_data),
+            ast::ItemKind::Union(ident, generics, variant_data) => Self::Union(*ident, generics, variant_data),
             ast::ItemKind::Trait(trait_) => Self::Trait(trait_),
-            ast::ItemKind::TraitAlias(generics, generic_bounds) => Self::TraitAlias(generics, generic_bounds),
+            ast::ItemKind::TraitAlias(ident, generics, generic_bounds) => Self::TraitAlias(*ident, generics, generic_bounds),
             ast::ItemKind::Impl(impl_) => Self::Impl(impl_),
             ast::ItemKind::MacCall(mac_call) => Self::MacCall(mac_call),
-            ast::ItemKind::MacroDef(macro_def) => Self::MacroDef(macro_def),
+            ast::ItemKind::MacroDef(ident, macro_def) => Self::MacroDef(*ident, macro_def),
             ast::ItemKind::Delegation(delegation) => Self::Delegation(delegation),
             ast::ItemKind::DelegationMac(delegation_mac) => Self::DelegationMac(delegation_mac),
         }
@@ -93,8 +83,8 @@ impl<'ast> DefItemKind<'ast> {
 
     pub fn from_foreign_item_kind(item_kind: &'ast ast::ForeignItemKind) -> Self {
         match item_kind {
-            ast::ForeignItemKind::Static(static_item) => Self::Static(StaticItemKind::Foreign(static_item)),
-            ast::ForeignItemKind::Fn(fn_) => Self::Fn(fn_),
+            ast::ForeignItemKind::Static(static_item) => Self::Static(static_item),
+            ast::ForeignItemKind::Fn(fn_item) => Self::Fn(fn_item),
             ast::ForeignItemKind::TyAlias(ty_alias) => Self::TyAlias(ty_alias),
             ast::ForeignItemKind::MacCall(mac_call) => Self::MacCall(mac_call),
         }
@@ -103,7 +93,7 @@ impl<'ast> DefItemKind<'ast> {
     pub fn from_assoc_item_kind(item_kind: &'ast ast::AssocItemKind) -> Self {
         match item_kind {
             ast::AssocItemKind::Const(const_item) => Self::Const(const_item),
-            ast::AssocItemKind::Fn(fn_) => Self::Fn(fn_),
+            ast::AssocItemKind::Fn(fn_item) => Self::Fn(fn_item),
             ast::AssocItemKind::Type(ty_alias) => Self::TyAlias(ty_alias),
             ast::AssocItemKind::MacCall(mac_call) => Self::MacCall(mac_call),
             ast::AssocItemKind::Delegation(delegation) => Self::Delegation(delegation),
@@ -130,9 +120,12 @@ impl<'ast> DefItem<'ast> {
 
     pub fn ident(&self) -> Ident {
         match self {
-            Self::Item(item) => item.ident,
-            Self::ForeignItem(item) => item.ident,
-            Self::AssocItem(item, _) => item.ident,
+            Self::Item(item) if let Some(ident) = item.kind.ident() => ident,
+            Self::Item(item) => panic!("{} does not have ident", item.kind.descr()),
+            Self::ForeignItem(item) if let Some(ident) = item.kind.ident() => ident,
+            Self::ForeignItem(item) => panic!("{} does not have ident", item.kind.descr()),
+            Self::AssocItem(item, _) if let Some(ident) = item.kind.ident() => ident,
+            Self::AssocItem(item, _) => panic!("{} does not have ident", item.kind.descr()),
         }
     }
 
@@ -205,7 +198,7 @@ pub mod mk {
             // NOTE: A path segment with an empty identifier is used instead of `ast::PathSegment::path_root`, because
             //       `ast::PathSegment::path_root` uses the `{{root}}` symbol which is improperly printed in token
             //       stream positions.
-            segments.push(ast::PathSegment::from_ident(Ident::empty()));
+            segments.push(ast::PathSegment::from_ident(Ident::new(sym::empty, sp)));
         }
 
         let last_ident = idents.pop().unwrap();
@@ -332,16 +325,17 @@ pub mod mk {
         ast::TraitRef { ref_id: ast::DUMMY_NODE_ID, path }
     }
 
-    pub fn poly_trait_ref(sp: Span, path: ast::Path) -> ast::PolyTraitRef {
+    pub fn poly_trait_ref(sp: Span, modifiers: ast::TraitBoundModifiers, path: ast::Path) -> ast::PolyTraitRef {
         ast::PolyTraitRef {
             span: sp,
             bound_generic_params: ThinVec::new(),
+            modifiers,
             trait_ref: self::trait_ref(path),
         }
     }
 
     pub fn trait_bound(modifiers: ast::TraitBoundModifiers, path: ast::Path) -> ast::GenericBound {
-        ast::GenericBound::Trait(self::poly_trait_ref(path.span, path), modifiers)
+        ast::GenericBound::Trait(self::poly_trait_ref(path.span, modifiers, path))
     }
 
     pub fn lifetime_bound(lifetime: ast::Lifetime) -> ast::GenericBound {
@@ -419,8 +413,8 @@ pub mod mk {
         self::expr(sp, ast::ExprKind::Assign(lhs, rhs, sp))
     }
 
-    pub fn expr_assign_op(sp: Span, op: ast::BinOpKind, lhs: P<ast::Expr>, rhs: P<ast::Expr>) -> P<ast::Expr> {
-        self::expr(sp, ast::ExprKind::AssignOp(ast::BinOp { span: sp, node: op }, lhs, rhs))
+    pub fn expr_assign_op(sp: Span, op: ast::AssignOpKind, lhs: P<ast::Expr>, rhs: P<ast::Expr>) -> P<ast::Expr> {
+        self::expr(sp, ast::ExprKind::AssignOp(ast::AssignOp { span: sp, node: op }, lhs, rhs))
     }
 
     pub fn expr_range(sp: Span, start: Option<P<ast::Expr>>, end: Option<P<ast::Expr>>, limits: ast::RangeLimits) -> P<ast::Expr> {
@@ -435,8 +429,8 @@ pub mod mk {
         self::pat(sp, ast::PatKind::Wild)
     }
 
-    pub fn pat_lit(sp: Span, expr: P<ast::Expr>) -> P<ast::Pat> {
-        self::pat(sp, ast::PatKind::Lit(expr))
+    pub fn pat_expr(sp: Span, expr: P<ast::Expr>) -> P<ast::Pat> {
+        self::pat(sp, ast::PatKind::Expr(expr))
     }
 
     pub fn pat_ident_binding_mode(sp: Span, ident: Ident, binding: ast::BindingMode) -> P<ast::Pat> {
@@ -689,7 +683,6 @@ pub mod mk {
             rules: block_check_mode,
             stmts,
             tokens: None,
-            could_be_bare_literal: false,
         })
     }
 
@@ -725,28 +718,31 @@ pub mod mk {
         })
     }
 
-    pub fn item(sp: Span, attrs: ThinVec<ast::Attribute>, vis: ast::Visibility, ident: Ident, kind: ast::ItemKind) -> P<ast::Item> {
+    pub fn item(sp: Span, attrs: ThinVec<ast::Attribute>, vis: ast::Visibility, kind: ast::ItemKind) -> P<ast::Item> {
         P(ast::Item {
             id: ast::DUMMY_NODE_ID,
             span: sp,
             attrs,
             vis,
-            ident,
             kind,
             tokens: None,
         })
     }
 
     pub fn item_static(sp: Span, vis: ast::Visibility, mutbl: ast::Mutability, ident: Ident, ty: P<ast::Ty>, expr: P<ast::Expr>) -> P<ast::Item> {
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Static(Box::new(ast::StaticItem {
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Static(Box::new(ast::StaticItem {
+            ident,
             ty,
+            safety: ast::Safety::Default,
             mutability: mutbl,
             expr: Some(expr),
+            define_opaque: None,
         })))
     }
 
     pub fn item_const(sp: Span, vis: ast::Visibility, ident: Ident, ty: P<ast::Ty>, expr: P<ast::Expr>) -> P<ast::Item> {
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Const(Box::new(ast::ConstItem {
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Const(Box::new(ast::ConstItem {
+            ident,
             defaultness: ast::Defaultness::Final,
             generics: ast::Generics {
                 params: ThinVec::new(),
@@ -759,23 +755,25 @@ pub mod mk {
             },
             ty,
             expr: Some(expr),
+            define_opaque: None,
         })))
     }
 
     pub fn item_mod(sp: Span, vis: ast::Visibility, ident: Ident, items: ThinVec<P<ast::Item>>) -> P<ast::Item> {
-        let mod_kind = ast::ModKind::Loaded(items, ast::Inline::Yes, ast::ModSpans { inner_span: sp, inject_use_span: sp });
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Mod(ast::Unsafe::No, mod_kind))
+        let mod_kind = ast::ModKind::Loaded(items, ast::Inline::Yes, ast::ModSpans { inner_span: sp, inject_use_span: sp }, Ok(()));
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Mod(ast::Safety::Default, ident, mod_kind))
     }
 
     pub fn item_extern_crate(sp: Span, krate: Symbol, ident: Option<Ident>) -> P<ast::Item> {
         match ident {
-            Some(ident) => self::item(sp, ThinVec::new(), self::vis_default(sp), ident, ast::ItemKind::ExternCrate(Some(krate))),
-            None => self::item(sp, ThinVec::new(), self::vis_default(sp), Ident::new(krate, sp), ast::ItemKind::ExternCrate(None)),
+            Some(ident) => self::item(sp, ThinVec::new(), self::vis_default(sp), ast::ItemKind::ExternCrate(Some(krate), ident)),
+            None => self::item(sp, ThinVec::new(), self::vis_default(sp), ast::ItemKind::ExternCrate(None, Ident::new(krate, sp))),
         }
     }
 
     pub fn item_fn(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, header: Option<ast::FnHeader>, inputs: ThinVec<ast::Param>, output: Option<P<ast::Ty>>, body: Option<P<ast::Block>>) -> P<ast::Item> {
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Fn(Box::new(ast::Fn {
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Fn(Box::new(ast::Fn {
+            ident,
             defaultness: ast::Defaultness::Final,
             generics: generics.unwrap_or_default(),
             sig: ast::FnSig {
@@ -783,6 +781,8 @@ pub mod mk {
                 header: header.unwrap_or_default(),
                 decl: self::fn_decl(inputs, self::fn_ret_ty(sp, output)),
             },
+            contract: None,
+            define_opaque: None,
             body,
         })))
     }
@@ -793,30 +793,35 @@ pub mod mk {
             span: sp,
             attrs: ast::AttrVec::new(),
             vis,
+            safety: ast::Safety::Default,
             ident,
             ty,
+            default: None,
             is_placeholder: false,
         }
     }
 
     pub fn item_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: ThinVec<ast::FieldDef>) -> P<ast::Item> {
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
-            ast::VariantData::Struct { fields, recovered: ast::Recovered::No },
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Struct(
+            ident,
             generics.unwrap_or_default(),
+            ast::VariantData::Struct { fields, recovered: ast::Recovered::No },
         ))
     }
 
     pub fn item_tuple_struct(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, fields: ThinVec<ast::FieldDef>) -> P<ast::Item> {
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
-            ast::VariantData::Tuple(fields, ast::DUMMY_NODE_ID),
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Struct(
+            ident,
             generics.unwrap_or_default(),
+            ast::VariantData::Tuple(fields, ast::DUMMY_NODE_ID),
         ))
     }
 
     pub fn item_unit_struct(sp: Span, vis: ast::Visibility, ident: Ident) -> P<ast::Item> {
-        self::item(sp, ThinVec::new(), vis, ident, ast::ItemKind::Struct(
-            ast::VariantData::Unit(ast::DUMMY_NODE_ID),
+        self::item(sp, ThinVec::new(), vis, ast::ItemKind::Struct(
+            ident,
             Default::default(),
+            ast::VariantData::Unit(ast::DUMMY_NODE_ID),
         ))
     }
 
@@ -844,6 +849,7 @@ pub mod mk {
             ty,
             kind,
             colon_sp: has_ty.then_some(sp),
+            super_: None,
             tokens: None,
         })))
     }
@@ -865,19 +871,19 @@ pub mod mk {
     }
 
     pub fn attr_inner_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr(g, ast::AttrStyle::Inner, path, args, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args, tokens: None }, None, ast::AttrStyle::Inner, sp)
     }
 
     pub fn attr_outer_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr(g, ast::AttrStyle::Outer, path, args, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args, tokens: None }, None, ast::AttrStyle::Outer, sp)
     }
 
     pub fn attr_inner(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr(g, ast::AttrStyle::Inner, ast::Path::from_ident(ident), args, sp)
+        self::attr_inner_path(g, sp, ast::Path::from_ident(ident), args)
     }
 
     pub fn attr_outer(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr(g, ast::AttrStyle::Outer, ast::Path::from_ident(ident), args, sp)
+        self::attr_outer_path(g, sp, ast::Path::from_ident(ident), args)
     }
 
     pub fn attr_args_delimited(sp: Span, delimiter: ast::token::Delimiter, tokens: ast::tokenstream::TokenStream) -> ast::AttrArgs {
@@ -936,6 +942,30 @@ pub mod mk {
     }
 }
 
+impl Descr for ast::ForeignItemKind {
+    fn descr(&self) -> &'static str {
+        match self {
+            ast::ForeignItemKind::Static(..) => "static item",
+            ast::ForeignItemKind::TyAlias(..) => "type alias",
+            ast::ForeignItemKind::Fn(..) => "function",
+            ast::ForeignItemKind::MacCall(..) => "item macro invocation",
+        }
+    }
+}
+
+impl Descr for ast::AssocItemKind {
+    fn descr(&self) -> &'static str {
+        match self {
+            ast::AssocItemKind::Const(..) => "const item",
+            ast::AssocItemKind::Type(..) => "type alias",
+            ast::AssocItemKind::Fn(..) => "function",
+            ast::AssocItemKind::MacCall(..) => "item macro invocation",
+            ast::AssocItemKind::Delegation(..) => "delegation",
+            ast::AssocItemKind::DelegationMac(..) => "delegation macro",
+        }
+    }
+}
+
 impl Descr for ast::StmtKind {
     fn descr(&self) -> &'static str {
         match self {
@@ -970,11 +1000,12 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::Match(..) => "match",
             ast::ExprKind::Closure(..) => "closure",
             ast::ExprKind::Block(..) => "block",
-            ast::ExprKind::Gen(.., ast::GenBlockKind::Async) => "async block",
-            ast::ExprKind::Gen(.., ast::GenBlockKind::Gen) => "generator block",
-            ast::ExprKind::Gen(.., ast::GenBlockKind::AsyncGen) => "async generator block",
+            ast::ExprKind::Gen(_, _, ast::GenBlockKind::Async, _) => "async block",
+            ast::ExprKind::Gen(_, _, ast::GenBlockKind::Gen, _) => "generator block",
+            ast::ExprKind::Gen(_, _, ast::GenBlockKind::AsyncGen, _) => "async generator block",
             ast::ExprKind::Await(..) => "await",
             ast::ExprKind::TryBlock(..) => "try block",
+            ast::ExprKind::Use(..) => "use",
             ast::ExprKind::Assign(..) => "assignment",
             ast::ExprKind::AssignOp(..) => "assignment with operator",
             ast::ExprKind::Field(..) => "field access",
@@ -998,6 +1029,7 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::Become(..) => "become",
             ast::ExprKind::IncludedBytes(..) => "included bytes",
             ast::ExprKind::FormatArgs(..) => "format_args",
+            ast::ExprKind::UnsafeBinderCast(..) => "unsafe binder cast",
             ast::ExprKind::Err(..) => "error",
             ast::ExprKind::Dummy => "dummy",
         }
@@ -1007,9 +1039,9 @@ impl Descr for ast::ExprKind {
 impl Descr for ast::PatKind {
     fn descr(&self) -> &'static str {
         match self {
+            ast::PatKind::Missing => "missing",
             ast::PatKind::Wild => "_",
             ast::PatKind::Never => "!",
-            ast::PatKind::Lit(..) => "literal",
             ast::PatKind::Ident(..) => "ident",
             ast::PatKind::Path(..) => "path",
             ast::PatKind::Tuple(..) => "tuple",
@@ -1022,6 +1054,8 @@ impl Descr for ast::PatKind {
             ast::PatKind::Or(..) => "or",
             ast::PatKind::Range(..) => "range",
             ast::PatKind::Slice(..) => "slice",
+            ast::PatKind::Expr(..) => "expression",
+            ast::PatKind::Guard(..) => "guard",
             ast::PatKind::MacCall(..) => "macro call",
             ast::PatKind::Paren(..) => "parentheses",
             ast::PatKind::Err(..) => "error",
@@ -1036,6 +1070,7 @@ impl Descr for ast::TyKind {
             ast::TyKind::Path(..) => "path",
             ast::TyKind::Ptr(..) => "raw pointer",
             ast::TyKind::Ref(..) => "reference",
+            ast::TyKind::PinnedRef(..) => "pinned reference",
             ast::TyKind::Slice(..) => "slice",
             ast::TyKind::Array(..) => "array",
             ast::TyKind::Tup(..) => "tuple",
@@ -1045,9 +1080,8 @@ impl Descr for ast::TyKind {
             ast::TyKind::Typeof(..) => "typeof",
             ast::TyKind::ImplicitSelf => "self",
             ast::TyKind::Infer => "infer",
-            ast::TyKind::AnonStruct(..) => "anonymous struct",
-            ast::TyKind::AnonUnion(..) => "anonymous union",
             ast::TyKind::CVarArgs => "C var args (va_list)",
+            ast::TyKind::UnsafeBinder(..) => "unsafe binder",
             ast::TyKind::Pat(..) => "pattern",
             ast::TyKind::Paren(..) => "parentheses",
             ast::TyKind::MacCall(..) => "macro call",
@@ -1101,9 +1135,9 @@ pub mod inspect {
         match_attr_name(attr, tool, word)
     }
 
-    pub fn is_name_value_attr(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::MetaItemLit) -> bool {
+    pub fn is_name_value_attr(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::LitKind) -> bool {
         let Some(ast::MetaItemKind::NameValue(lit)) = attr.meta_kind() else { return false; };
-        match_attr_name(attr, tool, name) && lit.kind == value.kind
+        match_attr_name(attr, tool, name) && lit.kind == *value
     }
 
     pub fn is_list_attr_with_path(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, path: &ast::Path) -> bool {
@@ -1123,8 +1157,8 @@ pub mod inspect {
     }
 
     pub fn is_extern_crate_decl(item: &ast::Item, sym: Symbol) -> bool {
-        if let ast::ItemKind::ExternCrate(..) = item.kind {
-            if item.ident.name == sym {
+        if let ast::ItemKind::ExternCrate(_, ident) = item.kind {
+            if ident.name == sym {
                 return true;
             }
         }
@@ -1138,8 +1172,8 @@ pub mod mut_visit {
 
     use rustc_ast::*;
 
-    // Copy of `rustc_ast::mut_visit::noop_visit_vis`, which has been made private.
-    pub fn noop_visit_vis<T: MutVisitor>(visibility: &mut Visibility, vis: &mut T) {
+    // Copy of `rustc_ast::mut_visit::walk_vis`, which has been made private.
+    pub fn walk_vis<T: MutVisitor>(vis: &mut T, visibility: &mut Visibility) {
         match &mut visibility.kind {
             VisibilityKind::Public | VisibilityKind::Inherited => {}
             VisibilityKind::Restricted { path, id, shorthand: _ } => {
@@ -1150,28 +1184,22 @@ pub mod mut_visit {
         vis.visit_span(&mut visibility.span);
     }
 
-    // Copy of `rustc_ast::mut_visit::noop_visit_constraint`, which has been made private.
-    pub fn noop_visit_constraint<T: MutVisitor>(assoc_constraint: &mut AssocConstraint, vis: &mut T) {
-        vis.visit_id(&mut assoc_constraint.id);
-        vis.visit_ident(&mut assoc_constraint.ident);
-        if let Some(gen_args) = &mut assoc_constraint.gen_args { vis.visit_generic_args(gen_args); }
-        match &mut assoc_constraint.kind {
-            AssocConstraintKind::Equality { term } => match term {
+    // Copy of `rustc_ast::mut_visit::walk_assoc_item_constraint`, which has been made private.
+    pub fn walk_assoc_item_constraint<T: MutVisitor>(vis: &mut T, assoc_item_constraint: &mut AssocItemConstraint) {
+        vis.visit_id(&mut assoc_item_constraint.id);
+        vis.visit_ident(&mut assoc_item_constraint.ident);
+        if let Some(gen_args) = &mut assoc_item_constraint.gen_args { vis.visit_generic_args(gen_args); }
+        match &mut assoc_item_constraint.kind {
+            AssocItemConstraintKind::Equality { term } => match term {
                 Term::Ty(ty) => vis.visit_ty(ty),
                 Term::Const(c) => vis.visit_anon_const(c),
             }
-            AssocConstraintKind::Bound { bounds } => {
+            AssocItemConstraintKind::Bound { bounds } => {
                 for bound in bounds {
-                    vis.visit_param_bound(bound);
+                    vis.visit_param_bound(bound, visit::BoundKind::Bound);
                 }
             }
         }
-        vis.visit_span(&mut assoc_constraint.span);
-    }
-
-    // Copy of `rustc_ast::mut_visit::noop_visit_anon_const`, which has been made private.
-    pub fn noop_visit_anon_const<T: MutVisitor>(anon_const: &mut AnonConst, vis: &mut T) {
-        vis.visit_id(&mut anon_const.id);
-        vis.visit_expr(&mut anon_const.value);
+        vis.visit_span(&mut assoc_item_constraint.span);
     }
 }
