@@ -1435,7 +1435,7 @@ pub mod visit {
             (ast::GenericArgs::AngleBracketed(generic_args_ast), hir::GenericArgsParentheses::No) => {
                 let mut args_hir = generic_args_hir.args.iter().filter(|arg_hir| {
                     let hir::GenericArg::Lifetime(lifetime_hir) = arg_hir else { return true; };
-                    !lifetime_hir.ident.name.is_empty()
+                    !lifetime_hir.is_implicit()
                 });
                 let mut constraints_hir = generic_args_hir.constraints.iter();
                 for generic_arg_ast in &generic_args_ast.args {
