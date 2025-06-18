@@ -718,7 +718,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let parent_def_id = self.tcx.parent(qres.def_id());
                         match self.tcx.def_kind(parent_def_id) {
                             hir::DefKind::Trait | hir::DefKind::TraitAlias => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty, parent_def_id, qself_ty_hir.span);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, node_hir_id.owner.to_def_id(), qself_ty_hir.span);
 
                                 let parent_path_segment_res = match &path.segments[..] {
                                     [.., parent_path_segment, _] => self.def_res.node_res(parent_path_segment.id),
@@ -737,7 +737,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             let trait_generics = self.tcx.generics_of(parent_def_id);
                                             let trait_args = &node_args[(trait_generics.has_self as usize)..trait_generics.count()];
 
-                                            self.sanitize_generic_args(trait_args, parent_def_id, qself_ty_hir.span)
+                                            self.sanitize_generic_args(trait_args, node_hir_id.owner.to_def_id(), qself_ty_hir.span)
                                         }
 
                                         // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
@@ -864,7 +864,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             }
 
                             hir::DefKind::Impl { of_trait: false } => {
-                                let qself_ty_ast = self.sanitize_ty(qself_ty, parent_def_id, qself_ty_hir.span);
+                                let qself_ty_ast = self.sanitize_ty(qself_ty, node_hir_id.owner.to_def_id(), qself_ty_hir.span);
 
                                 // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
                                 let _ = self.sanitize_path(path, qres.expect_non_local(), None);
