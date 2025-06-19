@@ -90,6 +90,7 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(coverage_attribute)]
         #![feature(hint_must_use)]
         #![feature(mpmc_channel)]
+        #![feature(never_type)]
         #![feature(rt)]
         #![feature(rustc_private)]
         #![feature(stdarch_internal)]

@@ -3,6 +3,10 @@
 
 #[cfg(test)]
 mod tests {
+    thread_local! {
+        static TLS: () = Default::default();
+    }
+
     #[test]
     fn test_builtins() {
         println!("{:?}, {:?}, {:?}", 3, 2, Some(1));
