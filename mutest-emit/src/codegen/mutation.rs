@@ -534,6 +534,15 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
         if let hir::ExprKind::Closure(_) = expr_hir.kind { self.current_closure = current_closure; }
     }
 
+    fn visit_pat(&mut self, pat: &'ast ast::Pat) {
+        match &pat.kind {
+            // NOTE: We do not want to visit pattern expressions (i.e. literal, const block, path), since
+            //       we cannot introduce dynamic mutations in them.
+            ast::PatKind::Expr(_) => {}
+            _ => ast::visit::walk_pat(self, pat),
+        }
+    }
+
     fn visit_attribute(&mut self, _attr: &'ast ast::Attribute) {}
 
     fn visit_ty(&mut self, _ty: &'ast ast::Ty) {
