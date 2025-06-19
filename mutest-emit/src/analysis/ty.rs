@@ -7,16 +7,13 @@ use rustc_trait_selection::infer::InferCtxtExt;
 use crate::analysis::hir;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol};
 
-pub fn impls_trait_with_env<'tcx>(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>) -> bool {
+pub fn impls_trait<'tcx>(tcx: TyCtxt<'tcx>, body_def_id: hir::LocalDefId, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>) -> bool {
     let ty = tcx.erase_regions(ty);
     if ty.has_escaping_bound_vars() { return false; }
 
-    let infcx = tcx.infer_ctxt().build(ty::TypingMode::PostAnalysis);
+    let infcx = tcx.infer_ctxt().build(ty::TypingMode::analysis_in_body(tcx, body_def_id));
+    let param_env = tcx.param_env(body_def_id);
     infcx.type_implements_trait(trait_def_id, tcx.mk_args_trait(ty, args), param_env).must_apply_modulo_regions()
-}
-
-pub fn impls_trait<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>) -> bool {
-    impls_trait_with_env(tcx, ty::ParamEnv::empty(), ty, trait_def_id, args)
 }
 
 pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, caller_def_id: hir::LocalDefId, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>, assoc_ty: Symbol) -> Option<Ty<'tcx>> {

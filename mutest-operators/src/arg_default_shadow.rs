@@ -99,8 +99,6 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
         let Some(body) = &f.fn_data.body else { return Mutations::none(); };
         let Some(first_valid_stmt) = body.stmts.iter().filter(|stmt| stmt.id != ast::DUMMY_NODE_ID).next() else { return Mutations::none(); };
 
-        let param_env = tcx.param_env(f_hir.owner_id.def_id);
-
         let Some(body_hir) = f_hir.body else { return Mutations::none(); };
         let typeck = tcx.typeck_body(body_hir.id());
 
@@ -114,7 +112,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
 
             let Some(ident_pat_hir) = body_res.hir_pat(ident_pat) else { continue; };
             let param_ty = typeck.pat_ty(ident_pat_hir);
-            if !ty::impls_trait_with_env(tcx, param_env, param_ty, res::traits::Default(tcx), vec![]) { continue; }
+            if !ty::impls_trait(tcx, f_hir.owner_id.def_id, param_ty, res::traits::Default(tcx), vec![]) { continue; }
 
             // Short-circuit in the common case where the parameter pattern is an ident in and of itself.
             // This case is simpler, since we can simply copy the type ascription from the parameter directly.

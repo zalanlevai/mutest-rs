@@ -9,7 +9,7 @@ use mutest_emit::codegen::symbols::{Ident, path, kw};
 use mutest_emit::thin_vec::thin_vec;
 use mutest_emit::smallvec::smallvec;
 
-fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
+fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::LocalDefId, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
     // Calls to functions that take no arguments (including self) are ignored, because they are likely
     // default constructor functions.
     let call_args_count = match expr.kind {
@@ -24,7 +24,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
 
     let expr_ty = typeck.expr_ty(expr);
     if expr_ty == tcx.types.unit || expr_ty == tcx.types.never { return None; }
-    if !ty::impls_trait_with_env(tcx, param_env, expr_ty, res::traits::Default(tcx), vec![]) { return None; }
+    if !ty::impls_trait(tcx, f, expr_ty, res::traits::Default(tcx), vec![]) { return None; }
 
     let Some((callee, _)) = res::callee(typeck, expr) else { return None; };
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
@@ -44,7 +44,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
     {
         // Direct recursion: placing a call to type `T`'s `Default::default` implementation
         // within type `T`'s `Default::default` implementation is a directly recursive function call.
-        if ty_default_impl_def_id.to_def_id() == f { return None; }
+        if ty_default_impl_def_id == f { return None; }
 
         let mut ty_default_impl_callees = res::collect_callees(tcx, tcx.hir_body(ty_default_impl_body_id)).into_iter()
             .filter_map(|call| match call.kind {
@@ -57,7 +57,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::DefId, body: hir::BodyId, e
                 ty::Instance::try_resolve(tcx, typing_env, def_id, generic_args).ok().flatten()
             });
 
-        let ty_default_impl_refers_to_call = ty_default_impl_callees.any(|instance| instance.def_id() == f);
+        let ty_default_impl_refers_to_call = ty_default_impl_callees.any(|instance| instance.def_id() == f.to_def_id());
         if ty_default_impl_refers_to_call { return None; }
     }
 
@@ -105,7 +105,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let Some((callee, expr_ty)) = non_default_call(
             tcx,
-            f_hir.owner_id.to_def_id(),
+            f_hir.owner_id.def_id,
             body_hir.id(),
             expr_hir,
             self.limit_scope_to_local_callees,
@@ -179,7 +179,7 @@ impl<'a> Operator<'a> for CallDelete {
         let Some(expr_hir) = body_res.hir_expr(expr) else { unreachable!() };
         let Some((callee, _)) = non_default_call(
             tcx,
-            f_hir.owner_id.to_def_id(),
+            f_hir.owner_id.def_id,
             body_hir.id(),
             expr_hir,
             self.limit_scope_to_local_callees,

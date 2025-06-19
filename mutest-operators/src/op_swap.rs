@@ -30,8 +30,7 @@ impl OpKind {
 }
 
 fn impls_matching_op<'tcx>(tcx: TyCtxt<'tcx>, caller_def_id: hir::LocalDefId, lhs_ty: Ty<'tcx>, rhs_ty: Ty<'tcx>, expr_ty: Ty<'tcx>, op_trait: hir::DefId, op_kind: OpKind) -> bool {
-    let param_env = tcx.param_env(caller_def_id);
-    if !ty::impls_trait_with_env(tcx, param_env, lhs_ty, op_trait, vec![rhs_ty.into()]) { return false; }
+    if !ty::impls_trait(tcx, caller_def_id, lhs_ty, op_trait, vec![rhs_ty.into()]) { return false; }
 
     match op_kind {
         OpKind::Standalone(_) => {
