@@ -206,6 +206,9 @@ fn main() {
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
         if let Some(out_dir) = matches.get_one::<PathBuf>("Zwrite-json") {
+            // NOTE: The out dir path passed to the generated test binary must be canonicalized,
+            //       as it will likely be run under a different cwd.
+            let out_dir = out_dir.canonicalize().expect("cannot canonicalize out dir path");
             let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
             cmd.arg(format!("--Zwrite-json={out_dir}"));
         }
