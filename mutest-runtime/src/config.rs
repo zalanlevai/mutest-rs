@@ -13,6 +13,7 @@ pub struct PrintOptions {
 
 pub struct WriteOptions {
     pub out_dir: PathBuf,
+    pub eval_stream: Option<()>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

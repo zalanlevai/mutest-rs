@@ -5,7 +5,7 @@ use std::panic;
 use std::sync::atomic::{self, AtomicU32, AtomicUsize};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
-use std::thread;
+use std::thread::{self, ThreadId};
 
 /// Fixed frame used to clean the backtrace with `RUST_BACKTRACE=1`.
 #[inline(never)]
@@ -18,16 +18,16 @@ fn __rust_begin_short_backtrace<T, F: FnOnce() -> T>(f: F) -> T {
 
 pub type Thunk<'a> = Box<dyn FnOnce() + Send + 'a>;
 
-struct Packet {
-    result: UnsafeCell<Option<Result<(), Box<dyn Any + Send + 'static>>>>
+struct Packet<T> {
+    data: UnsafeCell<Option<T>>
 }
 
-unsafe impl Sync for Packet {}
+unsafe impl<T> Sync for Packet<T> {}
 
-impl Drop for Packet {
+impl<T> Drop for Packet<T> {
     fn drop(&mut self) {
-        if let Err(_) = panic::catch_unwind(panic::AssertUnwindSafe(|| *self.result.get_mut() = None)) {
-            println!("thread result panicked on drop");
+        if let Err(_) = panic::catch_unwind(panic::AssertUnwindSafe(|| *self.data.get_mut() = None)) {
+            println!("thread packet panicked on drop");
             std::process::abort();
         }
     }
@@ -52,8 +52,10 @@ impl AtomicSingleWait {
 }
 
 pub struct JobHandle {
+    allocated: AtomicSingleWait,
+    thread_id_packet: Arc<Packet<ThreadId>>,
     finished: AtomicSingleWait,
-    packet: Arc<Packet>,
+    result_packet: Arc<Packet<Result<(), Box<dyn Any + Send + 'static>>>>,
 }
 
 impl fmt::Debug for JobHandle {
@@ -63,13 +65,22 @@ impl fmt::Debug for JobHandle {
 }
 
 impl JobHandle {
+    pub fn thread_id(&self) -> ThreadId {
+        self.allocated.wait();
+        unsafe { (*self.thread_id_packet.data.get()).unwrap() }
+    }
+
+    pub fn is_allocated(&self) -> bool {
+        Arc::strong_count(&self.thread_id_packet) == 1
+    }
+
     pub fn join(mut self) -> Result<(), Box<dyn Any + Send + 'static>> {
         self.finished.wait();
-        Arc::get_mut(&mut self.packet).unwrap().result.get_mut().take().unwrap()
+        Arc::get_mut(&mut self.result_packet).unwrap().data.get_mut().take().unwrap()
     }
 
     pub fn is_finished(&self) -> bool {
-        Arc::strong_count(&self.packet) == 1
+        Arc::strong_count(&self.result_packet) == 1
     }
 }
 
@@ -78,7 +89,7 @@ struct ThreadPoolData {
     stack_size: Option<usize>,
     max_thread_count: AtomicUsize,
 
-    job_receiver: Mutex<mpsc::Receiver<(Thunk<'static>, Arc<Packet>, AtomicSingleWait)>>,
+    job_receiver: Mutex<mpsc::Receiver<(Thunk<'static>, Arc<Packet<ThreadId>>, AtomicSingleWait, Arc<Packet<Result<(), Box<dyn Any + Send + 'static>>>>, AtomicSingleWait)>>,
     active_threads_count: AtomicUsize,
     queued_count: AtomicUsize,
     panic_count: AtomicUsize,
@@ -127,17 +138,20 @@ fn spawn_in_pool(data: Arc<ThreadPoolData>) {
 
         loop {
             let job_msg = data.job_receiver.lock().expect("worker thread unable to lock job receiver").recv();
-            let (job, packet, finished) = match job_msg {
+            let (job, thread_id_packet, allocated, result_packet, finished) = match job_msg {
                 Ok(job) => job,
                 Err(_) => break,
             };
-            data.queued_count.fetch_sub(1, atomic::Ordering::SeqCst);
 
+            data.queued_count.fetch_sub(1, atomic::Ordering::SeqCst);
             data.active_threads_count.fetch_add(1, atomic::Ordering::SeqCst);
+            unsafe { *thread_id_packet.data.get() = Some(thread::current().id()) };
+            drop(thread_id_packet);
+            allocated.wake_all();
 
             let result = panic::catch_unwind(panic::AssertUnwindSafe(|| __rust_begin_short_backtrace(job)));
-            unsafe { *packet.result.get() = Some(result) };
-            drop(packet);
+            unsafe { *result_packet.data.get() = Some(result) };
+            drop(result_packet);
             finished.wake_all();
 
             data.active_threads_count.fetch_sub(1, atomic::Ordering::SeqCst);
@@ -149,12 +163,12 @@ fn spawn_in_pool(data: Arc<ThreadPoolData>) {
 
 pub struct ThreadPool {
     data: Arc<ThreadPoolData>,
-    job_sender: mpsc::Sender<(Thunk<'static>, Arc<Packet>, AtomicSingleWait)>,
+    job_sender: mpsc::Sender<(Thunk<'static>, Arc<Packet<ThreadId>>, AtomicSingleWait, Arc<Packet<Result<(), Box<dyn Any + Send + 'static>>>>, AtomicSingleWait)>,
 }
 
 impl ThreadPool {
     pub fn new(size: usize, name: Option<String>, stack_size: Option<usize>) -> Self {
-        let (tx, rx) = mpsc::channel::<(Thunk<'static>, Arc<Packet>, AtomicSingleWait)>();
+        let (tx, rx) = mpsc::channel::<(Thunk<'static>, Arc<Packet<ThreadId>>, AtomicSingleWait, Arc<Packet<Result<(), Box<dyn Any + Send + 'static>>>>, AtomicSingleWait)>();
 
         let data = Arc::new(ThreadPoolData {
             name,
@@ -177,16 +191,20 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
-        let packet = Arc::new(Packet {
-            result: UnsafeCell::new(None),
+        let thread_id_packet = Arc::new(Packet {
+            data: UnsafeCell::new(None),
         });
+        let allocated = AtomicSingleWait::new();
 
+        let result_packet = Arc::new(Packet {
+            data: UnsafeCell::new(None),
+        });
         let finished = AtomicSingleWait::new();
 
         self.data.queued_count.fetch_add(1, atomic::Ordering::SeqCst);
-        self.job_sender.send((Box::new(job), packet.clone(), finished.clone())).expect("cannot send job into queue");
+        self.job_sender.send((Box::new(job), thread_id_packet.clone(), allocated.clone(), result_packet.clone(), finished.clone())).expect("cannot send job into queue");
 
-        JobHandle { finished, packet }
+        JobHandle { allocated, thread_id_packet, finished, result_packet }
     }
 
     pub fn max_thread_count(&self) -> usize {

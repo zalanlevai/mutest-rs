@@ -1,12 +1,78 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::BufWriter;
-use std::time::Duration;
+use std::io::{BufWriter, Write};
+use std::num::NonZeroU64;
+use std::ops::DerefMut;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 use crate::config::WriteOptions;
 use crate::harness::{MutationAnalysisResults, MutationTestResult};
 use crate::flakiness::MutationFlakinessMatrix;
+use crate::metadata::MutationMeta;
 use crate::test_runner;
+
+#[derive(Clone)]
+pub struct EvaluationStreamWriter {
+    buffered_file: Arc<Mutex<BufWriter<fs::File>>>,
+    t_start: Instant,
+}
+
+impl EvaluationStreamWriter {
+    pub fn new(path: &Path, t_start: Instant) -> Self {
+        let file = fs::File::create(path).expect("cannot create stream file");
+        let buffered_file = Arc::new(Mutex::new(BufWriter::new(file)));
+        let eval_stream_writer = Self { buffered_file, t_start };
+
+        eval_stream_writer.write_event(&mutest_json::evaluation_stream::EvaluationStreamHeader {
+            format_version: mutest_json::FORMAT_VERSION,
+        });
+
+        eval_stream_writer
+    }
+
+    #[inline]
+    pub fn timestamp(&self) -> Duration {
+        self.t_start.elapsed()
+    }
+
+    pub fn write_event<T: serde::Serialize>(&self, data: &T) {
+        let mut eval_stream_file = self.buffered_file.lock().unwrap();
+        serde_json::to_writer(eval_stream_file.deref_mut(), &data).expect("cannot write to stream file");
+        writeln!(eval_stream_file.deref_mut(), "").expect("cannot write to stream file");
+    }
+
+    pub fn write_test_start(&self, mutation: &MutationMeta, test_desc: &test::TestDesc, thread_id: Option<ThreadId>) {
+        let t = self.timestamp();
+
+        self.write_event(&mutest_json::evaluation_stream::Event::TestStart(mutest_json::evaluation_stream::TestStartEvent {
+            time: mutest_json::evaluation_stream::Nanos(t.as_nanos().try_into().expect("cannot fit timestamp in u64")),
+            mutation_id: mutest_json::mutations::MutationId(mutation.id),
+            test_name: test_desc.name.as_slice().to_owned(),
+            thread_id: thread_id.map_or(const { NonZeroU64::new(1).unwrap() }, |thread_id| thread_id.as_u64())
+        }))
+    }
+
+    pub fn write_test_result(&self, mutation: &MutationMeta, test: &test_runner::CompletedTest) {
+        let t = self.timestamp();
+
+        self.write_event(&mutest_json::evaluation_stream::Event::TestResult(mutest_json::evaluation_stream::TestResultEvent {
+            time: mutest_json::evaluation_stream::Nanos(t.as_nanos().try_into().expect("cannot fit timestamp in u64")),
+            mutation_id: mutest_json::mutations::MutationId(mutation.id),
+            test_name: test.desc.name.as_slice().to_owned(),
+            test_exec_time: test.exec_time.map(|test_exec_time| mutest_json::evaluation_stream::Nanos(test_exec_time.as_nanos().try_into().expect("cannot fit exec time in u64"))),
+            test_result: match test.result {
+                test_runner::TestResult::Ok => mutest_json::evaluation_stream::TestResult::Ok,
+                test_runner::TestResult::Ignored => mutest_json::evaluation_stream::TestResult::Ignored,
+                test_runner::TestResult::Failed | test_runner::TestResult::FailedMsg(_) => mutest_json::evaluation_stream::TestResult::Failed,
+                test_runner::TestResult::CrashedMsg(_) => mutest_json::evaluation_stream::TestResult::Crashed,
+                test_runner::TestResult::TimedOut => mutest_json::evaluation_stream::TestResult::TimedOut,
+            }
+        }))
+    }
+}
 
 fn write_metadata<T: serde::Serialize>(write_opts: &WriteOptions, file_name: &str, data: &T) {
     let file = fs::File::create(write_opts.out_dir.join(file_name)).expect("cannot create metadata file");

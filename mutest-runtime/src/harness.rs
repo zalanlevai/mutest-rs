@@ -7,6 +7,8 @@ use std::iter;
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::MutationSafety;
@@ -17,7 +19,7 @@ use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta
 use crate::subsumption::{MutationSubsumptionMatrix, print_mutation_subsumption_matrix};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
-use crate::write::write_evaluation;
+use crate::write::{EvaluationStreamWriter, write_evaluation};
 
 mod test {
     #![allow(unused_imports)]
@@ -198,6 +200,88 @@ fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: 
     *tests = parallelized_tests;
 }
 
+pub enum LingeringTestEvent {
+    Completion(test_runner::CompletedTest, &'static MutationMeta),
+    Termination(test_runner::RunningTest, &'static MutationMeta),
+}
+
+pub struct LingeringTestMonitoringThread {
+    running_test_sender: mpsc::Sender<Vec<(test_runner::RunningTest, &'static MutationMeta)>>,
+}
+
+impl LingeringTestMonitoringThread {
+    pub fn set_up<F: FnMut(LingeringTestEvent) + Send + Clone + 'static>(mut on_lingering_test_event: F) -> Self {
+        let (running_test_sender, running_test_receiver) = mpsc::channel::<Vec<(test_runner::RunningTest, &'static MutationMeta)>>();
+
+        struct Sentinel<F: FnMut(LingeringTestEvent) + Send + Clone + 'static> {
+            lingering_tests: Vec<(test_runner::RunningTest, &'static MutationMeta)>,
+            on_lingering_test_event: F,
+        }
+
+        impl<F: FnMut(LingeringTestEvent) + Send + Clone + 'static> Drop for Sentinel<F> {
+            fn drop(&mut self) {
+                for (lingering_test, mutation) in self.lingering_tests.drain(..) {
+                    (self.on_lingering_test_event)(LingeringTestEvent::Termination(lingering_test, mutation));
+                }
+            }
+        }
+
+        let job = move || {
+            let mut sentinel = Sentinel {
+                lingering_tests: vec![],
+                on_lingering_test_event: on_lingering_test_event.clone(),
+            };
+
+            loop {
+                match running_test_receiver.try_recv() {
+                    Ok(running_tests) => {
+                        sentinel.lingering_tests.extend(running_tests);
+                    }
+
+                    Err(mpsc::TryRecvError::Disconnected) => break,
+
+                    // No tests received, continue normally.
+                    Err(mpsc::TryRecvError::Empty) => {}
+                }
+
+                if let Some((completed_running_test, mutation)) = sentinel.lingering_tests.extract_if(.., |(running_test, _)| running_test.join_handle.as_ref().is_some_and(|h| h.is_finished())).next() {
+                    let exec_time = completed_running_test.start_time.elapsed();
+
+                    let Some(join_handle) = completed_running_test.join_handle else { unreachable!() };
+                    let test_result = match join_handle.join() {
+                        Ok(_) => test_runner::TestResult::from_task(completed_running_test.desc.should_panic, Ok(()), completed_running_test.timeout, Some(exec_time)),
+                        Err(e) => test_runner::TestResult::from_task(completed_running_test.desc.should_panic, Err(e.as_ref()), completed_running_test.timeout, Some(exec_time)),
+                    };
+
+                    // TODO: Retreive "real" completed test by keeping around the test_rx used to send it, along with the running test.
+                    let completed_test = test_runner::CompletedTest {
+                        // FIXME: Retrieve real test ID, or use consistent test IDs everywhere.
+                        id: test::TestId(0),
+                        desc: completed_running_test.desc.clone(),
+                        result: test_result,
+                        exec_time: Some(exec_time),
+                        stdout: vec![],
+                    };
+
+                    on_lingering_test_event(LingeringTestEvent::Completion(completed_test, mutation));
+                }
+            }
+        };
+
+        let thread = thread::Builder::new().name("lingering_test_monitoring_thread".to_owned());
+        let _join_handle = match thread.spawn(job) {
+            Ok(join_handle) => join_handle,
+            Err(e) => panic!("failed to spawn thread for monitoring lingering tests: {e}"),
+        };
+
+        Self { running_test_sender }
+    }
+
+    pub fn submit_lingering_tests(&self, lingering_tests: Vec<(test_runner::RunningTest, &'static MutationMeta)>) {
+        self.running_test_sender.send(lingering_tests).expect("lingering test monitoring thread crashed");
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum MutationTestResult {
     #[default]
@@ -213,7 +297,14 @@ pub struct MutationTestResults {
     pub results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
 }
 
-fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta<S>, exhaustive: bool, mutation_isolation: config::MutationIsolation, thread_pool: Option<ThreadPool>) -> Result<HashMap<u32, MutationTestResults>, Infallible> {
+fn run_tests<S: SubstMap>(
+    mut tests: Vec<test_runner::Test>,
+    mutant: &MutantMeta<S>,
+    exhaustive: bool,
+    mutation_isolation: config::MutationIsolation,
+    thread_pool: Option<ThreadPool>,
+    eval_stream_writer: Option<EvaluationStreamWriter>,
+) -> (HashMap<u32, MutationTestResults>, Vec<(test_runner::RunningTest, &'static MutationMeta)>) {
     let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutant.mutations.len());
 
     for &mutation in mutant.mutations {
@@ -231,11 +322,23 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
 
     let on_test_event = |event, remaining_tests: &mut Vec<(test::TestId, test_runner::Test)>| -> Result<_, Infallible> {
         match event {
+            test_runner::TestEvent::Wait(test_desc, thread_id) => {
+                if let Some(eval_stream_writer) = &eval_stream_writer {
+                    let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test_desc.name.as_slice()))
+                        .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
+
+                    eval_stream_writer.write_test_start(mutation, &test_desc, thread_id);
+                }
+            }
             test_runner::TestEvent::Result(test) => {
                 completed_tests_count += 1;
 
                 let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
                     .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
+
+                if let Some(eval_stream_writer) = &eval_stream_writer {
+                    eval_stream_writer.write_test_result(mutation, &test);
+                }
 
                 let mutation_results = results.get_mut(&mutation.id).expect("mutation result slot not allocated");
 
@@ -300,7 +403,15 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
         _ => test_runner::TestRunStrategy::InProcess(thread_pool),
     };
 
-    test_runner::run_tests(tests, on_test_event, test_run_strategy, false)?;
+    let Ok((_, lingering_tests)) = test_runner::run_tests(tests, on_test_event, test_run_strategy, false);
+
+    let lingering_tests = lingering_tests.into_iter()
+        .map(|test| {
+            let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
+                .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
+            (test, *mutation)
+        })
+        .collect::<Vec<_>>();
 
     println!("ran {completed} out of {total} {descr}",
         completed = completed_tests_count,
@@ -312,7 +423,7 @@ fn run_tests<S: SubstMap>(mut tests: Vec<test_runner::Test>, mutant: &MutantMeta
     );
     println!();
 
-    Ok(results)
+    (results, lingering_tests)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -338,7 +449,15 @@ pub struct MutationAnalysisResults {
     pub duration: Duration,
 }
 
-fn run_mutation_analysis<S: SubstMap>(opts: &Options, tests: &[test_runner::Test], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>, thread_pool: Option<ThreadPool>) -> MutationAnalysisResults {
+fn run_mutation_analysis<S: SubstMap>(
+    opts: &Options,
+    tests: &[test_runner::Test],
+    mutants: &'static [&'static MutantMeta<S>],
+    active_mutant_handle: &'static ActiveMutantHandle<S>,
+    thread_pool: Option<ThreadPool>,
+    lingering_test_monitoring_thread: Arc<LingeringTestMonitoringThread>,
+    eval_stream_writer: Option<EvaluationStreamWriter>,
+) -> MutationAnalysisResults {
     let mut results = MutationAnalysisResults {
         all_test_runs_failed_successfully: true,
         total_mutations_count: 0,
@@ -391,54 +510,52 @@ fn run_mutation_analysis<S: SubstMap>(opts: &Options, tests: &[test_runner::Test
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        match run_tests(tests, mutant, opts.exhaustive, opts.mutation_isolation, thread_pool.clone()) {
-            Ok(mut run_results) => {
-                for &mutation in mutant.mutations {
-                    let op_stats = results.mutation_op_stats.entry(mutation.op_name).or_default();
+        let (mut run_results, lingering_tests) = run_tests(tests, mutant, opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone());
+        lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
 
-                    results.total_mutations_count += 1;
-                    op_stats.total_mutations_count += 1;
+        for &mutation in mutant.mutations {
+            let op_stats = results.mutation_op_stats.entry(mutation.op_name).or_default();
+
+            results.total_mutations_count += 1;
+            op_stats.total_mutations_count += 1;
+            if let MutationSafety::Safe = mutation.safety {
+                results.total_safe_mutations_count += 1;
+            }
+
+            let Some(mutation_result) = run_results.remove(&mutation.id) else { unreachable!() };
+
+            match mutation_result.result {
+                MutationTestResult::Undetected => {
+                    results.all_test_runs_failed_successfully = false;
+
+                    results.undetected_mutations_count += 1;
+                    op_stats.undetected_mutations_count += 1;
                     if let MutationSafety::Safe = mutation.safety {
-                        results.total_safe_mutations_count += 1;
+                        results.undetected_safe_mutations_count += 1;
                     }
 
-                    let Some(mutation_result) = run_results.remove(&mutation.id) else { unreachable!() };
+                    print!("{}", mutation.undetected_diagnostic);
+                }
 
-                    match mutation_result.result {
-                        MutationTestResult::Undetected => {
-                            results.all_test_runs_failed_successfully = false;
-
-                            results.undetected_mutations_count += 1;
-                            op_stats.undetected_mutations_count += 1;
-                            if let MutationSafety::Safe = mutation.safety {
-                                results.undetected_safe_mutations_count += 1;
-                            }
-
-                            print!("{}", mutation.undetected_diagnostic);
-                        }
-
-                        MutationTestResult::Detected => {}
-                        MutationTestResult::TimedOut => {
-                            results.timed_out_mutations_count += 1;
-                            op_stats.timed_out_mutations_count += 1;
-                            if let MutationSafety::Safe = mutation.safety {
-                                results.timed_out_safe_mutations_count += 1;
-                            }
-
-                        }
-                        MutationTestResult::Crashed => {
-                            results.crashed_mutations_count += 1;
-                            op_stats.crashed_mutations_count += 1;
-                            if let MutationSafety::Safe = mutation.safety {
-                                results.crashed_safe_mutations_count += 1;
-                            }
-                        }
+                MutationTestResult::Detected => {}
+                MutationTestResult::TimedOut => {
+                    results.timed_out_mutations_count += 1;
+                    op_stats.timed_out_mutations_count += 1;
+                    if let MutationSafety::Safe = mutation.safety {
+                        results.timed_out_safe_mutations_count += 1;
                     }
 
-                    results.mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
+                }
+                MutationTestResult::Crashed => {
+                    results.crashed_mutations_count += 1;
+                    op_stats.crashed_mutations_count += 1;
+                    if let MutationSafety::Safe = mutation.safety {
+                        results.crashed_safe_mutations_count += 1;
+                    }
                 }
             }
-            Err(_) => { process::exit(ERROR_EXIT_CODE); }
+
+            results.mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
         }
     }
 
@@ -531,6 +648,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         write_opts: args.iter().flat_map(|arg| arg.strip_prefix("--Zwrite-json=")).next().map(|out_dir_str| {
             config::WriteOptions {
                 out_dir: PathBuf::from(out_dir_str),
+                eval_stream: args.contains(&"--Zwrite-json-eval-stream").then_some(()),
             }
         }),
         exhaustive: args.contains(&"--exhaustive"),
@@ -546,6 +664,13 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
     let t_start = Instant::now();
     let mut write_duration = Duration::ZERO;
+
+    let eval_stream_writer = match &opts.write_opts {
+        Some(write_opts) if let Some(()) = write_opts.eval_stream => {
+            Some(EvaluationStreamWriter::new(&write_opts.out_dir.join("evaluation.jsonl"), t_start))
+        }
+        _ => None,
+    };
 
     println!("profiling reference test run");
     let t_test_profiling_start = Instant::now();
@@ -613,9 +738,33 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         println!();
     }
 
+    let monitoring_thread_eval_stream_writer = eval_stream_writer.clone();
+    let lingering_test_monitoring_thread = Arc::new(LingeringTestMonitoringThread::set_up(move |event| {
+        match event {
+            LingeringTestEvent::Completion(completed_test, mutation) => {
+                if let Some(eval_stream_writer) = &monitoring_thread_eval_stream_writer {
+                    eval_stream_writer.write_test_result(mutation, &completed_test);
+                }
+            }
+            LingeringTestEvent::Termination(running_test, mutation) => {
+                if let Some(eval_stream_writer) = &monitoring_thread_eval_stream_writer {
+                    let exec_time = running_test.start_time.elapsed();
+                    let completed_test = test_runner::CompletedTest {
+                        id: test::TestId(0),
+                        desc: running_test.desc.clone(),
+                        result: test_runner::TestResult::TimedOut,
+                        exec_time: Some(exec_time),
+                        stdout: vec![],
+                    };
+                    eval_stream_writer.write_test_result(mutation, &completed_test);
+                }
+            }
+        }
+    }));
+
     match opts.mode {
         config::Mode::Evaluate => {
-            let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool);
+            let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool, lingering_test_monitoring_thread.clone(), eval_stream_writer);
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
@@ -631,6 +780,8 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 let mutation_subsumption_matrix = MutationSubsumptionMatrix::build(&results.mutation_detection_matrix, &tests);
                 print_mutation_subsumption_matrix(&mutation_subsumption_matrix, mutants, !opts.exhaustive);
             }
+
+            drop(lingering_test_monitoring_thread);
 
             print_mutation_analysis_epilogue(&results, opts.verbosity);
 
@@ -657,7 +808,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 println!("running iteration {iteration} out of {iterations_count}");
                 println!();
 
-                let iteration_results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool.clone());
+                let iteration_results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool.clone(), lingering_test_monitoring_thread.clone(), eval_stream_writer.clone());
 
                 if let Some(()) = &opts.print_opts.detection_matrix {
                     print_mutation_detection_matrix(&iteration_results.mutation_detection_matrix, &tests, !opts.exhaustive);
@@ -680,6 +831,8 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
                 results.push(iteration_results);
             }
+
+            drop(lingering_test_monitoring_thread);
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();

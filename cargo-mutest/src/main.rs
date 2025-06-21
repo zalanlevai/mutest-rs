@@ -58,6 +58,8 @@ fn main() {
             .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").display_order(120))
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
+            // Experimental Flags
+            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file(s) into JSON output directory.").display_order(500))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
@@ -96,6 +98,8 @@ fn main() {
             let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();
             if print_names.contains("all") { print_names = HashSet::from_iter(run_print::ALL.into_iter().map(|s| *s)); }
             for print_name in print_names { passed_args.push(format!("--print={print_name}")); }
+
+            if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
 
             ("test", &[], "build", Some(passed_args))
         }

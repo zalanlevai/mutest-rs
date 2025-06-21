@@ -3,6 +3,7 @@
 #![feature(if_let_guard)]
 #![feature(iter_array_chunks)]
 #![feature(let_chains)]
+#![feature(thread_id_value)]
 
 #![feature(test)]
 #![feature(internal_output_capture)]

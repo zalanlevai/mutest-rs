@@ -8,7 +8,7 @@ use std::panic;
 use std::process::{self, Command};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
-use std::thread;
+use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use crate::thread_pool::{self, ThreadPool};
@@ -48,6 +48,13 @@ pub enum ThreadHandle {
 }
 
 impl ThreadHandle {
+    pub fn thread_id(&self) -> ThreadId {
+        match self {
+            Self::StandaloneThread(join_handle) => join_handle.thread().id(),
+            Self::ThreadPoolThread(job_handle) => job_handle.thread_id(),
+        }
+    }
+
     pub fn join(self) -> Result<(), Box<dyn Any + Send + 'static>> {
         match self {
             Self::StandaloneThread(join_handle) => join_handle.join(),
@@ -497,7 +504,7 @@ pub struct RunningTest {
 #[derive(Debug)]
 pub enum TestEvent {
     Queue(usize, usize),
-    Wait(test::TestDesc),
+    Wait(test::TestDesc, Option<ThreadId>),
     Result(CompletedTest),
 }
 
@@ -550,9 +557,11 @@ where
             }
 
             event!(TestEvent::Queue(1, remaining_tests.len()));
-            event!(TestEvent::Wait(test.desc.clone()));
+
+            let desc = test.desc.clone();
 
             let join_handle = run_test(id, test, None, test_tx.clone(), test_run_strategy.clone(), no_capture);
+            event!(TestEvent::Wait(desc, join_handle.as_ref().map(|h| h.thread_id())));
             let mut completed_test = test_rx.recv().unwrap();
 
             if let Some(join_handle) = join_handle {
@@ -614,13 +623,13 @@ where
 
             while running_tests.len() < concurrency && let Some((id, test)) = remaining_tests.pop() {
                 event!(TestEvent::Queue(running_tests.len(), remaining_tests.len()));
-                event!(TestEvent::Wait(test.desc.clone()));
 
                 let desc = test.desc.clone();
                 let timeout = test.timeout;
 
                 let (control_tx, control_rx) = mpsc::channel::<ControlMsg>();
                 let join_handle = run_test(id, test, Some(control_rx), test_tx.clone(), test_run_strategy.clone(), no_capture);
+                event!(TestEvent::Wait(desc.clone(), join_handle.as_ref().map(|h| h.thread_id())));
                 running_tests.insert(id, RunningTest { desc, timeout, start_time: Instant::now(), control_tx, join_handle });
             }
 
