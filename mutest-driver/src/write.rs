@@ -52,6 +52,7 @@ pub fn write_call_graph<'tcx>(write_opts: &WriteOptions, _tcx: TyCtxt<'tcx>, all
             virtual_calls_count: call_graph.virtual_calls_count,
             dynamic_calls_count: call_graph.dynamic_calls_count,
             foreign_calls_count: call_graph.foreign_calls_count,
+            call_graph_depth: call_graph.depth(),
         },
         duration,
     });

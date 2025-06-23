@@ -21,6 +21,9 @@ pub struct CallGraphStats {
     /// Number of foreign calls in the crate's call graph.
     /// Foreign calls are calls to opaque `extern` function pointers.
     pub foreign_calls_count: usize,
+
+    /// Depth of the crate's call graph in number of calls.
+    pub call_graph_depth: usize,
 }
 
 /// Information about the crate's tests' call graph.
