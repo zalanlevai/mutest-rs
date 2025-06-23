@@ -236,16 +236,16 @@ pub fn main() {
                 .collect::<Vec<_>>()
         };
 
-        let mut call_graph_depth = mutest_arg_matches.get_one::<usize>("call-graph-depth").copied();
+        let mut call_graph_depth_limit = mutest_arg_matches.get_one::<usize>("call-graph-depth-limit").copied();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
-        if let Some(call_graph_depth_value) = call_graph_depth && call_graph_depth_value < mutation_depth {
-            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph depth argument ignored as mutation depth exceeds it");
+        if let Some(call_graph_depth_limit_value) = call_graph_depth_limit && call_graph_depth_limit_value < mutation_depth {
+            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph depth limit argument ignored as mutation depth exceeds it");
             diagnostic.note(format!("mutation depth is set to {mutation_depth}"));
-            diagnostic.note(format!("call graph depth was explicitly set to {call_graph_depth_value}, but will be ignored"));
+            diagnostic.note(format!("call graph depth limit was explicitly set to {call_graph_depth_limit_value}, but will be ignored"));
             diagnostic.emit();
 
-            call_graph_depth = None;
+            call_graph_depth_limit = None;
         }
 
         let mutation_batching_algorithm = {
@@ -332,7 +332,7 @@ pub fn main() {
                 print_opts,
                 unsafe_targeting,
                 operators: &mutation_operators,
-                call_graph_depth,
+                call_graph_depth_limit,
                 mutation_depth,
                 mutation_batching_algorithm,
                 mutation_batching_randomness,

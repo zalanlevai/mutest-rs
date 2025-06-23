@@ -4,22 +4,22 @@
 entry points:
 
 test test
-  -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
-  -> other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:12:1: 12:38 (#0)
+  -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:6:1: 6:32 (#0)
+  -> other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:11:1: 11:38 (#0)
 
 nested calls at distance 1:
 
-recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
-  -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
-other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:12:1: 12:38 (#0)
-  -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
+recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:6:1: 6:32 (#0)
+  -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:6:1: 6:32 (#0)
+other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:11:1: 11:38 (#0)
+  -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:6:1: 6:32 (#0)
 
 @@@ targets @@@
 
-tests -(0)-> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
+tests -(0)-> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:6:1: 6:32 (#0)
   (0) test
 
-tests -(0)-> other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:12:1: 12:38 (#0)
+tests -(0)-> other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:11:1: 11:38 (#0)
   (0) test
 
 targets: 2 total; 2 safe; 0 unsafe (0 tainted)

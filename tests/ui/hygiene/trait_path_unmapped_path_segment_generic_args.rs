@@ -1,5 +1,6 @@
 //@ build
-//@ stderr: empty
+//@ stderr
+//@ mutest-flags: --depth=1 --call-graph-depth-limit=1
 
 //! The following paths get normalized into paths that point to their trait items,
 //! which means that the generic arguments in the original path segments will be discarded.

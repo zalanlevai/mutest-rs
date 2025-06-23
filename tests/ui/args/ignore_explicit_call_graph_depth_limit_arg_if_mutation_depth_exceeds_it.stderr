@@ -1,0 +1,5 @@
+warning: explicit call graph depth limit argument ignored as mutation depth exceeds it
+  |
+  = note: mutation depth is set to 5
+  = note: call graph depth limit was explicitly set to 3, but will be ignored
+

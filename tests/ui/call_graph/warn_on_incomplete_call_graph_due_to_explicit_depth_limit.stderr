@@ -1,0 +1,7 @@
+warning: incomplete call graph due to explicit depth limit
+  |
+  = note: call graph depth limit is set to 3
+  = note: ignoring 1 caller and its callees
+
+warning: 1 warning emitted
+

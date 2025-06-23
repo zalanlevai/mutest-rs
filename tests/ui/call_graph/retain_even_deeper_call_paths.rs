@@ -2,7 +2,6 @@
 //@ print-targets
 //@ stdout
 //@ stderr: empty
-//@ mutest-flags: --depth=6
 
 fn non_recursive_function_a() {}
 

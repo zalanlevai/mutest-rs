@@ -1,0 +1,33 @@
+built call graph with depth of 3
+reached 60.00% of functions from tests (3 out of 5 functions)
+
+@@@ call graph @@@
+
+entry points:
+
+test test
+  -> depth_1 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:21:1: 21:13 (#0)
+
+nested calls at distance 1:
+
+depth_1 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:21:1: 21:13 (#0)
+  -> depth_2 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:17:1: 17:13 (#0)
+
+nested calls at distance 2:
+
+depth_2 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:17:1: 17:13 (#0)
+  -> depth_3 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:13:1: 13:13 (#0)
+
+
+@@@ targets @@@
+
+tests -(2)-> depth_3 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:13:1: 13:13 (#0)
+  (2) test
+
+tests -(1)-> depth_2 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:17:1: 17:13 (#0)
+  (1) test
+
+tests -(0)-> depth_1 at tests/ui/call_graph/warn_on_incomplete_call_graph_due_to_explicit_depth_limit.rs:21:1: 21:13 (#0)
+  (0) test
+
+targets: 3 total; 3 safe; 0 unsafe (0 tainted)

@@ -116,25 +116,29 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let all_mutable_fns_count = mutest_emit::analysis::call_graph::all_mutable_fns(tcx, &tests).count();
 
-            let call_graph_depth = match opts.call_graph_depth {
-                Some(call_graph_depth) => {
-                    if call_graph_depth < opts.mutation_depth {
-                        tcx.dcx().fatal("explicit call graph depth argument exceeds mutation depth");
+            let call_graph_depth_limit = match opts.call_graph_depth_limit {
+                Some(call_graph_depth_limit) => {
+                    if call_graph_depth_limit < opts.mutation_depth {
+                        tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit argument");
                     }
-                    call_graph_depth
+                    Some(call_graph_depth_limit)
                 }
-                None => opts.mutation_depth,
+                None => None,
             };
 
             let t_target_analysis_start = Instant::now();
 
-            let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth);
+            let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth_limit);
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
                 write_call_graph(write_opts, tcx, all_mutable_fns_count, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
                 pass_result.write_duration += t_write_start.elapsed();
             }
             if opts.verbosity >= 1 {
+                println!("built call graph with depth of {depth}",
+                    depth = call_graph.depth(),
+                );
+
                 println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
                     reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
                     reached = reachable_fns.len(),

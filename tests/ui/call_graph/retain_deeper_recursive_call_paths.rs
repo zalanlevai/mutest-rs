@@ -2,7 +2,6 @@
 //@ print-targets
 //@ stdout
 //@ stderr: empty
-//@ mutest-flags: --depth=6
 
 fn recursive_function(i: usize) {
     if i == 1 { return; }

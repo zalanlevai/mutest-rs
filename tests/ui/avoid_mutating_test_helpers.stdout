@@ -1,3 +1,4 @@
+built call graph with depth of 1
 reached 100.00% of functions from tests (1 out of 1 functions)
 tests -(0)-> help_program at tests/ui/avoid_mutating_test_helpers.rs:6:1: 6:18 (#0)
   (0) test_standalone

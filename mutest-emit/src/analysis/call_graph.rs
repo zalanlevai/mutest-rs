@@ -318,6 +318,10 @@ impl<'tcx> CallGraph<'tcx> {
         total_calls_count
     }
 
+    pub fn depth(&self) -> usize {
+        (!self.root_calls.is_empty() as usize) + self.nested_calls.len()
+    }
+
     pub fn callees_of_nested_caller(&self, caller: Callee<'tcx>) -> Option<impl Iterator<Item = (Callee<'tcx>, hir::Safety)> + '_> {
         let calls_of_caller = self.nested_calls.iter().find_map(|calls| {
             let mut calls_of_caller = calls.iter().filter(move |(this_caller, _, _)| *this_caller == caller).peekable();
@@ -341,7 +345,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     def_res: &ast_lowering::DefResolutions,
     krate: &'ast ast::Crate,
     tests: &'tst [Test],
-    depth: usize,
+    depth_limit: Option<usize>,
 ) -> (CallGraph<'tcx>, Vec<Target<'tst>>) {
     let mut call_graph = CallGraph {
         virtual_calls_count: 0,
@@ -432,7 +436,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
     let mut alread_recorded_callers: FxHashSet<Callee<'tcx>> = Default::default();
 
-    for distance in 0..depth {
+    for distance in 0.. {
         let mut newly_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
         // HACK: We must sort the callers into a stable order for the corresponding diagnostics to be printed in a stable order.
@@ -452,9 +456,21 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             break;
         }
 
-        if distance < (depth - 1) {
-            call_graph.nested_calls.push(Default::default());
+        // Reached explicit call graph depth limit.
+        if let Some(depth_limit) = depth_limit && !(distance < (depth_limit - 1)) {
+            // Warn about non-recorded callers because of explicit call graph depth limit.
+            let mut diagnostic = tcx.dcx().struct_warn("incomplete call graph due to explicit depth limit");
+            diagnostic.note(format!("call graph depth limit is set to {depth_limit}"));
+            diagnostic.note(match callers.len() {
+                1 => "ignoring 1 caller and its callees".to_owned(),
+                _ => format!("ignoring {} callers and their callees", callers.len()),
+            });
+            diagnostic.emit();
+
+            break;
         }
+
+        call_graph.nested_calls.push(Default::default());
 
         let mut callers_to_be_recorded: FxHashSet<Callee<'tcx>> = Default::default();
 
@@ -465,83 +481,80 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             if alread_recorded_callers.contains(&caller) { continue; }
 
             // Collect calls of callees, for the next depth iteration.
-            // NOTE: This is not performed on the last depth iteration; calls made by
-            //       callees at the end of the call graph are ignored.
-            if distance < (depth - 1) {
-                if !tcx.is_mir_available(caller.def_id) { continue; }
-                let body_mir = tcx.instance_mir(ty::InstanceKind::Item(caller.def_id));
 
-                let mut callees = mir_callees(tcx, &body_mir, caller.generic_args);
-                callees.extend(drop_glue_callees(tcx, &body_mir, caller.generic_args));
+            if !tcx.is_mir_available(caller.def_id) { continue; }
+            let body_mir = tcx.instance_mir(ty::InstanceKind::Item(caller.def_id));
 
-                // HACK: We must sort the calls into a stable order for the corresponding diagnostics to be printed in a stable order.
-                let mut calls = callees.into_iter().collect::<Vec<_>>();
-                calls.sort_unstable_by(|call_a, call_b| span_diagnostic_ord(call_a.span, call_b.span));
+            let mut callees = mir_callees(tcx, &body_mir, caller.generic_args);
+            callees.extend(drop_glue_callees(tcx, &body_mir, caller.generic_args));
 
-                for call in calls {
-                    // NOTE: We are post type-checking, querying monomorphic obligations.
-                    let typing_env = ty::TypingEnv::fully_monomorphized();
+            // HACK: We must sort the calls into a stable order for the corresponding diagnostics to be printed in a stable order.
+            let mut calls = callees.into_iter().collect::<Vec<_>>();
+            calls.sort_unstable_by(|call_a, call_b| span_diagnostic_ord(call_a.span, call_b.span));
 
-                    let callee = match call.kind {
-                        CallKind::Def(def_id, generic_args) => {
-                            // The type arguments from the local, generic scope may still contain type parameters, so we
-                            // fold the bound type arguments of the concrete invocation of the enclosing function into it.
-                            let generic_args = instantiate_generic_args(tcx, generic_args, caller.generic_args);
-                            // Using the concrete type arguments of this call, we resolve the corresponding definition
-                            // instance. The type arguments might take a different form at the resolved definition site, so
-                            // we propagate them instead.
-                            let instance = ty::Instance::expect_resolve(tcx, typing_env, def_id, generic_args, DUMMY_SP);
+            for call in calls {
+                // NOTE: We are post type-checking, querying monomorphic obligations.
+                let typing_env = ty::TypingEnv::fully_monomorphized();
 
-                            if let ty::InstanceKind::Virtual(def_id, _) = instance.def {
-                                call_graph.virtual_calls_count += 1;
+                let callee = match call.kind {
+                    CallKind::Def(def_id, generic_args) => {
+                        // The type arguments from the local, generic scope may still contain type parameters, so we
+                        // fold the bound type arguments of the concrete invocation of the enclosing function into it.
+                        let generic_args = instantiate_generic_args(tcx, generic_args, caller.generic_args);
+                        // Using the concrete type arguments of this call, we resolve the corresponding definition
+                        // instance. The type arguments might take a different form at the resolved definition site, so
+                        // we propagate them instead.
+                        let instance = ty::Instance::expect_resolve(tcx, typing_env, def_id, generic_args, DUMMY_SP);
 
-                                let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
+                        if let ty::InstanceKind::Virtual(def_id, _) = instance.def {
+                            call_graph.virtual_calls_count += 1;
+
+                            let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
+                            diagnostic.span(call.span);
+                            diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
+                            diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
+                            diagnostic.emit();
+                        }
+
+                        if tcx.is_foreign_item(instance.def_id()) && !tcx.intrinsic(instance.def_id()).is_some() {
+                            let codegen_fn_attrs = tcx.codegen_fn_attrs(instance.def_id());
+                            let is_allocator_intrinsic = codegen_fn_attrs.flags.intersects(
+                                CodegenFnAttrFlags::ALLOCATOR
+                                | CodegenFnAttrFlags::DEALLOCATOR
+                                | CodegenFnAttrFlags::REALLOCATOR
+                                | CodegenFnAttrFlags::ALLOCATOR_ZEROED
+                            );
+
+                            if !is_allocator_intrinsic {
+                                call_graph.foreign_calls_count += 1;
+
+                                let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");
                                 diagnostic.span(call.span);
-                                diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
+                                diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(instance.def_id(), instance.args)));
                                 diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
                                 diagnostic.emit();
                             }
-
-                            if tcx.is_foreign_item(instance.def_id()) && !tcx.intrinsic(instance.def_id()).is_some() {
-                                let codegen_fn_attrs = tcx.codegen_fn_attrs(instance.def_id());
-                                let is_allocator_intrinsic = codegen_fn_attrs.flags.intersects(
-                                    CodegenFnAttrFlags::ALLOCATOR
-                                    | CodegenFnAttrFlags::DEALLOCATOR
-                                    | CodegenFnAttrFlags::REALLOCATOR
-                                    | CodegenFnAttrFlags::ALLOCATOR_ZEROED
-                                );
-
-                                if !is_allocator_intrinsic {
-                                    call_graph.foreign_calls_count += 1;
-
-                                    let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");
-                                    diagnostic.span(call.span);
-                                    diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(instance.def_id(), instance.args)));
-                                    diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
-                                    diagnostic.emit();
-                                }
-                            }
-
-                            Callee::new(instance.def_id(), instance.args)
                         }
 
-                        CallKind::Ptr(fn_sig) => {
-                            call_graph.dynamic_calls_count += 1;
+                        Callee::new(instance.def_id(), instance.args)
+                    }
 
-                            let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
-                            diagnostic.span(call.span);
-                            diagnostic.span_label(call.span, format!("call to {fn_sig}"));
-                            diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
-                            diagnostic.emit();
+                    CallKind::Ptr(fn_sig) => {
+                        call_graph.dynamic_calls_count += 1;
 
-                            continue;
-                        }
-                    };
+                        let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
+                        diagnostic.span(call.span);
+                        diagnostic.span_label(call.span, format!("call to {fn_sig}"));
+                        diagnostic.note(format!("in {}", tcx.def_path_str_with_args(caller.def_id, caller.generic_args)));
+                        diagnostic.emit();
 
-                    call_graph.nested_calls[distance].insert((caller, callee, call.safety));
+                        continue;
+                    }
+                };
 
-                    newly_found_callees.insert(callee);
-                }
+                call_graph.nested_calls[distance].insert((caller, callee, call.safety));
+
+                newly_found_callees.insert(callee);
             }
 
             callers_to_be_recorded.insert(caller);

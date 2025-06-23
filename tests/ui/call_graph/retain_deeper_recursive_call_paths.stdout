@@ -4,24 +4,24 @@
 entry points:
 
 test test_direct
-  -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)
+  -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:6:1: 6:32 (#0)
 test test_indirect
-  -> indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:17:1: 17:24 (#0)
+  -> indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:16:1: 16:24 (#0)
 
 nested calls at distance 1:
 
-recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)
-  -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)
-indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:17:1: 17:24 (#0)
-  -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)
+recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:6:1: 6:32 (#0)
+  -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:6:1: 6:32 (#0)
+indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:16:1: 16:24 (#0)
+  -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:6:1: 6:32 (#0)
 
 @@@ targets @@@
 
-tests -(0)-> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)
+tests -(0)-> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:6:1: 6:32 (#0)
   (0) test_direct
   (1) test_indirect
 
-tests -(0)-> indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:17:1: 17:24 (#0)
+tests -(0)-> indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:16:1: 16:24 (#0)
   (0) test_indirect
 
 targets: 2 total; 2 safe; 0 unsafe (0 tainted)
