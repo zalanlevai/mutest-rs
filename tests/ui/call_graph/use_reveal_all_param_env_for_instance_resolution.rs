@@ -1,5 +1,6 @@
 //@ print-call-graph
 //@ stderr: empty
+//@ edition: 2021
 
 //! Since we are performing monomorphising call graph construction after type checking,
 //! we do so by querying monomorphic obligations.

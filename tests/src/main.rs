@@ -1,3 +1,4 @@
+#![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
@@ -157,6 +158,22 @@ fn log_test(test_name: &str, result: TestResult, reason: Option<&str>) {
     );
 }
 
+fn parse_directives(path: &Path) -> Vec<String> {
+    let source = fs::File::open(path).expect(&format!("cannot open `{}`", path.display()));
+    let mut reader = BufReader::with_capacity(1024, source);
+
+    let mut directives = vec![];
+    let mut line = String::new();
+    while reader.read_line(&mut line).expect(&format!("cannot read contents of `{}`", path.display())) >= 1 {
+        if let Some(directive) = line.trim_start().strip_prefix("//@").map(str::trim) {
+            directives.push(directive.to_owned());
+        }
+        line.clear();
+    }
+
+    directives
+}
+
 fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResults) {
     if !path.is_file() { return; }
     if !path.extension().is_some_and(|v| v == "rs") { return; }
@@ -192,17 +209,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         crate_name = &unmangled_crate_name[..unmangled_crate_name.floor_char_boundary(48)],
     );
 
-    let source = fs::File::open(&path).expect(&format!("cannot open `{}`", path.display()));
-    let mut reader = BufReader::with_capacity(1024, source);
-
-    let mut directives = vec![];
-    let mut line = String::new();
-    while reader.read_line(&mut line).expect(&format!("cannot read contents of `{}`", path.display())) >= 1 {
-        if let Some(directive) = line.trim_start().strip_prefix("//@").map(str::trim) {
-            directives.push(directive.to_owned());
-        }
-        line.clear();
-    }
+    let directives = parse_directives(&path);
 
     if directives.iter().any(|d| d == "ignore") {
         results.ignored_tests_count += 1;
@@ -210,78 +217,87 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         return;
     }
 
+    let mut edition: Option<&str> = None;
     let mut expect_command_fail = false;
     let mut expectations = BTreeSet::new();
     let mut mutest_prints = BTreeSet::new();
-    let mutest_subcommand = {
-        let mut mutest_subcommand: Option<&str> = None;
-
-        for directive in &directives {
-            match directive.as_str() {
-                subcommand @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
-                    if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
-                        results.ignored_tests_count += 1;
-                        log_test(&name, TestResult::Ignored, Some("invalid directives"));
-                        return;
-                    }
-                    match subcommand {
-                        "run" => mutest_subcommand = Some("build"),
-                        "print-tests" => {
-                            mutest_prints.insert("tests");
-                            mutest_subcommand.get_or_insert("print");
-                        }
-                        "print-call-graph" => {
-                            mutest_prints.insert("call-graph");
-                            mutest_subcommand.get_or_insert("print");
-                        }
-                        "print-targets" => {
-                            mutest_prints.insert("targets");
-                            mutest_subcommand.get_or_insert("print");
-                        }
-                        "print-mutants" => {
-                            mutest_prints.insert("mutants");
-                            mutest_subcommand.get_or_insert("print");
-                        }
-                        "print-code" => {
-                            mutest_prints.insert("code");
-                            mutest_subcommand.get_or_insert("print");
-                        }
-                        subcommand => mutest_subcommand = Some(subcommand),
-                    };
-                }
-
-                "fail" => {
-                    if let Some(_previous_subcommand) = mutest_subcommand {
-                        results.ignored_tests_count += 1;
-                        log_test(&name, TestResult::Ignored, Some("invalid directives"));
-                        return;
-                    }
-                    expect_command_fail = true;
-                    mutest_subcommand = Some("build");
-                }
-
-                "stdout" => { expectations.insert(Expectation::StdOut { empty: false }); }
-                "stdout: empty" => { expectations.insert(Expectation::StdOut { empty: true }); }
-                "stderr" => { expectations.insert(Expectation::StdErr { empty: false }); }
-                "stderr: empty" => { expectations.insert(Expectation::StdErr { empty: true }); }
-
-                _ if directive.starts_with("aux-build:") => {}
-                _ if directive.starts_with("rustc-flags:") => {}
-                _ if directive.starts_with("verify:") => {}
-                _ if directive.starts_with("mutation-operators:") => {}
-                _ if directive.starts_with("mutest-flags:") => {}
-                _ if directive.starts_with("mutest-subcommand-flags:") => {}
-
-                _ => {
+    let mut mutest_subcommand: Option<&str> = None;
+    for directive in &directives {
+        match directive.as_str() {
+            subcommand @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
+                if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
                     results.ignored_tests_count += 1;
-                    log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{directive}`")));
+                    log_test(&name, TestResult::Ignored, Some("invalid directives"));
                     return;
                 }
+                match subcommand {
+                    "run" => mutest_subcommand = Some("build"),
+                    "print-tests" => {
+                        mutest_prints.insert("tests");
+                        mutest_subcommand.get_or_insert("print");
+                    }
+                    "print-call-graph" => {
+                        mutest_prints.insert("call-graph");
+                        mutest_subcommand.get_or_insert("print");
+                    }
+                    "print-targets" => {
+                        mutest_prints.insert("targets");
+                        mutest_subcommand.get_or_insert("print");
+                    }
+                    "print-mutants" => {
+                        mutest_prints.insert("mutants");
+                        mutest_subcommand.get_or_insert("print");
+                    }
+                    "print-code" => {
+                        mutest_prints.insert("code");
+                        mutest_subcommand.get_or_insert("print");
+                    }
+                    subcommand => mutest_subcommand = Some(subcommand),
+                };
+            }
+
+            "fail" => {
+                if let Some(_previous_subcommand) = mutest_subcommand {
+                    results.ignored_tests_count += 1;
+                    log_test(&name, TestResult::Ignored, Some("invalid directives"));
+                    return;
+                }
+                expect_command_fail = true;
+                mutest_subcommand = Some("build");
+            }
+
+            _ if let Some(edition_str) = directive.strip_prefix("edition:").map(str::trim) => {
+                if let Some(_previous_edition) = edition {
+                    results.ignored_tests_count += 1;
+                    log_test(&name, TestResult::Ignored, Some("invalid directives: multiple editions"));
+                    return;
+                }
+                edition = Some(edition_str);
+            }
+
+            "stdout" => { expectations.insert(Expectation::StdOut { empty: false }); }
+            "stdout: empty" => { expectations.insert(Expectation::StdOut { empty: true }); }
+            "stderr" => { expectations.insert(Expectation::StdErr { empty: false }); }
+            "stderr: empty" => { expectations.insert(Expectation::StdErr { empty: true }); }
+
+            _ if directive.starts_with("aux-build:") => {}
+            _ if directive.starts_with("rustc-flags:") => {}
+            _ if directive.starts_with("verify:") => {}
+            _ if directive.starts_with("mutation-operators:") => {}
+            _ if directive.starts_with("mutest-flags:") => {}
+            _ if directive.starts_with("mutest-subcommand-flags:") => {}
+
+            _ => {
+                results.ignored_tests_count += 1;
+                log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{directive}`")));
+                return;
             }
         }
+    }
 
-        mutest_subcommand.unwrap_or("build")
-    };
+    // Set defaults.
+    let edition = edition.unwrap_or("2018");
+    let mutest_subcommand = mutest_subcommand.unwrap_or("build");
 
     // HACK: We invoke mutest-driver directly, rather than through Cargo, which means
     //       we have to add `windows.lib` to the linker search path manually.
@@ -308,13 +324,38 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         let aux_path = aux_dir_path.join(aux_build);
         let aux_crate_name = Path::new(aux_build).file_stem().expect("invalid aux path").to_str().expect("invalid aux path");
 
+        let aux_directives = parse_directives(&aux_path);
+
+        let mut edition = None;
+        for aux_directive in &aux_directives {
+            match aux_directive.as_str() {
+                _ if let Some(edition_str) = directive.strip_prefix("edition:").map(str::trim) => {
+                    if let Some(_previous_edition) = edition {
+                        results.ignored_tests_count += 1;
+                        log_test(&name, TestResult::Ignored, Some("invalid directives: multiple editions"));
+                        return;
+                    }
+                    edition = Some(edition_str);
+                }
+
+                _ => {
+                    results.ignored_tests_count += 1;
+                    log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{directive}`")));
+                    return;
+                }
+            }
+        }
+
+        // Set defaults.
+        let edition = edition.unwrap_or("2018");
+
         let mut cmd = Command::new("target/release/mutest-driver");
         // We need to invoke mutest-driver as a rustc wrapper. This must be the first argument.
         cmd.arg("/dummy/rustc");
 
         cmd.arg(&aux_path);
         cmd.args(["--crate-name", aux_crate_name]);
-        cmd.arg("--edition=2021");
+        cmd.arg(format!("--edition={edition}"));
 
         cmd.args(["--out-dir", AUX_OUT_DIR]);
 
@@ -356,7 +397,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
     cmd.arg(&path);
     cmd.args(["--crate-name".to_owned(), test_crate_name]);
-    cmd.arg("--edition=2021");
+    cmd.arg(format!("--edition={edition}"));
 
     cmd.args(["--crate-type", "lib"]);
 

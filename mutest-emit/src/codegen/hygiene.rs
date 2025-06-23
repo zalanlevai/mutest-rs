@@ -1620,7 +1620,7 @@ fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
             stability: None,
             deprecation: None,
             helper_attrs,
-            edition: Edition::Edition2021,
+            edition: Edition::Edition2024,
             builtin_name: Some(name),
             allow_internal_unsafe: false,
             local_inner_macros: false,

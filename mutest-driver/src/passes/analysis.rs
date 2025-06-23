@@ -4,7 +4,6 @@ use rustc_hash::FxHashSet;
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_span::ErrorGuaranteed;
-use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
 use mutest_emit::codegen::symbols::span_diagnostic_ord;
 
@@ -416,7 +415,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     "".to_owned(),
                     &NoAnn,
                     true,
-                    Edition::Edition2021,
+                    sess.edition(),
                     &sess.psess.attr_id_generator,
                 ),
             );
