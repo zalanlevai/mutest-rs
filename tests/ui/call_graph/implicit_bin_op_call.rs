@@ -1,3 +1,4 @@
+//@ print-call-graph
 //@ print-targets
 //@ stdout
 //@ stderr: empty

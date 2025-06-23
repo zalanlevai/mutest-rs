@@ -1,8 +1,10 @@
+use std::collections::hash_map;
 use std::iter;
 
 use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_middle::mir;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
+use smallvec::{SmallVec, smallvec};
 
 use crate::analysis::ast_lowering;
 use crate::analysis::hir;
@@ -279,12 +281,30 @@ impl<'tcx> Callee<'tcx> {
     }
 }
 
+pub struct CallTrace<'tcx> {
+    pub root: hir::LocalDefId,
+    pub nested_calls: SmallVec<[Callee<'tcx>; 1]>,
+}
+
+impl<'tcx> CallTrace<'tcx> {
+    pub fn contains(&self, callee: Callee<'tcx>) -> bool {
+        self.nested_calls.iter().any(|nested_call| *nested_call == callee)
+    }
+
+    pub fn display_str(&self, tcx: TyCtxt<'tcx>) -> String {
+        iter::once(tcx.def_path_str(self.root))
+            .chain(self.nested_calls.iter().map(|nested_call| format!("{} at {:?}", nested_call.display_str(tcx), tcx.def_span(nested_call.def_id))))
+            .intersperse("\n    -> ".to_owned())
+            .collect::<String>()
+    }
+}
+
 pub struct CallGraph<'tcx> {
     pub virtual_calls_count: usize,
     pub dynamic_calls_count: usize,
     pub foreign_calls_count: usize,
-    pub root_calls: FxHashSet<(hir::LocalDefId, Callee<'tcx>)>,
-    pub nested_calls: Vec<FxHashSet<(Callee<'tcx>, Callee<'tcx>)>>,
+    pub root_calls: FxHashSet<(hir::LocalDefId, Callee<'tcx>, hir::Safety)>,
+    pub nested_calls: Vec<FxHashSet<(Callee<'tcx>, Callee<'tcx>, hir::Safety)>>,
 }
 
 impl<'tcx> CallGraph<'tcx> {
@@ -295,6 +315,16 @@ impl<'tcx> CallGraph<'tcx> {
         total_calls_count += self.dynamic_calls_count;
 
         total_calls_count
+    }
+
+    pub fn callees_of_nested_caller(&self, caller: Callee<'tcx>) -> Option<impl Iterator<Item = (Callee<'tcx>, hir::Safety)> + '_> {
+        let calls_of_caller = self.nested_calls.iter().find_map(|calls| {
+            let mut calls_of_caller = calls.iter().filter(move |(this_caller, _, _)| *this_caller == caller).peekable();
+            if let Some(_) = calls_of_caller.peek() { return Some(calls_of_caller); }
+            None
+        })?;
+
+        Some(calls_of_caller.map(|(_, callee, safety)| (*callee, *safety)))
     }
 }
 
@@ -320,29 +350,9 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
         nested_calls: iter::repeat_with(|| Default::default()).take(depth - 1).collect(),
     };
 
-    /// A map from each entry point to the most severe unsafety source of any call path in its current call tree walk.
-    /// Safe items called from an unsafe context (dependencies) will be marked `Unsafety::Tainted` with their
-    /// corresponding unsafety source.
-    ///
-    /// ```ignore
-    /// [Safe] fn x { [None -> Safe]
-    ///     [Safe] fn y { [Some(EnclosingUnsafe) -> Unsafe(EnclosingUnsafe)]
-    ///         unsafe { [Some(Unsafe) -> Unsafe(Unsafe)]
-    ///             [Safe] fn z { [Some(Unsafe) -> Tainted(Unsafe)] }
-    ///         }
-    ///         [Safe] fn w { [Some(EnclosingUnsafe) -> Tainted(EnclosingUnsafe)] }
-    ///         [Unsafe(Unsafe)] unsafe fn u { [Some(Unsafe) -> Unsafe(Unsafe)]
-    ///             [Safe] fn v { [Some(Unsafe) -> Tainted(Unsafe)] }
-    ///             [Safe] fn w { [Some(Unsafe) -> Tainted(Unsafe)] }
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    type CallPaths<'tst> = FxHashMap<&'tst Test, Option<UnsafeSource>>;
-
     let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
 
-    let mut previously_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
+    let mut previously_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
     for test in tests {
         if test.ignore { continue; }
@@ -413,69 +423,32 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 }
             };
 
-            call_graph.root_calls.insert((test.def_id, callee));
+            call_graph.root_calls.insert((test.def_id, callee, call.safety));
 
-            let call_paths = previously_found_callees.entry(callee).or_insert_with(Default::default);
-            call_paths.insert(test, None);
+            previously_found_callees.insert(callee);
         }
     }
 
-    let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
+    let mut alread_recorded_callers: FxHashSet<Callee<'tcx>> = Default::default();
 
     for distance in 0..depth {
-        let mut newly_found_callees: FxHashMap<Callee<'tcx>, CallPaths<'tst>> = Default::default();
+        let mut newly_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
         // HACK: We must sort the callees into a stable order for the corresponding diagnostics to be printed in a stable order.
         let mut callees = previously_found_callees.drain().collect::<Vec<_>>();
-        callees.sort_unstable_by(|(caller_a, _), (caller_b, _)| {
+        callees.sort_unstable_by(|caller_a, caller_b| {
             let caller_a_span = tcx.def_span(caller_a.def_id);
             let caller_b_span = tcx.def_span(caller_b.def_id);
             span_diagnostic_ord(caller_a_span, caller_b_span)
         });
 
-        for (caller, call_paths) in callees {
+        let mut callers_to_be_recorded: FxHashSet<Callee<'tcx>> = Default::default();
+
+        for caller in callees {
             // `const` functions, like other `const` scopes, cannot be mutated.
             if tcx.is_const_fn(caller.def_id) { continue; }
 
-            if let Some(local_def_id) = caller.def_id.as_local() {
-                if !tcx.hir_node_by_def_id(local_def_id).body_id().is_some() { continue; }
-
-                let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
-                let skip = false
-                    // Non-functions, including closures
-                    || !matches!(tcx.def_kind(caller.def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
-                    // Inner function of #[test] function
-                    || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
-                    // #[cfg(test)] function, or function in #[cfg(test)] module
-                    || tests::is_marked_or_in_cfg_test(tcx, hir_id)
-                    // #[mutest::skip] function
-                    || tool_attr::skip(tcx.hir_attrs(hir_id));
-
-                if !skip && let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) {
-                    let target = targets.entry(local_def_id).or_insert_with(|| {
-                        Target {
-                            def_id: local_def_id,
-                            unsafety: check_item_unsafety(caller_def_item),
-                            reachable_from: Default::default(),
-                            distance,
-                        }
-                    });
-
-                    for (&test, &unsafety) in &call_paths {
-                        let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
-                        target.unsafety = Ord::max(caller_tainting, target.unsafety);
-
-                        let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
-                            EntryPointAssociation {
-                                distance,
-                                unsafe_call_path: None,
-                            }
-                        });
-
-                        entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
-                    }
-                }
-            }
+            if alread_recorded_callers.contains(&caller) { continue; }
 
             // Collect calls of callees, for the next depth iteration.
             // NOTE: This is not performed on the last depth iteration; calls made by
@@ -551,24 +524,131 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                         }
                     };
 
-                    call_graph.nested_calls[distance].insert((caller, callee));
+                    call_graph.nested_calls[distance].insert((caller, callee, call.safety));
 
-                    let new_call_paths = newly_found_callees.entry(callee).or_insert_with(Default::default);
-
-                    for (&test, &unsafety) in &call_paths {
-                        let unsafe_source = match call.safety {
-                            hir::Safety::Safe => unsafety,
-                            hir::Safety::Unsafe => Some(UnsafeSource::Unsafe),
-                        };
-
-                        let new_unsafety = new_call_paths.entry(test).or_insert(unsafety);
-                        *new_unsafety = new_unsafety.or(unsafe_source);
-                    }
+                    newly_found_callees.insert(callee);
                 }
             }
+
+            callers_to_be_recorded.insert(caller);
         }
 
-        previously_found_callees.extend(newly_found_callees.drain());
+        alread_recorded_callers.extend(callers_to_be_recorded);
+
+        previously_found_callees.extend(newly_found_callees);
+    }
+
+    // During the call tree walk along the call traces, for each target, we record
+    // each entry point's most severe unsafety source of any of its call paths.
+    // Safe items called from an unsafe context (dependencies) will be
+    // marked `Unsafety::Tainted` with their corresponding unsafety source.
+    //
+    // ```ignore
+    // [Safe] fn x { [None -> Safe]
+    //     [Safe] fn y { [Some(EnclosingUnsafe) -> Unsafe(EnclosingUnsafe)]
+    //         unsafe { [Some(Unsafe) -> Unsafe(Unsafe)]
+    //             [Safe] fn z { [Some(Unsafe) -> Tainted(Unsafe)] }
+    //         }
+    //         [Safe] fn w { [Some(EnclosingUnsafe) -> Tainted(EnclosingUnsafe)] }
+    //         [Unsafe(Unsafe)] unsafe fn u { [Some(Unsafe) -> Unsafe(Unsafe)]
+    //             [Safe] fn v { [Some(Unsafe) -> Tainted(Unsafe)] }
+    //             [Safe] fn w { [Some(Unsafe) -> Tainted(Unsafe)] }
+    //         }
+    //     }
+    // }
+    // ```
+
+    fn record_targets<'ast, 'tcx, 'tst>(
+        tcx: TyCtxt<'tcx>,
+        def_res: &ast_lowering::DefResolutions,
+        krate: &'ast ast::Crate,
+        test_def_ids: &FxHashSet<hir::LocalDefId>,
+        call_graph: &CallGraph<'tcx>,
+        test: &'tst Test,
+        unsafety: Option<UnsafeSource>,
+        call_trace: &mut CallTrace<'tcx>,
+        targets: &mut FxHashMap<hir::LocalDefId, Target<'tst>>,
+    ) {
+        let &[.., caller] = &call_trace.nested_calls[..] else { return; };
+
+        let distance = call_trace.nested_calls.len() - 1;
+
+        // `const` functions, like other `const` scopes, cannot be mutated.
+        if tcx.is_const_fn(caller.def_id) { return; }
+
+        // Record or update target.
+        'target: {
+            let Some(local_def_id) = caller.def_id.as_local() else { break 'target; };
+            if !tcx.hir_node_by_def_id(local_def_id).body_id().is_some() { return; }
+
+            let target = match targets.entry(local_def_id) {
+                hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                hash_map::Entry::Vacant(entry) => {
+                    let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
+                    // TODO: Ignore #[coverage(off)] functions
+                    let skip = false
+                        // Non-functions, including closures
+                        || !matches!(tcx.def_kind(caller.def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
+                        // Inner function of #[test] function
+                        || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                        // #[cfg(test)] function, or function in #[cfg(test)] module
+                        || tests::is_marked_or_in_cfg_test(tcx, hir_id)
+                        // #[mutest::skip] function
+                        || tool_attr::skip(tcx.hir_attrs(hir_id));
+
+                    if skip { break 'target; }
+
+                    let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) else { break 'target; };
+
+                    entry.insert(Target {
+                        def_id: local_def_id,
+                        unsafety: check_item_unsafety(caller_def_item),
+                        reachable_from: Default::default(),
+                        distance,
+                    })
+                }
+            };
+
+            target.distance = Ord::min(distance, target.distance);
+
+            let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
+            target.unsafety = Ord::max(caller_tainting, target.unsafety);
+
+            let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
+                EntryPointAssociation {
+                    distance,
+                    unsafe_call_path: None,
+                }
+            });
+
+            entry_point.distance = Ord::min(distance, entry_point.distance);
+            entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
+        }
+
+        let Some(callees) = call_graph.callees_of_nested_caller(caller) else { return; };
+        for (callee, safety) in callees {
+            // We have encontered a recursion point along this call trace; end the search along this trace.
+            if call_trace.nested_calls.iter().any(|callee_in_trace| callee == *callee_in_trace) { continue; }
+
+            call_trace.nested_calls.push(callee);
+
+            let unsafety = match safety {
+                hir::Safety::Safe => unsafety,
+                hir::Safety::Unsafe => Some(UnsafeSource::Unsafe),
+            };
+
+            record_targets(tcx, def_res, krate, test_def_ids, call_graph, test, unsafety, call_trace, targets);
+
+            call_trace.nested_calls.pop();
+        }
+    }
+
+    let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
+    for &(entry_point, callee, _safety) in &call_graph.root_calls {
+        let Some(test) = tests.iter().find(|test| test.def_id == entry_point) else { unreachable!() };
+        let unsafety = None;
+        let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![callee] };
+        record_targets(tcx, def_res, krate, &test_def_ids, &call_graph, test, unsafety, &mut call_trace, &mut targets);
     }
 
     (call_graph, targets.into_values().collect())

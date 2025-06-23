@@ -1,0 +1,51 @@
+
+@@@ call graph @@@
+
+entry points:
+
+test test
+  -> recursive_function at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:7:1: 7:32 (#0)
+
+nested calls at distance 1:
+
+recursive_function at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:7:1: 7:32 (#0)
+  -> make_indirect_recursive_call at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:20:1: 20:42 (#0)
+
+nested calls at distance 2:
+
+make_indirect_recursive_call at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:20:1: 20:42 (#0)
+  -> recursive_function at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:7:1: 7:32 (#0)
+  -> non_recursive_function_a at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:12:1: 12:30 (#0)
+  -> non_recursive_function_b at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:13:1: 13:30 (#0)
+  -> non_recursive_function_c at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:15:1: 15:30 (#0)
+
+nested calls at distance 3:
+
+non_recursive_function_c at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:15:1: 15:30 (#0)
+  -> non_recursive_function_a at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:12:1: 12:30 (#0)
+  -> non_recursive_function_b at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:13:1: 13:30 (#0)
+
+nested calls at distance 4:
+
+
+nested calls at distance 5:
+
+
+@@@ targets @@@
+
+tests -(0)-> recursive_function at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:7:1: 7:32 (#0)
+  (0) test
+
+tests -(2)-> non_recursive_function_a at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:12:1: 12:30 (#0)
+  (2) test
+
+tests -(2)-> non_recursive_function_b at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:13:1: 13:30 (#0)
+  (2) test
+
+tests -(2)-> non_recursive_function_c at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:15:1: 15:30 (#0)
+  (2) test
+
+tests -(1)-> make_indirect_recursive_call at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:20:1: 20:42 (#0)
+  (1) test
+
+targets: 5 total; 5 safe; 0 unsafe (0 tainted)

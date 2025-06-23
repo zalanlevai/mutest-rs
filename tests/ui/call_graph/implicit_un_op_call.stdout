@@ -1,25 +1,55 @@
-tests -(1)-> deref_impl at tests/ui/call_graph/implicit_un_op_call.rs:9:1: 9:16 (#0)
+
+@@@ call graph @@@
+
+entry points:
+
+test test_implicit_deref_call
+  -> <ImplsDeref as std::ops::Deref>::deref at tests/ui/call_graph/implicit_un_op_call.rs:14:5: 14:37 (#0)
+test test_implicit_deref_mut_call
+  -> <ImplsDeref as std::ops::DerefMut>::deref_mut at tests/ui/call_graph/implicit_un_op_call.rs:27:5: 27:49 (#0)
+test test_implicit_neg_call
+  -> <ImplsNeg as std::ops::Neg>::neg at tests/ui/call_graph/implicit_un_op_call.rs:44:5: 44:33 (#0)
+test test_implicit_not_call
+  -> <ImplsNot as std::ops::Not>::not at tests/ui/call_graph/implicit_un_op_call.rs:61:5: 61:33 (#0)
+
+nested calls at distance 1:
+
+<ImplsDeref as std::ops::Deref>::deref at tests/ui/call_graph/implicit_un_op_call.rs:14:5: 14:37 (#0)
+  -> deref_impl at tests/ui/call_graph/implicit_un_op_call.rs:10:1: 10:16 (#0)
+<ImplsDeref as std::ops::DerefMut>::deref_mut at tests/ui/call_graph/implicit_un_op_call.rs:27:5: 27:49 (#0)
+  -> deref_mut_impl at tests/ui/call_graph/implicit_un_op_call.rs:25:1: 25:20 (#0)
+<ImplsNeg as std::ops::Neg>::neg at tests/ui/call_graph/implicit_un_op_call.rs:44:5: 44:33 (#0)
+  -> neg_impl at tests/ui/call_graph/implicit_un_op_call.rs:40:1: 40:14 (#0)
+<ImplsNot as std::ops::Not>::not at tests/ui/call_graph/implicit_un_op_call.rs:61:5: 61:33 (#0)
+  -> not_impl at tests/ui/call_graph/implicit_un_op_call.rs:57:1: 57:14 (#0)
+
+nested calls at distance 2:
+
+
+@@@ targets @@@
+
+tests -(1)-> deref_impl at tests/ui/call_graph/implicit_un_op_call.rs:10:1: 10:16 (#0)
   (1) test_implicit_deref_call
 
-tests -(0)-> <ImplsDeref as std::ops::Deref>::deref at tests/ui/call_graph/implicit_un_op_call.rs:13:5: 13:37 (#0)
+tests -(0)-> <ImplsDeref as std::ops::Deref>::deref at tests/ui/call_graph/implicit_un_op_call.rs:14:5: 14:37 (#0)
   (0) test_implicit_deref_call
 
-tests -(1)-> deref_mut_impl at tests/ui/call_graph/implicit_un_op_call.rs:24:1: 24:20 (#0)
+tests -(1)-> deref_mut_impl at tests/ui/call_graph/implicit_un_op_call.rs:25:1: 25:20 (#0)
   (1) test_implicit_deref_mut_call
 
-tests -(0)-> <ImplsDeref as std::ops::DerefMut>::deref_mut at tests/ui/call_graph/implicit_un_op_call.rs:26:5: 26:49 (#0)
+tests -(0)-> <ImplsDeref as std::ops::DerefMut>::deref_mut at tests/ui/call_graph/implicit_un_op_call.rs:27:5: 27:49 (#0)
   (0) test_implicit_deref_mut_call
 
-tests -(1)-> neg_impl at tests/ui/call_graph/implicit_un_op_call.rs:39:1: 39:14 (#0)
+tests -(1)-> neg_impl at tests/ui/call_graph/implicit_un_op_call.rs:40:1: 40:14 (#0)
   (1) test_implicit_neg_call
 
-tests -(0)-> <ImplsNeg as std::ops::Neg>::neg at tests/ui/call_graph/implicit_un_op_call.rs:43:5: 43:33 (#0)
+tests -(0)-> <ImplsNeg as std::ops::Neg>::neg at tests/ui/call_graph/implicit_un_op_call.rs:44:5: 44:33 (#0)
   (0) test_implicit_neg_call
 
-tests -(1)-> not_impl at tests/ui/call_graph/implicit_un_op_call.rs:56:1: 56:14 (#0)
+tests -(1)-> not_impl at tests/ui/call_graph/implicit_un_op_call.rs:57:1: 57:14 (#0)
   (1) test_implicit_not_call
 
-tests -(0)-> <ImplsNot as std::ops::Not>::not at tests/ui/call_graph/implicit_un_op_call.rs:60:5: 60:33 (#0)
+tests -(0)-> <ImplsNot as std::ops::Not>::not at tests/ui/call_graph/implicit_un_op_call.rs:61:5: 61:33 (#0)
   (0) test_implicit_not_call
 
 targets: 8 total; 8 safe; 0 unsafe (0 tainted)

@@ -1,37 +1,73 @@
-tests -(2)-> partial_cmp_impl at tests/ui/call_graph/implicit_ord_call.rs:10:1: 10:22 (#0)
+
+@@@ call graph @@@
+
+entry points:
+
+test test_implicit_ge_call
+  -> <ImplsOrd as std::cmp::PartialOrd>::ge at tests/ui/call_graph/implicit_ord_call.rs:38:5: 38:39 (#0)
+test test_implicit_gt_call
+  -> <ImplsOrd as std::cmp::PartialOrd>::gt at tests/ui/call_graph/implicit_ord_call.rs:33:5: 33:39 (#0)
+test test_implicit_le_call
+  -> <ImplsOrd as std::cmp::PartialOrd>::le at tests/ui/call_graph/implicit_ord_call.rs:28:5: 28:39 (#0)
+test test_implicit_lt_call
+  -> <ImplsOrd as std::cmp::PartialOrd>::lt at tests/ui/call_graph/implicit_ord_call.rs:23:5: 23:39 (#0)
+
+nested calls at distance 1:
+
+<ImplsOrd as std::cmp::PartialOrd>::lt at tests/ui/call_graph/implicit_ord_call.rs:23:5: 23:39 (#0)
+  -> lt_impl at tests/ui/call_graph/implicit_ord_call.rs:12:1: 12:13 (#0)
+  -> <ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:18:5: 18:61 (#0)
+<ImplsOrd as std::cmp::PartialOrd>::le at tests/ui/call_graph/implicit_ord_call.rs:28:5: 28:39 (#0)
+  -> le_impl at tests/ui/call_graph/implicit_ord_call.rs:13:1: 13:13 (#0)
+  -> <ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:18:5: 18:61 (#0)
+<ImplsOrd as std::cmp::PartialOrd>::gt at tests/ui/call_graph/implicit_ord_call.rs:33:5: 33:39 (#0)
+  -> gt_impl at tests/ui/call_graph/implicit_ord_call.rs:14:1: 14:13 (#0)
+  -> <ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:18:5: 18:61 (#0)
+<ImplsOrd as std::cmp::PartialOrd>::ge at tests/ui/call_graph/implicit_ord_call.rs:38:5: 38:39 (#0)
+  -> ge_impl at tests/ui/call_graph/implicit_ord_call.rs:15:1: 15:13 (#0)
+  -> <ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:18:5: 18:61 (#0)
+
+nested calls at distance 2:
+
+<ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:18:5: 18:61 (#0)
+  -> partial_cmp_impl at tests/ui/call_graph/implicit_ord_call.rs:11:1: 11:22 (#0)
+
+@@@ targets @@@
+
+tests -(2)-> partial_cmp_impl at tests/ui/call_graph/implicit_ord_call.rs:11:1: 11:22 (#0)
   (2) test_implicit_ge_call
   (2) test_implicit_gt_call
   (2) test_implicit_le_call
   (2) test_implicit_lt_call
 
-tests -(1)-> lt_impl at tests/ui/call_graph/implicit_ord_call.rs:11:1: 11:13 (#0)
+tests -(1)-> lt_impl at tests/ui/call_graph/implicit_ord_call.rs:12:1: 12:13 (#0)
   (1) test_implicit_lt_call
 
-tests -(1)-> le_impl at tests/ui/call_graph/implicit_ord_call.rs:12:1: 12:13 (#0)
+tests -(1)-> le_impl at tests/ui/call_graph/implicit_ord_call.rs:13:1: 13:13 (#0)
   (1) test_implicit_le_call
 
-tests -(1)-> gt_impl at tests/ui/call_graph/implicit_ord_call.rs:13:1: 13:13 (#0)
+tests -(1)-> gt_impl at tests/ui/call_graph/implicit_ord_call.rs:14:1: 14:13 (#0)
   (1) test_implicit_gt_call
 
-tests -(1)-> ge_impl at tests/ui/call_graph/implicit_ord_call.rs:14:1: 14:13 (#0)
+tests -(1)-> ge_impl at tests/ui/call_graph/implicit_ord_call.rs:15:1: 15:13 (#0)
   (1) test_implicit_ge_call
 
-tests -(1)-> <ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:17:5: 17:61 (#0)
+tests -(1)-> <ImplsOrd as std::cmp::PartialOrd>::partial_cmp at tests/ui/call_graph/implicit_ord_call.rs:18:5: 18:61 (#0)
   (1) test_implicit_ge_call
   (1) test_implicit_gt_call
   (1) test_implicit_le_call
   (1) test_implicit_lt_call
 
-tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::lt at tests/ui/call_graph/implicit_ord_call.rs:22:5: 22:39 (#0)
+tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::lt at tests/ui/call_graph/implicit_ord_call.rs:23:5: 23:39 (#0)
   (0) test_implicit_lt_call
 
-tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::le at tests/ui/call_graph/implicit_ord_call.rs:27:5: 27:39 (#0)
+tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::le at tests/ui/call_graph/implicit_ord_call.rs:28:5: 28:39 (#0)
   (0) test_implicit_le_call
 
-tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::gt at tests/ui/call_graph/implicit_ord_call.rs:32:5: 32:39 (#0)
+tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::gt at tests/ui/call_graph/implicit_ord_call.rs:33:5: 33:39 (#0)
   (0) test_implicit_gt_call
 
-tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::ge at tests/ui/call_graph/implicit_ord_call.rs:37:5: 37:39 (#0)
+tests -(0)-> <ImplsOrd as std::cmp::PartialOrd>::ge at tests/ui/call_graph/implicit_ord_call.rs:38:5: 38:39 (#0)
   (0) test_implicit_ge_call
 
 targets: 10 total; 10 safe; 0 unsafe (0 tainted)

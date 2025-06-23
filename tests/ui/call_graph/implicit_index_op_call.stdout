@@ -1,13 +1,35 @@
-tests -(1)-> index_impl at tests/ui/call_graph/implicit_index_op_call.rs:9:1: 9:16 (#0)
+
+@@@ call graph @@@
+
+entry points:
+
+test test_implicit_index_call
+  -> <ImplsIndex as std::ops::Index<usize>>::index at tests/ui/call_graph/implicit_index_op_call.rs:14:5: 14:52 (#0)
+test test_implicit_index_mut_call
+  -> <ImplsIndex as std::ops::IndexMut<usize>>::index_mut at tests/ui/call_graph/implicit_index_op_call.rs:22:5: 22:64 (#0)
+
+nested calls at distance 1:
+
+<ImplsIndex as std::ops::Index<usize>>::index at tests/ui/call_graph/implicit_index_op_call.rs:14:5: 14:52 (#0)
+  -> index_impl at tests/ui/call_graph/implicit_index_op_call.rs:10:1: 10:16 (#0)
+<ImplsIndex as std::ops::IndexMut<usize>>::index_mut at tests/ui/call_graph/implicit_index_op_call.rs:22:5: 22:64 (#0)
+  -> index_mut_impl at tests/ui/call_graph/implicit_index_op_call.rs:20:1: 20:20 (#0)
+
+nested calls at distance 2:
+
+
+@@@ targets @@@
+
+tests -(1)-> index_impl at tests/ui/call_graph/implicit_index_op_call.rs:10:1: 10:16 (#0)
   (1) test_implicit_index_call
 
-tests -(0)-> <ImplsIndex as std::ops::Index<usize>>::index at tests/ui/call_graph/implicit_index_op_call.rs:13:5: 13:52 (#0)
+tests -(0)-> <ImplsIndex as std::ops::Index<usize>>::index at tests/ui/call_graph/implicit_index_op_call.rs:14:5: 14:52 (#0)
   (0) test_implicit_index_call
 
-tests -(1)-> index_mut_impl at tests/ui/call_graph/implicit_index_op_call.rs:19:1: 19:20 (#0)
+tests -(1)-> index_mut_impl at tests/ui/call_graph/implicit_index_op_call.rs:20:1: 20:20 (#0)
   (1) test_implicit_index_mut_call
 
-tests -(0)-> <ImplsIndex as std::ops::IndexMut<usize>>::index_mut at tests/ui/call_graph/implicit_index_op_call.rs:21:5: 21:64 (#0)
+tests -(0)-> <ImplsIndex as std::ops::IndexMut<usize>>::index_mut at tests/ui/call_graph/implicit_index_op_call.rs:22:5: 22:64 (#0)
   (0) test_implicit_index_mut_call
 
 targets: 4 total; 4 safe; 0 unsafe (0 tainted)

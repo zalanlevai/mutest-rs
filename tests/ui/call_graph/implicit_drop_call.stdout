@@ -1,17 +1,44 @@
-tests -(1)-> drop_impl at tests/ui/call_graph/implicit_drop_call.rs:7:1: 7:15 (#0)
+
+@@@ call graph @@@
+
+entry points:
+
+test test_implicit_drop_call
+  -> <ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:10:5: 10:23 (#0)
+test test_implicit_generic_drop_call
+  -> implicit_drop::<ImplsDrop> at tests/ui/call_graph/implicit_drop_call.rs:30:1: 30:26 (#0)
+test test_implicit_indirect_drop_call
+  -> drop_impls_drop at tests/ui/call_graph/implicit_drop_call.rs:20:1: 20:21 (#0)
+test test_no_implicit_drop_call
+
+nested calls at distance 1:
+
+<ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:10:5: 10:23 (#0)
+  -> drop_impl at tests/ui/call_graph/implicit_drop_call.rs:8:1: 8:15 (#0)
+drop_impls_drop at tests/ui/call_graph/implicit_drop_call.rs:20:1: 20:21 (#0)
+  -> <ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:10:5: 10:23 (#0)
+implicit_drop::<ImplsDrop> at tests/ui/call_graph/implicit_drop_call.rs:30:1: 30:26 (#0)
+  -> <ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:10:5: 10:23 (#0)
+
+nested calls at distance 2:
+
+
+@@@ targets @@@
+
+tests -(1)-> drop_impl at tests/ui/call_graph/implicit_drop_call.rs:8:1: 8:15 (#0)
   (1) test_implicit_drop_call
   (2) test_implicit_generic_drop_call
   (2) test_implicit_indirect_drop_call
 
-tests -(0)-> <ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:9:5: 9:23 (#0)
+tests -(0)-> <ImplsDrop as std::ops::Drop>::drop at tests/ui/call_graph/implicit_drop_call.rs:10:5: 10:23 (#0)
   (0) test_implicit_drop_call
   (1) test_implicit_generic_drop_call
   (1) test_implicit_indirect_drop_call
 
-tests -(0)-> drop_impls_drop at tests/ui/call_graph/implicit_drop_call.rs:19:1: 19:21 (#0)
+tests -(0)-> drop_impls_drop at tests/ui/call_graph/implicit_drop_call.rs:20:1: 20:21 (#0)
   (0) test_implicit_indirect_drop_call
 
-tests -(0)-> implicit_drop at tests/ui/call_graph/implicit_drop_call.rs:29:1: 29:26 (#0)
+tests -(0)-> implicit_drop at tests/ui/call_graph/implicit_drop_call.rs:30:1: 30:26 (#0)
   (0) test_implicit_generic_drop_call
 
 targets: 4 total; 4 safe; 0 unsafe (0 tainted)
