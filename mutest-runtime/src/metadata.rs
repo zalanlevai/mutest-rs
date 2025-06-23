@@ -28,7 +28,9 @@ impl<const N: usize> SubstMap for [Option<SubstMeta>; N] {
 
     #[inline]
     unsafe fn subst_at_unchecked(&self, subst_loc_idx: SubstLocIdx) -> Option<SubstMeta> {
-        *self.get_unchecked(subst_loc_idx)
+        // SAFETY: The caller must ensure that the substitution location index is
+        //         valid for the active substitution map.
+        unsafe { *self.get_unchecked(subst_loc_idx) }
     }
 }
 

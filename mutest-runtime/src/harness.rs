@@ -70,7 +70,9 @@ impl<S: SubstMap> ActiveMutantHandle<S> {
         //         and the value is allowed to change before the substitution metadata is read.
         let subst_map_ref = (unsafe { &*self.0.as_ptr() }).as_ref();
 
-        subst_map_ref.and_then(|subst| subst.subst_at_unchecked(subst_loc_idx))
+        // SAFETY: The caller must ensure that the substitution location index is
+        //         valid for the active substitution map.
+        subst_map_ref.and_then(|subst| unsafe { subst.subst_at_unchecked(subst_loc_idx) })
     }
 
     /// # Safety
@@ -976,7 +978,8 @@ fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAnd
 
 pub fn mutest_main_static<S: SubstMap>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
-        env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION);
+        // SAFETY: No other thread is running.
+        unsafe { env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION) };
 
         let test = tests.iter().find(|test| test.desc.name.as_slice() == test_name)
             .expect(&format!("cannot find test with name `{test_name}`"));

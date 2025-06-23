@@ -4,7 +4,7 @@
 name = "cargo-mutest"
 description = "Mutation testing tools for Rust."
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 mutest-driver-cli = { path = "../mutest-driver-cli" }

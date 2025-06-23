@@ -3,7 +3,7 @@
 [package]
 name = "mutest-tests"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 cargo_metadata = "0.18"

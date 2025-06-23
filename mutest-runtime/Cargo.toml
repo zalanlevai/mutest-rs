@@ -3,7 +3,7 @@
 [package]
 name = "mutest-runtime"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 # FIXME: rustc requires libraries in the search path to be in rlib format. Once proper dependency
 #        resolution in generated code is implemented, cargo might be able to inject the crate for us.
