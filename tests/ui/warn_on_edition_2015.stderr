@@ -1,0 +1,6 @@
+warning: edition 2015 code is not explicitly supported
+  |
+  = note: you may encounter issues with generated code from macro expansion sanitization and mutation operators
+
+warning: 1 warning emitted
+

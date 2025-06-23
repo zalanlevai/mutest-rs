@@ -4,6 +4,7 @@ use rustc_hash::FxHashSet;
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_span::ErrorGuaranteed;
+use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
 use mutest_emit::codegen::symbols::span_diagnostic_ord;
 
@@ -66,6 +67,12 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
         // NOTE: We must register our custom tool attribute namespace before the
         //       relevant attribute validation is performed during macro expansion.
         mutest_emit::codegen::tool_attr::register(sess, &mut crate_ast);
+
+        if sess.edition() == Edition::Edition2015 {
+            let mut diagnostic = sess.dcx().struct_warn("edition 2015 code is not explicitly supported");
+            diagnostic.note("you may encounter issues with generated code from macro expansion sanitization and mutation operators");
+            diagnostic.emit();
+        }
 
         let result = create_and_enter_global_ctxt(compiler, crate_ast.clone(), |tcx| -> Flow<AnalysisPassResult, ErrorGuaranteed> {
             let (mut generated_crate_ast, def_res) = {
