@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::collections::hash_map;
 use std::iter;
 
@@ -558,12 +559,31 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     // }
     // ```
 
+    struct CalleeLookupCache<'tcx, 'a> {
+        call_graph: &'a CallGraph<'tcx>,
+        cache: UnsafeCell<FxHashMap<Callee<'tcx>, Box<[(Callee<'tcx>, hir::Safety)]>>>,
+    }
+
+    impl<'tcx, 'a> CalleeLookupCache<'tcx, 'a> {
+        fn new(call_graph: &'a CallGraph<'tcx>) -> Self {
+            Self { call_graph, cache: UnsafeCell::new(Default::default()) }
+        }
+
+        fn callees_of_nested_caller(&self, caller: Callee<'tcx>) -> &[(Callee<'tcx>, hir::Safety)] {
+            // SAFETY: The lookup cache is an append-only map; existing entries are never modified.
+            let cache = unsafe { &mut *self.cache.get() };
+
+            let callees = cache.entry(caller).or_insert_with(|| self.call_graph.callees_of_nested_caller(caller).into_iter().flatten().collect::<Box<[_]>>());
+            callees
+        }
+    }
+
     fn record_targets<'ast, 'tcx, 'tst>(
         tcx: TyCtxt<'tcx>,
         def_res: &ast_lowering::DefResolutions,
         krate: &'ast ast::Crate,
         test_def_ids: &FxHashSet<hir::LocalDefId>,
-        call_graph: &CallGraph<'tcx>,
+        callee_lookup_cache: &CalleeLookupCache<'tcx, '_>,
         test: &'tst Test,
         unsafety: Option<UnsafeSource>,
         call_trace: &mut CallTrace<'tcx>,
@@ -625,8 +645,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
         }
 
-        let Some(callees) = call_graph.callees_of_nested_caller(caller) else { return; };
-        for (callee, safety) in callees {
+        for &(callee, safety) in callee_lookup_cache.callees_of_nested_caller(caller) {
             // We have encontered a recursion point along this call trace; end the search along this trace.
             if call_trace.nested_calls.iter().any(|callee_in_trace| callee == *callee_in_trace) { continue; }
 
@@ -637,18 +656,19 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 hir::Safety::Unsafe => Some(UnsafeSource::Unsafe),
             };
 
-            record_targets(tcx, def_res, krate, test_def_ids, call_graph, test, unsafety, call_trace, targets);
+            record_targets(tcx, def_res, krate, test_def_ids, callee_lookup_cache, test, unsafety, call_trace, targets);
 
             call_trace.nested_calls.pop();
         }
     }
 
+    let callee_lookup_cache = CalleeLookupCache::new(&call_graph);
     let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
     for &(entry_point, callee, _safety) in &call_graph.root_calls {
         let Some(test) = tests.iter().find(|test| test.def_id == entry_point) else { unreachable!() };
         let unsafety = None;
         let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![callee] };
-        record_targets(tcx, def_res, krate, &test_def_ids, &call_graph, test, unsafety, &mut call_trace, &mut targets);
+        record_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, test, unsafety, &mut call_trace, &mut targets);
     }
 
     (call_graph, targets.into_values().collect())
