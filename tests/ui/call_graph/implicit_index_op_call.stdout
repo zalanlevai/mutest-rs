@@ -15,9 +15,6 @@ nested calls at distance 1:
 <ImplsIndex as std::ops::IndexMut<usize>>::index_mut at tests/ui/call_graph/implicit_index_op_call.rs:22:5: 22:64 (#0)
   -> index_mut_impl at tests/ui/call_graph/implicit_index_op_call.rs:20:1: 20:20 (#0)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(1)-> index_impl at tests/ui/call_graph/implicit_index_op_call.rs:10:1: 10:16 (#0)

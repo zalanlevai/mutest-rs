@@ -11,9 +11,6 @@ nested calls at distance 1:
 reserve_inner at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_blocks_as_unsafe.rs:10:1: 10:19 (#0)
   -> offset_from at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_blocks_as_unsafe.rs:8:1: 8:17 (#0)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(1)-> [tainted] offset_from at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_blocks_as_unsafe.rs:8:1: 8:17 (#0)

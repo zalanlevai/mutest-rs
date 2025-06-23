@@ -348,7 +348,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
         dynamic_calls_count: 0,
         foreign_calls_count: 0,
         root_calls: Default::default(),
-        nested_calls: iter::repeat_with(|| Default::default()).take(depth - 1).collect(),
+        nested_calls: vec![],
     };
 
     let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
@@ -435,17 +435,30 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     for distance in 0..depth {
         let mut newly_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
-        // HACK: We must sort the callees into a stable order for the corresponding diagnostics to be printed in a stable order.
-        let mut callees = previously_found_callees.drain().collect::<Vec<_>>();
-        callees.sort_unstable_by(|caller_a, caller_b| {
+        // HACK: We must sort the callers into a stable order for the corresponding diagnostics to be printed in a stable order.
+        let mut callers = previously_found_callees.drain().collect::<Vec<_>>();
+        callers.sort_unstable_by(|caller_a, caller_b| {
             let caller_a_span = tcx.def_span(caller_a.def_id);
             let caller_b_span = tcx.def_span(caller_b.def_id);
             span_diagnostic_ord(caller_a_span, caller_b_span)
         });
 
+        // No remaining callers were found, exit early.
+        if callers.is_empty() {
+            // Remove the empty entry that was prepared for the nested calls at the last depth.
+            if let Some(nested_calls_at_last_depth) = call_graph.nested_calls.pop() {
+                assert!(nested_calls_at_last_depth.is_empty(), "no remaining newly found callees to process, but call graph still recorded nested calls");
+            };
+            break;
+        }
+
+        if distance < (depth - 1) {
+            call_graph.nested_calls.push(Default::default());
+        }
+
         let mut callers_to_be_recorded: FxHashSet<Callee<'tcx>> = Default::default();
 
-        for caller in callees {
+        for caller in callers {
             // `const` functions, like other `const` scopes, cannot be mutated.
             if tcx.is_const_fn(caller.def_id) { continue; }
 

@@ -23,9 +23,6 @@ nested calls at distance 1:
 <ImplsNot as std::ops::Not>::not at tests/ui/call_graph/implicit_un_op_call.rs:61:5: 61:33 (#0)
   -> not_impl at tests/ui/call_graph/implicit_un_op_call.rs:57:1: 57:14 (#0)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(1)-> deref_impl at tests/ui/call_graph/implicit_un_op_call.rs:10:1: 10:16 (#0)

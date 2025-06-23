@@ -12,9 +12,6 @@ make_extern_calls at tests/ui/call_graph/warn_on_foreign_calls.rs:12:1: 12:23 (#
   -> foreign at tests/ui/call_graph/warn_on_foreign_calls.rs:7:5: 7:18 (#0)
   -> not_foreign at tests/ui/call_graph/warn_on_foreign_calls.rs:10:1: 10:35 (#0)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(1)-> [unsafe] not_foreign at tests/ui/call_graph/warn_on_foreign_calls.rs:10:1: 10:35 (#0)

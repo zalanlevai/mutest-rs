@@ -25,12 +25,6 @@ non_recursive_function_c at tests/ui/call_graph/avoid_counting_indirect_cycles.r
   -> non_recursive_function_a at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:12:1: 12:30 (#0)
   -> non_recursive_function_b at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:13:1: 13:30 (#0)
 
-nested calls at distance 4:
-
-
-nested calls at distance 5:
-
-
 @@@ targets @@@
 
 tests -(0)-> recursive_function at tests/ui/call_graph/avoid_counting_indirect_cycles.rs:7:1: 7:32 (#0)

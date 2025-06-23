@@ -15,9 +15,6 @@ nested calls at distance 1:
 <ImplsEq as std::cmp::PartialEq>::ne at tests/ui/call_graph/implicit_eq_call.rs:17:5: 17:40 (#0)
   -> ne_impl at tests/ui/call_graph/implicit_eq_call.rs:9:1: 9:13 (#0)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(1)-> eq_impl at tests/ui/call_graph/implicit_eq_call.rs:8:1: 8:13 (#0)

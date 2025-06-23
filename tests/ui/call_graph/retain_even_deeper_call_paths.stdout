@@ -18,15 +18,6 @@ nested calls at distance 2:
 non_recursive_function_b at tests/ui/call_graph/retain_even_deeper_call_paths.rs:9:1: 9:30 (#0)
   -> non_recursive_function_a at tests/ui/call_graph/retain_even_deeper_call_paths.rs:7:1: 7:30 (#0)
 
-nested calls at distance 3:
-
-
-nested calls at distance 4:
-
-
-nested calls at distance 5:
-
-
 @@@ targets @@@
 
 tests -(0)-> non_recursive_function_a at tests/ui/call_graph/retain_even_deeper_call_paths.rs:7:1: 7:30 (#0)

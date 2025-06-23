@@ -77,9 +77,6 @@ nested calls at distance 1:
 <ImplsShr as std::ops::ShrAssign>::shr_assign at tests/ui/call_graph/implicit_bin_op_call.rs:23:9: 23:48 (#22)
   -> shr_assign_impl at tests/ui/call_graph/implicit_bin_op_call.rs:21:5: 21:28 (#22)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(1)-> add_impl at tests/ui/call_graph/implicit_bin_op_call.rs:11:5: 11:21 (#4)

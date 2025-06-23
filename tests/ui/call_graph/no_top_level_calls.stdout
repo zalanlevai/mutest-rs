@@ -1,0 +1,11 @@
+
+@@@ call graph @@@
+
+entry points:
+
+test empty_test
+test test_with_basic_stmts
+
+@@@ targets @@@
+
+targets: 0 total; 0 safe; 0 unsafe (0 tainted)

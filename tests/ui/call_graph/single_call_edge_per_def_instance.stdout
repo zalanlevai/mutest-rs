@@ -13,9 +13,6 @@ nested calls at distance 1:
 f at tests/ui/call_graph/single_call_edge_per_def_instance.rs:6:1: 6:7 (#0)
   -> f_generic::<u8> at tests/ui/call_graph/single_call_edge_per_def_instance.rs:11:1: 11:22 (#0)
 
-nested calls at distance 2:
-
-
 @@@ targets @@@
 
 tests -(0)-> f at tests/ui/call_graph/single_call_edge_per_def_instance.rs:6:1: 6:7 (#0)

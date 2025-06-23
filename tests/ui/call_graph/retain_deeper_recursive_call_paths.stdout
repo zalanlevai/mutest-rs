@@ -15,18 +15,6 @@ recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:
 indirect_recursive at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:17:1: 17:24 (#0)
   -> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)
 
-nested calls at distance 2:
-
-
-nested calls at distance 3:
-
-
-nested calls at distance 4:
-
-
-nested calls at distance 5:
-
-
 @@@ targets @@@
 
 tests -(0)-> recursive_function at tests/ui/call_graph/retain_deeper_recursive_call_paths.rs:7:1: 7:32 (#0)

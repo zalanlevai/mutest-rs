@@ -14,18 +14,6 @@ recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7
 other_recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:12:1: 12:38 (#0)
   -> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
 
-nested calls at distance 2:
-
-
-nested calls at distance 3:
-
-
-nested calls at distance 4:
-
-
-nested calls at distance 5:
-
-
 @@@ targets @@@
 
 tests -(0)-> recursive_function at tests/ui/call_graph/avoid_counting_direct_cycles.rs:7:1: 7:32 (#0)
