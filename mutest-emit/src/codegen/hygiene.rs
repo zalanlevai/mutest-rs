@@ -728,30 +728,29 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
                                 let _ = self.sanitize_path(path, qres.expect_non_local(), None);
 
-                                // NOTE: There is no need to append bound param args if the path is already qualified, since
-                                //       the necessary trait arguments should already be present in the corresponding path segment.
-                                if qself.is_none() {
-                                    let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(node_hir_id)[..]) {
-                                        // Inferred generic args for the trait.
-                                        Some(node_args @ [_, ..]) => {
-                                            let trait_generics = self.tcx.generics_of(parent_def_id);
-                                            let trait_args = &node_args[(trait_generics.has_self as usize)..trait_generics.count()];
+                                // Extract param args for the trait reference in the qualified path.
+                                // These param args come from type-inference, if available, or
+                                // from bound params in local trait bounds in the current scope.
+                                let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(node_hir_id)[..]) {
+                                    // Inferred generic args for the trait.
+                                    Some(node_args @ [_, ..]) => {
+                                        let trait_generics = self.tcx.generics_of(parent_def_id);
+                                        let trait_args = &node_args[(trait_generics.has_self as usize)..trait_generics.count()];
 
-                                            self.sanitize_generic_args(trait_args, node_hir_id.owner.to_def_id(), qself_ty_hir.span)
-                                        }
-
-                                        // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
-                                        _ if let Some(parent_path_segment_res) = parent_path_segment_res => {
-                                            self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, qself_ty_hir.span)
-                                        }
-
-                                        _ => None,
-                                    };
-
-                                    if let Some(generic_args_ast) = generic_args_ast {
-                                        let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
-                                        parent_path_segment.args = Some(generic_args_ast);
+                                        self.sanitize_generic_args(trait_args, node_hir_id.owner.to_def_id(), qself_ty_hir.span)
                                     }
+
+                                    // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
+                                    _ if let Some(parent_path_segment_res) = parent_path_segment_res => {
+                                        self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, qself_ty_hir.span)
+                                    }
+
+                                    _ => None,
+                                };
+                                // Append param args to the trait reference in the qualified path.
+                                if let Some(generic_args_ast) = generic_args_ast {
+                                    let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
+                                    parent_path_segment.args = Some(generic_args_ast);
                                 }
 
                                 *qself = Some(P(ast::QSelf {
