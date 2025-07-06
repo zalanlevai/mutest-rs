@@ -310,13 +310,14 @@ pub struct CallGraph<'tcx> {
     pub virtual_calls_count: usize,
     pub dynamic_calls_count: usize,
     pub foreign_calls_count: usize,
-    pub root_calls: FxHashSet<(hir::LocalDefId, InstanceCall<'tcx>)>,
-    pub nested_calls: Vec<FxHashSet<(Callee<'tcx>, InstanceCall<'tcx>)>>,
+    pub root_calls: FxHashMap<hir::LocalDefId, Vec<InstanceCall<'tcx>>>,
+    pub nested_calls: Vec<FxHashMap<Callee<'tcx>, Vec<InstanceCall<'tcx>>>>,
 }
 
 impl<'tcx> CallGraph<'tcx> {
     pub fn total_calls_count(&self) -> usize {
-        let mut total_calls_count = self.root_calls.len() + self.nested_calls.iter().map(|calls| calls.len()).sum::<usize>();
+        let mut total_calls_count = self.root_calls.iter().map(|(_, calls)| calls.len()).sum::<usize>()
+            + self.nested_calls.iter().map(|calls| calls.iter().map(|(_, calls)| calls.len()).sum::<usize>()).sum::<usize>();
         // NOTE: Dynamic calls are currently not represented in the call graph, therefore
         //       we have to add their count manually to the total.
         total_calls_count += self.dynamic_calls_count;
@@ -328,14 +329,8 @@ impl<'tcx> CallGraph<'tcx> {
         (!self.root_calls.is_empty() as usize) + self.nested_calls.len()
     }
 
-    pub fn callees_of_nested_caller(&self, caller: Callee<'tcx>) -> Option<impl Iterator<Item = InstanceCall<'tcx>> + '_> {
-        let calls_of_caller = self.nested_calls.iter().find_map(|calls| {
-            let mut calls_of_caller = calls.iter().filter(move |(this_caller, _)| *this_caller == caller).peekable();
-            if let Some(_) = calls_of_caller.peek() { return Some(calls_of_caller); }
-            None
-        })?;
-
-        Some(calls_of_caller.map(|(_, call)| *call))
+    pub fn callees_of_nested_caller(&self, caller: Callee<'tcx>) -> Option<&[InstanceCall<'tcx>]> {
+        self.nested_calls.iter().find_map(|calls| calls.get(&caller).map(|v| &**v))
     }
 }
 
@@ -432,7 +427,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 }
             };
 
-            call_graph.root_calls.insert((test.def_id, InstanceCall { callee, safety: call.safety, span: call.span }));
+            let test_calls = call_graph.root_calls.entry(test.def_id).or_default();
+            test_calls.push(InstanceCall { callee, safety: call.safety, span: call.span });
 
             previously_found_callees.insert(callee);
         }
@@ -554,7 +550,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     }
                 };
 
-                call_graph.nested_calls[distance].insert((caller, InstanceCall { callee, safety: call.safety, span: call.span }));
+                let caller_calls = call_graph.nested_calls[distance].entry(caller).or_default();
+                caller_calls.push(InstanceCall { callee, safety: call.safety, span: call.span });
 
                 newly_found_callees.insert(callee);
             }
@@ -589,7 +586,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
     struct CalleeLookupCache<'tcx, 'a> {
         call_graph: &'a CallGraph<'tcx>,
-        cache: UnsafeCell<FxHashMap<Callee<'tcx>, Box<[InstanceCall<'tcx>]>>>,
+        cache: UnsafeCell<FxHashMap<Callee<'tcx>, Option<&'a [InstanceCall<'tcx>]>>>,
     }
 
     impl<'tcx, 'a> CalleeLookupCache<'tcx, 'a> {
@@ -601,8 +598,8 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             // SAFETY: The lookup cache is an append-only map; existing entries are never modified.
             let cache = unsafe { &mut *self.cache.get() };
 
-            let callees = cache.entry(caller).or_insert_with(|| self.call_graph.callees_of_nested_caller(caller).into_iter().flatten().collect::<Box<[_]>>());
-            callees
+            let callees = cache.entry(caller).or_insert_with(|| self.call_graph.callees_of_nested_caller(caller));
+            callees.unwrap_or_default()
         }
     }
 
@@ -692,11 +689,13 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
     let callee_lookup_cache = CalleeLookupCache::new(&call_graph);
     let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
-    for &(entry_point, call) in &call_graph.root_calls {
-        let Some(test) = tests.iter().find(|test| test.def_id == entry_point) else { unreachable!() };
-        let unsafety = None;
-        let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![call.callee] };
-        record_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, test, unsafety, &mut call_trace, &mut targets);
+    for (&entry_point, calls) in &call_graph.root_calls {
+        for call in calls {
+            let Some(test) = tests.iter().find(|test| test.def_id == entry_point) else { unreachable!() };
+            let unsafety = None;
+            let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![call.callee] };
+            record_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, test, unsafety, &mut call_trace, &mut targets);
+        }
     }
 
     (call_graph, targets.into_values().collect())
