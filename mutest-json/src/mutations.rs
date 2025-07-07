@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::{Serialize, Deserialize};
 use smallvec::SmallVec;
 
-use crate::{DefId, Definition, Span};
+use crate::{DefId, Span};
 use crate::data_structures::{Idx, IdxVec};
 
 /// Statistics about the crate's mutations.
@@ -133,13 +133,54 @@ pub enum MutationSafety {
     Unsafe,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+pub struct TargetId(pub u32);
+
+impl Idx for TargetId {
+    fn as_index(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_index(idx: usize) -> Self {
+        Self(idx as u32)
+    }
+}
+
+/// Data associated with a mutation target's association with an entry point.
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+pub struct EntryPointAssociation {
+    /// Distance in calls between the entry point and the target.
+    pub distance: usize,
+    /// Whether there exists a call path between the entry point and the target
+    /// that is tainted according to mutation safety.
+    pub tainted_call_path: bool,
+}
+
+/// Reachable, mutable definition in which mutation operators were invoked in
+/// to generate program mutations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Target {
+    pub target_id: TargetId,
+
+    /// The corresponding definition in the call graph.
+    pub def_id: DefId,
+    /// Distance in calls between the target and the closest entry point.
+    pub distance: usize,
+    /// Mutation safety property of the target, denoting
+    /// whether mutations contained in this definition may cause undefined behavior.
+    pub safety: MutationSafety,
+    /// Entry points from which this target is reachable from, and
+    /// data associated with each entry point.
+    pub reachable_from: HashMap<String, EntryPointAssociation>,
+}
+
 /// A program mutation.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct Mutation {
     pub mutation_id: MutationId,
 
     /// Target function the mutation is contained within.
-    pub target_def_id: DefId,
+    pub target_id: TargetId,
     /// Span of the origin node that is targeted by the mutation.
     pub origin_span: Span,
 
@@ -199,8 +240,8 @@ pub struct MutationsInfo {
     /// Generated batches of compatible mutations.
     pub mutation_batches: Option<IdxVec<MutationBatchId, MutationBatch>>,
 
-    /// Definitions referred to by the generated mutations.
-    pub definitions: IdxVec<DefId, Definition>,
+    /// Reachable, mutable definitions referred to by the generated mutations.
+    pub targets: IdxVec<TargetId, Target>,
 
     /// Time it took to generate the mutations.
     pub duration: Duration,

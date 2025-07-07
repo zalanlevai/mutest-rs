@@ -135,9 +135,10 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             let t_target_analysis_start = Instant::now();
 
             let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth_limit);
+            let mut json_definitions = Default::default();
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
-                write_call_graph(write_opts, tcx, all_mutable_fns_count, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
+                json_definitions = write_call_graph(write_opts, tcx, all_mutable_fns_count, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
                 pass_result.write_duration += t_write_start.elapsed();
             }
             if opts.verbosity >= 1 {
@@ -230,7 +231,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             }
 
             let t_mutation_generation_start = Instant::now();
-            let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
+            let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, targets.clone(), &opts.operators, opts.unsafe_targeting, &sess_opts);
             if opts.verbosity >= 1 {
                 let mutated_fns = mutations.iter().map(|m| m.target.def_id).collect::<FxHashSet<_>>();
                 let mutated_fns_count = mutated_fns.len();
@@ -361,7 +362,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
-                write_mutations(write_opts, tcx, all_mutable_fns_count, &mutants, opts.unsafe_targeting, &mutation_conflict_graph, &opts.mutation_batching_algorithm, t_mutation_generation_start.elapsed());
+                write_mutations(write_opts, tcx, all_mutable_fns_count, &json_definitions, targets.clone(), &mutants, opts.unsafe_targeting, &mutation_conflict_graph, &opts.mutation_batching_algorithm, t_mutation_generation_start.elapsed());
                 pass_result.write_duration += t_write_start.elapsed();
             }
 

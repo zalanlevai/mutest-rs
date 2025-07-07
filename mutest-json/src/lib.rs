@@ -40,6 +40,13 @@ impl Span {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Safety {
+    Safe,
+    Unsafe,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct DefId(pub u32);
 
 impl Idx for DefId {
