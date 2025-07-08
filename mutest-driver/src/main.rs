@@ -237,6 +237,7 @@ pub fn main() {
         };
 
         let mut call_graph_depth_limit = mutest_arg_matches.get_one::<usize>("call-graph-depth-limit").copied();
+        let mut call_graph_trace_length_limit = mutest_arg_matches.get_one::<usize>("call-graph-trace-length-limit").copied();
         let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
 
         if let Some(call_graph_depth_limit_value) = call_graph_depth_limit && call_graph_depth_limit_value < mutation_depth {
@@ -246,6 +247,15 @@ pub fn main() {
             diagnostic.emit();
 
             call_graph_depth_limit = None;
+        }
+
+        if let Some(call_graph_trace_length_limit_value) = call_graph_trace_length_limit && call_graph_trace_length_limit_value < mutation_depth {
+            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph trace length limit argument ignored as mutation depth exceeds it");
+            diagnostic.note(format!("mutation depth is set to {mutation_depth}"));
+            diagnostic.note(format!("call graph trace length limit was explicitly set to {call_graph_trace_length_limit_value}, but will be ignored"));
+            diagnostic.emit();
+
+            call_graph_trace_length_limit = None;
         }
 
         let mutation_batching_algorithm = {
@@ -333,6 +343,7 @@ pub fn main() {
                 unsafe_targeting,
                 operators: &mutation_operators,
                 call_graph_depth_limit,
+                call_graph_trace_length_limit,
                 mutation_depth,
                 mutation_batching_algorithm,
                 mutation_batching_randomness,

@@ -96,6 +96,7 @@ pub struct Options<'op, 'm> {
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub call_graph_depth_limit: Option<usize>,
+    pub call_graph_trace_length_limit: Option<usize>,
     pub mutation_depth: usize,
     pub mutation_batching_algorithm: MutationBatchingAlgorithm,
     pub mutation_batching_randomness: MutationBatchingRandomness,

@@ -347,6 +347,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
     krate: &'ast ast::Crate,
     tests: &'tst [Test],
     depth_limit: Option<usize>,
+    trace_length_limit: Option<usize>,
 ) -> (CallGraph<'tcx>, Vec<Target<'tst>>) {
     let mut call_graph = CallGraph {
         virtual_calls_count: 0,
@@ -613,6 +614,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
         unsafety: Option<UnsafeSource>,
         call_trace: &mut CallTrace<'tcx>,
         targets: &mut FxHashMap<hir::LocalDefId, Target<'tst>>,
+        trace_length_limit: Option<usize>,
     ) {
         let &[.., caller] = &call_trace.nested_calls[..] else { return; };
 
@@ -670,6 +672,11 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             entry_point.unsafe_call_path = Ord::max(unsafety, entry_point.unsafe_call_path);
         }
 
+        if let Some(trace_length_limit) = trace_length_limit && call_trace.nested_calls.len() >= trace_length_limit {
+            tcx.dcx().warn("exceeded explicit call graph trace length limit");
+            return;
+        }
+
         for &call in callee_lookup_cache.callees_of_nested_caller(caller) {
             // We have encontered a recursion point along this call trace; end the search along this trace.
             if call_trace.nested_calls.iter().any(|callee_in_trace| call.callee == *callee_in_trace) { continue; }
@@ -681,7 +688,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 hir::Safety::Unsafe => Some(UnsafeSource::Unsafe),
             };
 
-            record_targets(tcx, def_res, krate, test_def_ids, callee_lookup_cache, test, unsafety, call_trace, targets);
+            record_targets(tcx, def_res, krate, test_def_ids, callee_lookup_cache, test, unsafety, call_trace, targets, trace_length_limit);
 
             call_trace.nested_calls.pop();
         }
@@ -694,7 +701,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
             let Some(test) = tests.iter().find(|test| test.def_id == entry_point) else { unreachable!() };
             let unsafety = None;
             let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![call.callee] };
-            record_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, test, unsafety, &mut call_trace, &mut targets);
+            record_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, test, unsafety, &mut call_trace, &mut targets, trace_length_limit);
         }
     }
 

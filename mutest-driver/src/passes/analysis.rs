@@ -122,19 +122,19 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let all_mutable_fns_count = mutest_emit::analysis::call_graph::all_mutable_fns(tcx, &tests).count();
 
-            let call_graph_depth_limit = match opts.call_graph_depth_limit {
-                Some(call_graph_depth_limit) => {
-                    if call_graph_depth_limit < opts.mutation_depth {
-                        tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit argument");
-                    }
-                    Some(call_graph_depth_limit)
-                }
-                None => None,
-            };
+            let call_graph_depth_limit = opts.call_graph_depth_limit;
+            if let Some(v) = call_graph_depth_limit && v < opts.mutation_depth {
+                tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit argument");
+            }
+
+            let call_graph_trace_length_limit = opts.call_graph_trace_length_limit;
+            if let Some(v) = call_graph_trace_length_limit && v < opts.mutation_depth {
+                tcx.dcx().fatal("mutation depth exceeds explicit call graph trace length limit argument");
+            }
 
             let t_target_analysis_start = Instant::now();
 
-            let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth_limit);
+            let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, &tests, call_graph_depth_limit, call_graph_trace_length_limit);
             let mut json_definitions = Default::default();
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();

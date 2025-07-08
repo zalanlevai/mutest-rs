@@ -133,6 +133,7 @@ pub fn command() -> clap::Command {
         .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "risky", "unsafe"]).multiple(false))
         .arg(clap::arg!(--"mutation-operators" [MUTATION_OPERATORS] "Mutation operators to apply to the code, separated by commas.").value_delimiter(',').value_parser(mutation_operators::possible_values()).default_value("all").display_order(115))
         .arg(clap::arg!(--"call-graph-depth-limit" [CALL_GRAPH_DEPTH_LIMIT] "Limit depth of call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
+        .arg(clap::arg!(--"call-graph-trace-length-limit" [CALL_GRAPH_TRACE_LENGTH_LIMIT] "Limit maximum length of analyzed call traces during call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to batch mutations into mutants.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE).display_order(199))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single mutant.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(199))
