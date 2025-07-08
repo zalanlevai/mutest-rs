@@ -597,6 +597,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
     fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, span: Span) -> Option<P<ast::GenericArgs>> {
         let (parent_def_id, generic_predicates, param_index) = match param_res {
+            // `Self::$assoc` in `impl<'a, 'b> Trait<'a, 'b> for T`
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
                 let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
 
@@ -608,25 +609,40 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 //       that appears in the trait def.
                 let dummy_self_param_ty = ty::ParamTy::new(0, kw::SelfUpper).to_ty(self.tcx);
                 let args = self.tcx.mk_args_trait(dummy_self_param_ty, trait_ref.skip_binder().args.iter().skip(1));
-                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, args);
+                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, args).predicates;
 
                 (impl_def_id, generic_predicates, 0)
             }
-            | hir::Res::SelfTyAlias { alias_to: trait_def_id, is_trait_impl: false, .. }
-            | hir::Res::SelfTyParam { trait_: trait_def_id } => {
-                let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx);
+            // `Self::$assoc` in `impl T`
+            hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: false, .. } => {
+                let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx).predicates;
+                (impl_def_id, generic_predicates, 0)
+            }
+            // `Self::$assoc` in `trait T<'a, 'b>: Base<'a, 'b>`
+            hir::Res::SelfTyParam { trait_: trait_def_id } => {
+                let mut generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx).predicates;
+
+                // NOTE: Because `predicates_of` does not reveal implicit supertrait predicates, we have to append those ourselves.
+                let supertrait_clauses = ty::elaborate::supertraits(self.tcx, ty::Binder::dummy(ty::TraitRef::identity(self.tcx, trait_def_id)));
+                generic_predicates.extend(supertrait_clauses.map(|trait_ref| {
+                    self.tcx.mk_predicate(trait_ref.map_bound(|trait_ref| {
+                        ty::PredicateKind::Clause(ty::ClauseKind::Trait(ty::TraitPredicate { trait_ref, polarity: ty::PredicatePolarity::Positive }))
+                    })).expect_clause()
+                }));
+
                 (trait_def_id, generic_predicates, 0)
             }
+            // `T::$assoc`
             hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
                 let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
                 let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
-                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id)).instantiate_identity(self.tcx);
+                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id)).instantiate_identity(self.tcx).predicates;
                 (self.tcx.parent(param_def_id), generic_predicates, param_index)
             }
             _ => { return None; }
         };
 
-        let predicates = generic_predicates.predicates.iter()
+        let predicates = generic_predicates.iter()
             .filter_map(|&clause| clause.as_trait_clause().map(|p| p.skip_binder()))
             .filter(|trait_predicate| {
                 let ty::TyKind::Param(param_ty) = trait_predicate.self_ty().kind() else { return false; };
