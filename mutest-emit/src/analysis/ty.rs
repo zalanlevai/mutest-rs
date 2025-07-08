@@ -636,9 +636,16 @@ pub mod print {
 
             let bounds = principal.into_iter()
                 .chain(auto_traits.into_iter())
-                .collect();
+                .collect::<Vec<_>>();
 
-            Ok(ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn)))
+            let bounds_count = bounds.len();
+            let mut ty_ast = ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn));
+            // NOTE: `dyn` trait objects of multiple bounds are syntactically ambiguous in some positions
+            //       unless surrounded by parens.
+            if bounds_count > 1 {
+                ty_ast = ast::mk::ty(sp, ast::TyKind::Paren(ty_ast));
+            }
+            Ok(ty_ast)
         }
 
         fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error> {
