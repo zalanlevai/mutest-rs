@@ -638,14 +638,7 @@ pub mod print {
                 .chain(auto_traits.into_iter())
                 .collect::<Vec<_>>();
 
-            let bounds_count = bounds.len();
-            let mut ty_ast = ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn));
-            // NOTE: `dyn` trait objects of multiple bounds are syntactically ambiguous in some positions
-            //       unless surrounded by parens.
-            if bounds_count > 1 {
-                ty_ast = ast::mk::ty(sp, ast::TyKind::Paren(ty_ast));
-            }
-            Ok(ty_ast)
+            Ok(ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn)))
         }
 
         fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error> {
@@ -707,13 +700,18 @@ pub mod print {
                 }
                 ty::TyKind::Dynamic(predicates, region, dyn_kind) => {
                     let mut dyn_existential = self.print_dyn_existential(predicates)?;
+                    let ast::TyKind::TraitObject(bounds, syntax) = &mut dyn_existential.kind else { unreachable!() };
                     if let Some(lifetime) = self.print_region(region)? {
-                        let ast::TyKind::TraitObject(bounds, syntax) = &mut dyn_existential.kind else { unreachable!() };
                         bounds.push(ast::mk::lifetime_bound(lifetime));
                         *syntax = match dyn_kind {
                             ty::DynKind::Dyn => ast::TraitObjectSyntax::Dyn,
                             ty::DynKind::DynStar => ast::TraitObjectSyntax::DynStar,
                         };
+                    }
+                    // NOTE: `dyn` trait objects of multiple bounds are syntactically ambiguous in some positions
+                    //       unless surrounded by parens.
+                    if bounds.len() > 1 {
+                        dyn_existential = ast::mk::ty(sp, ast::TyKind::Paren(dyn_existential));
                     }
                     Ok(dyn_existential)
                 }
