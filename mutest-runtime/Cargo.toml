@@ -19,7 +19,7 @@ mutest-json = { path = "../mutest-json" }
 # while also avoiding name collisions with the crate's own externs.
 # Because of this, mutest-rs only injects extern dependencies of mutest-runtime
 # that are renamed to `__mutest_runtime_public_dep_*`.
-__mutest_runtime_public_dep_phf = { package = "phf", version = "0.11.2", features = ["macros"], default-features = false }
+__mutest_runtime_public_dep_phf = { package = "phf", version = "0.12", features = ["macros"], default-features = false }
 
 atomic-wait = "1.1"
 
@@ -27,6 +27,6 @@ serde = "1.0"
 serde_json = "1.0"
 
 [build-dependencies]
-cargo_metadata = "0.20"
+cargo_metadata = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

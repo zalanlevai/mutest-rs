@@ -312,7 +312,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         let metadata_cmd = cargo_metadata::MetadataCommand::new();
         let metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
-        let windows_package = metadata.packages.iter().find(|package| package.name == WINDOWS_IMPORT_LIB).expect("could not retrieve windows.lib import package from manifest");
+        let windows_package = metadata.packages.iter().find(|package| package.name.as_ref() == WINDOWS_IMPORT_LIB).expect("could not retrieve windows.lib import package from manifest");
         windows_package.manifest_path.parent().expect("invalid windows.lib import package manifest path").join("lib")
     };
 
