@@ -41,7 +41,9 @@ jobs:
           cargo install --force --path cargo-mutest
 
       - name: Run unit tests
-        run: cargo test -p mutest-runtime --no-fail-fast -- --color=always
+        run: |
+          cargo test -p cargo-mutest --no-fail-fast -- --color=always
+          cargo test -p mutest-runtime --no-fail-fast -- --color=always
 
       - name: Run UI tests
         run: cargo run -p mutest-tests
