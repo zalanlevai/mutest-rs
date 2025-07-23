@@ -435,7 +435,9 @@ pub mod print {
                     Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
 
-                ty::RegionKind::ReVar(_) | ty::RegionKind::ReErased => Ok(None),
+                ty::RegionKind::ReVar(_) => Ok(None),
+
+                ty::RegionKind::ReErased => Ok(Some(ast::mk::lifetime(sp, Ident::new(kw::UnderscoreLifetime, sp)))),
 
                 ty::RegionKind::ReError(_) => Err("encountered region error".to_owned()),
             }
