@@ -17,12 +17,35 @@ fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, l
         let arg_without_prefix = short_arg.as_deref().and_then(|v| arg.strip_prefix(v))
             .or_else(|| long_arg.as_deref().and_then(|v| arg.strip_prefix(v)));
 
-        match arg_without_prefix.map(|v| !has_value || (v.trim_start().starts_with("=") && !(i + 1 < args.len()))) {
-            Some(false) => { args.splice(i..=(i + 1), None); }
-            Some(true) => { args.remove(i); }
+        match arg_without_prefix.map(|v| has_value && !v.trim_start().starts_with("=") && i + 1 < args.len()) {
+            Some(true) => { args.splice(i..=(i + 1), None); }
+            Some(false) => { args.remove(i); }
             None => i += 1,
         }
     }
+}
+
+#[test]
+fn test_strip_arg() {
+    let mut args = vec!["--lib".to_owned()];
+    strip_arg(&mut args, false, None, Some("lib"));
+    assert_eq!(&[] as &[String], &args[..]);
+
+    let mut args = vec!["--lib".to_owned(), "--print".to_owned(), "tests".to_owned()];
+    strip_arg(&mut args, false, None, Some("lib"));
+    assert_eq!(&["--print".to_owned(), "tests".to_owned()] as &[String], &args[..]);
+
+    let mut args = vec!["--features".to_owned(), "all".to_owned()];
+    strip_arg(&mut args, true, None, Some("features"));
+    assert_eq!(&[] as &[String], &args[..]);
+
+    let mut args = vec!["--features=all".to_owned()];
+    strip_arg(&mut args, true, None, Some("features"));
+    assert_eq!(&[] as &[String], &args[..]);
+
+    let mut args = vec!["--features=all".to_owned(), "--Zwrite-json=target/mutest/json".to_owned(), "--print=code".to_owned()];
+    strip_arg(&mut args, true, None, Some("features"));
+    assert_eq!(&["--Zwrite-json=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
 }
 
 mod run_isolate {
