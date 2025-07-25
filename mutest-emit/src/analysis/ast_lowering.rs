@@ -173,6 +173,10 @@ pub mod visit {
             walk_generic_bound(self, generic_bound_ast, generic_bound_hir);
         }
 
+        fn visit_precise_capturing_non_lifetime_arg(&mut self, node_id: ast::NodeId, path_ast: &'ast ast::Path, arg_hir: &'hir hir::PreciseCapturingNonLifetimeArg) {
+            walk_precise_capturing_non_lifetime_arg(self, node_id, path_ast, arg_hir);
+        }
+
         fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
             walk_block(self, block_ast, block_hir);
         }
@@ -633,8 +637,25 @@ pub mod visit {
             (ast::GenericBound::Outlives(_lifetime_ast), hir::GenericBound::Outlives(_lifetime_hir)) => {
                 // TODO: Visit lifetime
             }
+            (ast::GenericBound::Use(precise_capturing_args_ast, _), hir::GenericBound::Use(precise_capturing_args_hir, _)) => {
+                for (precise_capturing_arg_ast, precise_capturing_arg_hir) in iter::zip(precise_capturing_args_ast, *precise_capturing_args_hir) {
+                    match (precise_capturing_arg_ast, precise_capturing_arg_hir) {
+                        (ast::PreciseCapturingArg::Lifetime(_lifetime_ast), hir::PreciseCapturingArg::Lifetime(_lifetime_hir)) => {
+                            // TODO: Visit lifetime
+                        }
+                        (ast::PreciseCapturingArg::Arg(path_ast, node_id), hir::PreciseCapturingArg::Param(arg_hir)) => {
+                            visitor.visit_precise_capturing_non_lifetime_arg(*node_id, path_ast, arg_hir);
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
             _ => unreachable!(),
         }
+    }
+
+    pub fn walk_precise_capturing_non_lifetime_arg<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(_visitor: &mut T, _node_id: ast::NodeId, _path_ast: &'ast ast::Path, _arg_hir: &'hir hir::PreciseCapturingNonLifetimeArg) {
+        // NOTE: Nothing to visit.
     }
 
     pub fn visit_block_expr<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, block_ast: &'ast ast::Block, expr_hir: &'hir hir::Expr<'hir>) {
@@ -1838,6 +1859,11 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
         visit::walk_generic_bound(self, generic_bound_ast, generic_bound_hir);
     }
 
+    fn visit_precise_capturing_non_lifetime_arg(&mut self, node_id: ast::NodeId, path_ast: &'ast ast::Path, arg_hir: &'hir hir::PreciseCapturingNonLifetimeArg) {
+        self.insert_ids(node_id, arg_hir.hir_id);
+        visit::walk_precise_capturing_non_lifetime_arg(self, node_id, path_ast, arg_hir);
+    }
+
     fn visit_block(&mut self, block_ast: &'ast ast::Block, block_hir: &'hir hir::Block<'hir>) {
         self.insert_ids(block_ast.id, block_hir.hir_id);
         visit::walk_block(self, block_ast, block_hir);
@@ -2079,12 +2105,16 @@ impl<'ast, 'tcx, 'op> ast::visit::Visitor<'ast> for BodyResValidator<'tcx, 'op> 
 
     fn visit_precise_capturing_arg(&mut self, arg: &'ast ast::PreciseCapturingArg) {
         match arg {
+            // NOTE: The single segment precise capturing arg path in the AST
+            //       is lowered directly into the precise capturing non-lifetime arg HIR node,
+            //       meaning that there is no corresponding HIR id for the path segment.
+            //       Because of this, we skip checking the path segment's id, and
+            //       only check the precise capturing non-lifetime arg itself.
             ast::PreciseCapturingArg::Arg(path, id) => {
                 self.check_node_id("precise capturing arg", *id, path.span);
             }
-            _ => {}
+            _ => ast::visit::walk_precise_capturing_arg(self, arg),
         }
-        ast::visit::walk_precise_capturing_arg(self, arg)
     }
 
     fn visit_variant(&mut self, variant: &'ast ast::Variant) {
