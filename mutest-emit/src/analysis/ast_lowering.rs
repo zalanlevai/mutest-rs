@@ -509,12 +509,15 @@ pub mod visit {
             hir::TyAliasItem::Item(generics_hir, _) => {
                 visitor.visit_generics(&ty_alias_ast.generics, generics_hir);
             }
-            hir::TyAliasItem::TraitItem(generic_bounds_hir, _) => {
+            hir::TyAliasItem::TraitItem(generics_hir, generic_bounds_hir, _) => {
+                visitor.visit_generics(&ty_alias_ast.generics, generics_hir);
                 for (generic_bound_ast, generic_bound_hir) in iter::zip(&ty_alias_ast.bounds, *generic_bounds_hir) {
                     visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
                 }
             }
-            hir::TyAliasItem::ImplItem(_) => {}
+            hir::TyAliasItem::ImplItem(generics_hir, _) => {
+                visitor.visit_generics(&ty_alias_ast.generics, generics_hir);
+            }
         }
     }
 
