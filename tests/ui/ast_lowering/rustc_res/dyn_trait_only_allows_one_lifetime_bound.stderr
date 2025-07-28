@@ -1,0 +1,9 @@
+error[E0226]: only a single explicit lifetime bound is permitted
+ --> tests/ui/ast_lowering/rustc_res/dyn_trait_only_allows_one_lifetime_bound.rs:8:88
+  |
+8 | fn dyn_existential<'a, 'b, 'c, 'x, 'y>() -> Option<Box<dyn DynTrait<'a, 'b, 'c> + 'x + 'y>> {
+  |                                                                                        ^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0226`.

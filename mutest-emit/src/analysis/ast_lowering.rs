@@ -173,6 +173,10 @@ pub mod visit {
             walk_generic_bound(self, generic_bound_ast, generic_bound_hir);
         }
 
+        fn visit_lifetime(&mut self, lifetime_ast: &'ast ast::Lifetime, lifetime_hir: &'hir hir::Lifetime) {
+            walk_lifetime(self, lifetime_ast, lifetime_hir);
+        }
+
         fn visit_precise_capturing_non_lifetime_arg(&mut self, node_id: ast::NodeId, path_ast: &'ast ast::Path, arg_hir: &'hir hir::PreciseCapturingNonLifetimeArg) {
             walk_precise_capturing_non_lifetime_arg(self, node_id, path_ast, arg_hir);
         }
@@ -598,7 +602,7 @@ pub mod visit {
                 (ast::WherePredicateKind::RegionPredicate(predicate_ast), hir::WherePredicateKind::RegionPredicate(predicate_hir)) => {
                     assert!(predicate_hir.in_where_clause);
 
-                    // TODO: Visit lifetime
+                    visitor.visit_lifetime(&predicate_ast.lifetime, predicate_hir.lifetime);
                     for (generic_bound_ast, generic_bound_hir) in iter::zip(&predicate_ast.bounds, predicate_hir.bounds) {
                         visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
                     }
@@ -637,14 +641,14 @@ pub mod visit {
             (ast::GenericBound::Trait(poly_trait_ref_ast), hir::GenericBound::Trait(poly_trait_ref_hir)) => {
                 visitor.visit_poly_trait_ref(poly_trait_ref_ast, poly_trait_ref_hir);
             }
-            (ast::GenericBound::Outlives(_lifetime_ast), hir::GenericBound::Outlives(_lifetime_hir)) => {
-                // TODO: Visit lifetime
+            (ast::GenericBound::Outlives(lifetime_ast), hir::GenericBound::Outlives(lifetime_hir)) => {
+                visitor.visit_lifetime(lifetime_ast, lifetime_hir);
             }
             (ast::GenericBound::Use(precise_capturing_args_ast, _), hir::GenericBound::Use(precise_capturing_args_hir, _)) => {
                 for (precise_capturing_arg_ast, precise_capturing_arg_hir) in iter::zip(precise_capturing_args_ast, *precise_capturing_args_hir) {
                     match (precise_capturing_arg_ast, precise_capturing_arg_hir) {
-                        (ast::PreciseCapturingArg::Lifetime(_lifetime_ast), hir::PreciseCapturingArg::Lifetime(_lifetime_hir)) => {
-                            // TODO: Visit lifetime
+                        (ast::PreciseCapturingArg::Lifetime(lifetime_ast), hir::PreciseCapturingArg::Lifetime(lifetime_hir)) => {
+                            visitor.visit_lifetime(lifetime_ast, lifetime_hir);
                         }
                         (ast::PreciseCapturingArg::Arg(path_ast, node_id), hir::PreciseCapturingArg::Param(arg_hir)) => {
                             visitor.visit_precise_capturing_non_lifetime_arg(*node_id, path_ast, arg_hir);
@@ -655,6 +659,10 @@ pub mod visit {
             }
             _ => unreachable!(),
         }
+    }
+
+    pub fn walk_lifetime<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(_visitor: &mut T, _lifetime_ast: &'ast ast::Lifetime, _lifetime_hir: &'hir hir::Lifetime) {
+        // NOTE: Nothing to visit.
     }
 
     pub fn walk_precise_capturing_non_lifetime_arg<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(_visitor: &mut T, _node_id: ast::NodeId, _path_ast: &'ast ast::Path, _arg_hir: &'hir hir::PreciseCapturingNonLifetimeArg) {
@@ -1280,7 +1288,10 @@ pub mod visit {
             (ast::TyKind::Ptr(mut_ty_ast), hir::TyKind::Ptr(mut_ty_hir)) => {
                 visit_matching_ty(visitor, &mut_ty_ast.ty, mut_ty_hir.ty);
             }
-            (ast::TyKind::Ref(_lifetime_ast, mut_ty_ast), hir::TyKind::Ref(_lifetime_hir, mut_ty_hir)) => {
+            (ast::TyKind::Ref(lifetime_ast, mut_ty_ast), hir::TyKind::Ref(lifetime_hir, mut_ty_hir)) => {
+                if let Some(lifetime_ast) = lifetime_ast {
+                    visitor.visit_lifetime(lifetime_ast, lifetime_hir);
+                }
                 visit_matching_ty(visitor, &mut_ty_ast.ty, mut_ty_hir.ty);
             }
             (ast::TyKind::Slice(ty_ast), hir::TyKind::Slice(ty_hir)) => {
@@ -1310,7 +1321,7 @@ pub mod visit {
                     visitor.visit_generic_param(generic_param_ast, generic_param_hir);
                 }
             }
-            (ast::TyKind::TraitObject(generic_bounds_ast, _), hir::TyKind::TraitObject(poly_trait_refs_hir, _)) => {
+            (ast::TyKind::TraitObject(generic_bounds_ast, _), hir::TyKind::TraitObject(poly_trait_refs_hir, tagged_ref_hir)) => {
                 let poly_trait_refs_ast = generic_bounds_ast.iter().filter_map(|generic_bound_ast| {
                     match generic_bound_ast {
                         ast::GenericBound::Trait(poly_trait_ref_ast) => Some(poly_trait_ref_ast),
@@ -1320,7 +1331,22 @@ pub mod visit {
                 for (poly_trait_ref_ast, poly_trait_ref_hir) in iter::zip(poly_trait_refs_ast, *poly_trait_refs_hir) {
                     visitor.visit_poly_trait_ref(poly_trait_ref_ast, poly_trait_ref_hir);
                 }
-                // TODO: Visit lifetime
+
+                // NOTE: Only one lifetime bound is allowed in this position,
+                //       see `tests/ui/ast_lowering/rustc_res/dyn_trait_only_allows_one_lifetime_bound`.
+                let lifetime_ast = generic_bounds_ast.iter().find_map(|generic_bound_ast| {
+                    match generic_bound_ast {
+                        ast::GenericBound::Outlives(lifetime_ast) => Some(lifetime_ast),
+                        _ => None,
+                    }
+                });
+                if let Some(lifetime_ast) = lifetime_ast {
+                    let lifetime_hir = tagged_ref_hir.pointer();
+                    visitor.visit_lifetime(lifetime_ast, lifetime_hir);
+                }
+
+                // NOTE: Precise capturing bounds (`use<>`) are not allowed in this position,
+                //       see `tests/ui/ast_lowering/rustc_res/dyn_trait_does_not_allow_use_precise_capturing_bound`.
             }
             (ast::TyKind::ImplTrait(node_id, generic_bounds_ast), hir::TyKind::OpaqueDef(opaque_ty_hir)) => {
                 visitor.visit_impl_trait(*node_id, generic_bounds_ast, opaque_ty_hir);
@@ -1496,8 +1522,8 @@ pub mod visit {
 
     pub fn walk_generic_arg<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, generic_arg_ast: &'ast ast::GenericArg, generic_arg_hir: &'hir hir::GenericArg<'hir>) {
         match (generic_arg_ast, generic_arg_hir) {
-            (ast::GenericArg::Lifetime(_lifetime_ast), hir::GenericArg::Lifetime(_lifetime_hir)) => {
-                // TODO
+            (ast::GenericArg::Lifetime(lifetime_ast), hir::GenericArg::Lifetime(lifetime_hir)) => {
+                visitor.visit_lifetime(lifetime_ast, lifetime_hir);
             }
             (ast::GenericArg::Type(ty_ast), hir::GenericArg::Type(ty_hir)) => {
                 visit_matching_ty(visitor, ty_ast, ty_hir.as_unambig_ty());
@@ -1713,6 +1739,10 @@ impl<'tcx> BodyResolutions<'tcx> {
         self.hir_node(param.id).map(|hir_node| hir_node.expect_param())
     }
 
+    pub fn hir_lifetime(&self, lifetime: &ast::Lifetime) -> Option<&'tcx hir::Lifetime> {
+        self.hir_node(lifetime.id).map(|hir_node| hir_node.expect_lifetime())
+    }
+
     pub fn hir_pat(&self, pat: &ast::Pat) -> Option<&'tcx hir::Pat<'tcx>> {
         self.hir_node(pat.id).map(|hir_node| hir_node.expect_pat())
     }
@@ -1860,6 +1890,11 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
 
     fn visit_generic_bound(&mut self, generic_bound_ast: &'ast ast::GenericBound, generic_bound_hir: &'hir hir::GenericBound<'hir>) {
         visit::walk_generic_bound(self, generic_bound_ast, generic_bound_hir);
+    }
+
+    fn visit_lifetime(&mut self, lifetime_ast: &'ast ast::Lifetime, lifetime_hir: &'hir hir::Lifetime) {
+        self.insert_ids(lifetime_ast.id, lifetime_hir.hir_id);
+        visit::walk_lifetime(self, lifetime_ast, lifetime_hir);
     }
 
     fn visit_precise_capturing_non_lifetime_arg(&mut self, node_id: ast::NodeId, path_ast: &'ast ast::Path, arg_hir: &'hir hir::PreciseCapturingNonLifetimeArg) {
@@ -2131,7 +2166,7 @@ impl<'ast, 'tcx, 'op> ast::visit::Visitor<'ast> for BodyResValidator<'tcx, 'op> 
     }
 
     fn visit_lifetime(&mut self, lifetime: &'ast ast::Lifetime, _ctxt: ast::visit::LifetimeCtxt) {
-        // TODO: Check node id.
+        self.check_node_id("lifetime", lifetime.id, lifetime.ident.span);
         ast::visit::walk_lifetime(self, lifetime)
     }
 

@@ -1,0 +1,8 @@
+error: `use<...>` precise capturing syntax not allowed in `dyn` trait object bounds
+ --> tests/ui/ast_lowering/rustc_res/dyn_trait_does_not_allow_use_precise_capturing_bound.rs:8:88
+  |
+8 | fn dyn_existential<'a, 'b, 'c, 'x, 'y>() -> Option<Box<dyn DynTrait<'a, 'b, 'c> + 'x + use<'y>>> {
+  |                                                                                        ^^^^^^^
+
+error: aborting due to 1 previous error
+
