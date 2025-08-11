@@ -21,6 +21,14 @@ pub struct DefResolutions {
 }
 
 impl DefResolutions {
+    pub(crate) fn empty() -> Self {
+        Self {
+            node_id_to_def_id: Default::default(),
+            partial_res_map: Default::default(),
+            import_res_map: Default::default(),
+        }
+    }
+
     pub fn from_resolver(resolver: &ResolverAstLowering) -> Self {
         Self {
             node_id_to_def_id: resolver.node_id_to_def_id.clone(),
@@ -1741,6 +1749,10 @@ impl<'tcx> BodyResolutions<'tcx> {
 
     pub fn hir_lifetime(&self, lifetime: &ast::Lifetime) -> Option<&'tcx hir::Lifetime> {
         self.hir_node(lifetime.id).map(|hir_node| hir_node.expect_lifetime())
+    }
+
+    pub fn hir_ty(&self, ty: &ast::Ty) -> Option<&'tcx hir::Ty<'tcx>> {
+        self.hir_node(ty.id).map(|hir_node| hir_node.expect_ty())
     }
 
     pub fn hir_pat(&self, pat: &ast::Pat) -> Option<&'tcx hir::Pat<'tcx>> {

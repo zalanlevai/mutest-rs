@@ -23,6 +23,14 @@ pub struct CrateResolutions<'tcx> {
 }
 
 impl<'tcx> CrateResolutions<'tcx> {
+    pub(crate) fn empty(tcx: TyCtxt<'tcx>) -> Self {
+        Self {
+            tcx,
+            extern_crate_name_to_cnum: Default::default(),
+            cnum_to_extern_crate_name: Default::default(),
+        }
+    }
+
     pub fn from_post_analysis_tcx(tcx: TyCtxt<'tcx>) -> Self {
         let crate_sources = tcx.crates(()).iter()
             .filter_map(|&cnum| {

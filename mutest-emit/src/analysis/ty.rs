@@ -400,11 +400,14 @@ pub mod print {
 
                     let mut ident = Ident::new(early_param_region.name, sp);
                     if self.sanitize_macro_expns {
-                        let def_ident_span = match region.opt_param_def_id(self.tcx, self.binding_item_def_id) {
-                            Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
-                            None => DUMMY_SP,
-                        };
-                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+                        let generic_param_def = self.tcx.generics_of(self.binding_item_def_id).region_param(early_param_region, self.tcx);
+
+                        if generic_param_def.is_anonymous_lifetime() {
+                            hygiene::generate_revealed_name_for_anonymous_region(&mut ident, generic_param_def);
+                        } else {
+                            let def_ident_span = self.tcx.def_ident_span(generic_param_def.def_id).unwrap_or(DUMMY_SP);
+                            hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+                        }
                     }
                     Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
@@ -837,5 +840,27 @@ pub mod print {
             binding_item_def_id,
         };
         printer.print_ty(ty).ok()
+    }
+
+    pub fn region_ast<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        sp: Span,
+        region: ty::Region<'tcx>,
+        binding_item_def_id: hir::DefId,
+        sanitize_macro_expns: bool,
+    ) -> Option<ast::Lifetime> {
+        // HACK: We construct an AstTyPrinter with some unused dummy values to call the `print_region` impl.
+        let mut printer = AstTyPrinter {
+            tcx,
+            crate_res: &res::CrateResolutions::empty(tcx),
+            def_res: &ast_lowering::DefResolutions::empty(),
+            scope: None,
+            sp,
+            def_path_handling: DefPathHandling::FullyQualified,
+            opaque_ty_handling: OpaqueTyHandling::Infer,
+            sanitize_macro_expns,
+            binding_item_def_id,
+        };
+        printer.print_region(region).ok().flatten()
     }
 }

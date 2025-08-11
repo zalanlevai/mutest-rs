@@ -108,6 +108,12 @@ fn sanitize_standalone_ident_if_from_expansion(ident: &mut Ident, ident_res_kind
     sanitize_ident_if_from_expansion(ident, ident_res_kind);
 }
 
+pub fn generate_revealed_name_for_anonymous_region(ident: &mut Ident, generic_param_def: &ty::GenericParamDef) {
+    ident.name = Symbol::intern(&format!("'__rustc_region_anon_{index}",
+        index = generic_param_def.index,
+    ));
+}
+
 fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attribute) -> bool {
     syntax_extensions.iter().any(|syntax_extension| {
         syntax_extension.helper_attrs.iter().any(|&helper_attr| attr.has_name(helper_attr))
@@ -547,15 +553,104 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         rustc_hir_analysis::lower_ty(self.tcx, ty_hir)
     }
 
-    fn sanitize_region(&self, region: ty::Region<'tcx>, binding_item_def_id: hir::DefId) -> Option<ast::Lifetime> {
-        let span = match region.opt_param_def_id(self.tcx, binding_item_def_id) {
-            Some(def_id) => self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP),
-            None => DUMMY_SP,
-        };
-        let mut ident = Ident::new(region.get_name()?, span);
-        sanitize_ident_if_from_expansion(&mut ident, IdentResKind::Def);
+    fn reveal_anonymous_lifetime_generic_param_defs(&self, generics_ast: &mut ast::Generics, def_id: hir::LocalDefId) {
+        let generics = self.tcx.generics_of(def_id);
 
-        Some(ast::mk::lifetime(DUMMY_SP, ident))
+        let explicitly_defined_generics = generics_ast.params.iter()
+            .map(|generic_param_ast| {
+                let Some(&def_id) = self.def_res.node_id_to_def_id.get(&generic_param_ast.id) else {
+                    span_bug!(generic_param_ast.ident.span, "generic param `{}` cannot be resolved", generic_param_ast.ident);
+                };
+                def_id.to_def_id()
+            })
+            .collect::<FxHashSet<_>>();
+
+        // NOTE: Lifetimes are always placed at the start, contiguously.
+        let mut last_lifetime_param_idx = generics_ast.params.iter()
+            .position(|generic_param_ast| !matches!(generic_param_ast.kind, ast::GenericParamKind::Lifetime))
+            .unwrap_or(generics_ast.params.len());
+
+        for generic_param_def in &generics.own_params {
+            if explicitly_defined_generics.contains(&generic_param_def.def_id) { continue; }
+            if !generic_param_def.is_anonymous_lifetime() { continue; }
+
+            let mut ident = Ident::dummy();
+            generate_revealed_name_for_anonymous_region(&mut ident, generic_param_def);
+
+            // NOTE: Lifetimes have to be placed before any other generic parameter definition.
+            generics_ast.params.insert(last_lifetime_param_idx, ast::GenericParam {
+                id: ast::DUMMY_NODE_ID,
+                attrs: ast::AttrVec::new(),
+                ident,
+                bounds: Default::default(),
+                kind: ast::GenericParamKind::Lifetime,
+                is_placeholder: false,
+                colon_span: None,
+            });
+            last_lifetime_param_idx += 1;
+        }
+    }
+
+    fn sanitize_optional_lifetime(&self, lifetime_ast: &mut Option<ast::Lifetime>, lifetime_hir: &'tcx hir::Lifetime) {
+        match lifetime_hir.kind {
+            hir::LifetimeKind::Param(param_def_id) => {
+                let generics = self.tcx.generics_of(self.tcx.parent(param_def_id.to_def_id()));
+
+                let Some(param_index) = generics.param_def_id_to_index(self.tcx, param_def_id.to_def_id()) else {
+                    // NOTE: This may fail for lifetime parameters defined in `for<>` binders
+                    //       within the generic bounds of the definition, which are stored inline,
+                    //       and not as part of the generics of the definition,
+                    //       despite what the DefId for them looks like.
+                    //       We ignore these lifetime parameters as they are only valid
+                    //       in the trait bounds directly following the binder.
+                    if let Some(lifetime_ast) = lifetime_ast {
+                        sanitize_standalone_ident_if_from_expansion(&mut lifetime_ast.ident, IdentResKind::Def);
+                    }
+                    return;
+                };
+                let generic_param_def = generics.param_at(param_index as usize, self.tcx);
+
+                if generic_param_def.is_anonymous_lifetime() {
+                    let mut revealed_lifetime_ast = lifetime_ast.unwrap_or_else(|| ast::mk::lifetime(DUMMY_SP, Ident::dummy()));
+                    generate_revealed_name_for_anonymous_region(&mut revealed_lifetime_ast.ident, generic_param_def);
+                    *lifetime_ast = Some(revealed_lifetime_ast);
+                } else {
+                    if let Some(lifetime_ast) = lifetime_ast {
+                        let def_ident_span = self.tcx.def_ident_span(generic_param_def.def_id).unwrap_or(DUMMY_SP);
+                        sanitize_ident_if_def_from_expansion(&mut lifetime_ast.ident, def_ident_span);
+                    }
+                }
+            }
+
+            | hir::LifetimeKind::Static
+            | hir::LifetimeKind::Infer
+            | hir::LifetimeKind::ImplicitObjectLifetimeDefault
+            => {
+                if let Some(lifetime_ast) = lifetime_ast {
+                    sanitize_standalone_ident_if_from_expansion(&mut lifetime_ast.ident, IdentResKind::Def)
+                }
+            }
+
+            hir::LifetimeKind::Error => span_bug!(lifetime_hir.ident.span, "encountered invalid lifetime"),
+        }
+    }
+
+    fn sanitize_lifetime(&self, lifetime_ast: &mut ast::Lifetime) {
+        let Some(lifetime_hir) = self.body_res.hir_lifetime(lifetime_ast) else {
+            self.bug_unmatched_ast_node(lifetime_ast.ident.span, || format!("unable to resolve lifetime `{}` for sanitization", lifetime_ast.ident));
+        };
+
+        let mut new_lifetime_ast = Some(*lifetime_ast);
+        self.sanitize_optional_lifetime(&mut new_lifetime_ast, lifetime_hir);
+        let Some(new_lifetime_ast) = new_lifetime_ast else {
+            span_bug!(lifetime_ast.ident.span, "lifetime sanitization removed lifetime");
+        };
+
+        *lifetime_ast = new_lifetime_ast;
+    }
+
+    fn sanitize_region(&self, region: ty::Region<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<ast::Lifetime> {
+        ty::print::region_ast(self.tcx, span, region, binding_item_def_id, true)
     }
 
     fn sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> P<ast::Ty> {
@@ -573,7 +668,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             .filter_map(|generic_arg| {
                 match generic_arg.kind() {
                     ty::GenericArgKind::Lifetime(region) => {
-                        let lifetime = self.sanitize_region(region, binding_item_def_id)?;
+                        let lifetime = self.sanitize_region(region, binding_item_def_id, span)?;
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
                     }
                     ty::GenericArgKind::Type(ty) => {
@@ -1263,6 +1358,7 @@ macro def_flat_map_item_fns(
         walk_item: $walk_item:expr,
         $(check_item $check_item:block)?
         $(check_def $check_def:block)?
+        $(post_walk $post_walk:block)?
     });+;
 ) {
     $(
@@ -1290,6 +1386,8 @@ macro def_flat_map_item_fns(
             }
 
             $walk_item;
+
+            $($post_walk)?
 
             // Restore previous context.
             $self.current_typeck_ctx = previous_typeck_ctx;
@@ -1340,11 +1438,42 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     return smallvec![item];
                 }
             }
+            post_walk {
+                let generics = match &mut item.kind {
+                    ast::ItemKind::Const(const_item) => Some(&mut const_item.generics),
+                    ast::ItemKind::Fn(fn_item) => Some(&mut fn_item.generics),
+                    ast::ItemKind::TyAlias(ty_alias) => Some(&mut ty_alias.generics),
+                    ast::ItemKind::Enum(_, generics, _) => Some(generics),
+                    ast::ItemKind::Struct(_, generics, _) => Some(generics),
+                    ast::ItemKind::Union(_, generics, _) => Some(generics),
+                    ast::ItemKind::Trait(trait_item) => Some(&mut trait_item.generics),
+                    ast::ItemKind::TraitAlias(_, generics, _) => Some(generics),
+                    ast::ItemKind::Impl(impl_item) => Some(&mut impl_item.generics),
+                    _ => None,
+                };
+
+                if let Some(generics) = generics {
+                    self.reveal_anonymous_lifetime_generic_param_defs(generics, def_id);
+                }
+            }
         };
 
         fn flat_map_assoc_item(&mut self, item: AssocItemKind, assoc_ctxt: ast::visit::AssocCtxt) |def_id| {
             walk_item: ast::mut_visit::walk_assoc_item(self, &mut item, assoc_ctxt),
             check_def {
+                let generics = match &mut item.kind {
+                    ast::AssocItemKind::Const(const_item) => Some(&mut const_item.generics),
+                    ast::AssocItemKind::Type(ty_alias) => Some(&mut ty_alias.generics),
+                    ast::AssocItemKind::Fn(fn_item) => Some(&mut fn_item.generics),
+                    ast::AssocItemKind::MacCall(_) => None,
+                    ast::AssocItemKind::Delegation(_) => None,
+                    ast::AssocItemKind::DelegationMac(_) => None,
+                };
+
+                if let Some(generics) = generics {
+                    self.reveal_anonymous_lifetime_generic_param_defs(generics, def_id);
+                }
+
                 let ident = match &mut item.kind {
                     ast::AssocItemKind::Const(const_item) => Some(&mut const_item.ident),
                     ast::AssocItemKind::Type(ty_alias) => Some(&mut ty_alias.ident),
@@ -1393,6 +1522,22 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
             ast::TyKind::Path(qself, path) => {
                 let _res = self.sanitize_qualified_path(qself, path, ty_id);
                 return;
+            }
+            ast::TyKind::Ref(lifetime, inner_ty) => {
+                // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_ty` call
+                //       because of the `&mut ty.kind` partial borrow above.
+                let Some(ty_hir) = self.body_res.hir_node(ty_id).map(|hir_node| hir_node.expect_ty()) else {
+                    self.bug_unmatched_ast_node(ty.span, || format!("unable to resolve type `{}` for sanitization", ast::print::ty_to_string(ty)));
+                };
+
+                let lifetime_hir = match ty_hir.kind {
+                    hir::TyKind::Ref(lifetime_hir, _) => lifetime_hir,
+                    _ => unreachable!(),
+                };
+
+                self.sanitize_optional_lifetime(lifetime, lifetime_hir);
+
+                return self.visit_ty(&mut inner_ty.ty);
             }
             _ => {}
         }
@@ -1600,6 +1745,10 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         let None = self.sanitize_path(path, res, None) else {
             span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
         };
+    }
+
+    fn visit_lifetime(&mut self, lifetime: &mut ast::Lifetime) {
+        self.sanitize_lifetime(lifetime);
     }
 
     fn visit_label(&mut self, label: &mut ast::Label) {
