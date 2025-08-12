@@ -1,0 +1,22 @@
+
+@@@ call graph @@@
+
+entry points:
+
+test test
+  -> inlined_fn at tests/ui/call_graph/track_inlined_callees.rs:10:1: 10:16 (#0)
+
+nested calls at distance 1:
+
+inlined_fn at tests/ui/call_graph/track_inlined_callees.rs:10:1: 10:16 (#0)
+  -> called_from_inlined_fn at tests/ui/call_graph/track_inlined_callees.rs:7:1: 7:28 (#0)
+
+@@@ targets @@@
+
+tests -(1)-> called_from_inlined_fn at tests/ui/call_graph/track_inlined_callees.rs:7:1: 7:28 (#0)
+  (1) test
+
+tests -(0)-> inlined_fn at tests/ui/call_graph/track_inlined_callees.rs:10:1: 10:16 (#0)
+  (0) test
+
+targets: 2 total; 2 safe; 0 unsafe (0 tainted)

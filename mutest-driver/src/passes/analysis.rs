@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use rustc_hash::FxHashSet;
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
+use rustc_session::config::OptLevel;
 use rustc_span::ErrorGuaranteed;
 use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
@@ -36,6 +37,14 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     //       argument nodes between the AST and the HIR.
     //       See `mutest_emit::analysis::ast_lowering` for more details.
     compiler_config.opts.unstable_opts.flatten_format_args = false;
+
+    // NOTE: Disable all MIR optimizations in all cases to ensure identical MIRs
+    //       during analysis regardless of final optimization level.
+    compiler_config.opts.optimize = OptLevel::No;
+    // NOTE: We must disable MIR optimizations to disable inlining of function calls,
+    //       which is necessary to building a complete call graph in all circumstances.
+    //       The MIR generated in this pass is never used for any compilation anyway.
+    compiler_config.opts.unstable_opts.mir_opt_level = Some(0);
 
     let opts = &mut config.opts;
     let source_name = compiler_config.input.source_name();
