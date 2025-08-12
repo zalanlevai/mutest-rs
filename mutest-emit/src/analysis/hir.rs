@@ -159,6 +159,12 @@ impl<'hir> NodeExt<'hir> for hir::Node<'hir> {
                     _ => None,
                 }
             }
+            hir::Node::PatExpr(pat_expr_hir) => {
+                match &pat_expr_hir.kind {
+                    hir::PatExprKind::Path(qpath_hir) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
             hir::Node::Ty(ty_hir) => {
                 match &ty_hir.kind {
                     hir::TyKind::Path(qpath_hir) => Some(qpath_hir),
