@@ -1,0 +1,45 @@
+1 mutation
+  - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/basic_run.rs:7:15: 7:21
+    <-(0)- test
+
+1 mutation
+  - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/basic_run.rs:7:23: 7:29
+    <-(0)- test
+
+1 mutation
+  - [math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+    <-(0)- test
+
+1 mutation
+  - [math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+    <-(0)- test
+
+4 mutants; 4 mutations; 4 safe; 0 unsafe (0 tainted); 0 batched; 4 unbatched
+
+---
+
+profiling reference test run
+
+applying mutant with the following mutations:
+- [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/basic_run.rs:7:15: 7:21
+
+ran 1 out of 1 test
+
+applying mutant with the following mutations:
+- [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/basic_run.rs:7:23: 7:29
+
+ran 1 out of 1 test
+
+applying mutant with the following mutations:
+- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+
+ran 1 out of 1 test
+
+applying mutant with the following mutations:
+- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+
+ran 1 out of 1 test
+
+mutations: 100.00%. 4 detected (0 timed out; 0 crashed); 0 undetected; 4 total
+     safe: 100.00%. 4 detected (0 timed out; 0 crashed); 0 undetected; 4 total
+   unsafe: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total

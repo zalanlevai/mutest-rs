@@ -698,7 +698,9 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
         match profiled_test.exec_time {
             Some(exec_time) => {
                 unmutated_test_exec_times.insert(profiled_test.test.desc.name.clone(), exec_time);
-                println!("{} took {:?}", profiled_test.test.desc.name.as_slice(), exec_time);
+                if opts.report_timings {
+                    println!("{} took {:?}", profiled_test.test.desc.name.as_slice(), exec_time);
+                }
             }
             None => println!("{} was not profiled", profiled_test.test.desc.name.as_slice()),
         }

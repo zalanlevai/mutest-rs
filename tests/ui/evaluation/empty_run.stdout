@@ -1,0 +1,19 @@
+
+@@@ targets @@@
+
+tests -(0)-> non_mutable_fn at tests/ui/evaluation/empty_run.rs:8:1: 8:20 (#0)
+  (0) test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+@@@ mutants @@@
+
+0 mutants; 0 mutations; 0 safe; 0 unsafe (0 tainted); 0 batched; 0 unbatched
+
+---
+
+profiling reference test run
+
+mutations: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total
+     safe: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total
+   unsafe: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total

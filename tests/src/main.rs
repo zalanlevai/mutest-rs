@@ -218,9 +218,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut edition: Option<&str> = None;
-    let mut expect_command_fail = false;
+    let mut expect_build_fail = false;
     let mut expectations = BTreeSet::new();
     let mut mutest_prints = BTreeSet::new();
+    let mut exec_build_artifact = false;
     let mut mutest_subcommand: Option<&str> = None;
     for directive in &directives {
         match directive.as_str() {
@@ -231,7 +232,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                     return;
                 }
                 match subcommand {
-                    "run" => mutest_subcommand = Some("build"),
+                    "run" => {
+                        exec_build_artifact = true;
+                        mutest_subcommand = Some("build")
+                    }
                     "print-tests" => {
                         mutest_prints.insert("tests");
                         mutest_subcommand.get_or_insert("print");
@@ -262,7 +266,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                     log_test(&name, TestResult::Ignored, Some("invalid directives"));
                     return;
                 }
-                expect_command_fail = true;
+                expect_build_fail = true;
                 mutest_subcommand = Some("build");
             }
 
@@ -285,7 +289,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
             _ if directive.starts_with("verify:") => {}
             _ if directive.starts_with("mutation-operators:") => {}
             _ if directive.starts_with("mutest-flags:") => {}
-            _ if directive.starts_with("mutest-subcommand-flags:") => {}
+            _ if directive.starts_with("run-flags:") => {}
 
             _ => {
                 results.ignored_tests_count += 1;
@@ -396,7 +400,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     cmd.arg("/dummy/rustc");
 
     cmd.arg(&path);
-    cmd.args(["--crate-name".to_owned(), test_crate_name]);
+    cmd.args(["--crate-name", &test_crate_name]);
     cmd.arg(format!("--edition={edition}"));
 
     cmd.args(["--crate-type", "lib"]);
@@ -443,9 +447,6 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
         .collect_into(&mut mutest_args);
     mutest_args.push(mutest_subcommand.to_owned());
-    directives.iter().filter_map(|d| d.strip_prefix("mutest-subcommand-flags:").map(str::trim))
-        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
-        .collect_into(&mut mutest_args);
     cmd.env("MUTEST_ARGS".to_owned(), mutest_args.join(" "));
 
     if opts.verbosity >= 1 {
@@ -453,8 +454,8 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let output = cmd.output().expect("cannot spawn mutest-driver");
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let stderr = String::from_utf8(output.stderr).unwrap();
+    let mut stdout = String::from_utf8(output.stdout).unwrap();
+    let mut stderr = String::from_utf8(output.stderr).unwrap();
     if opts.verbosity >= 1 {
         if let Some(exit_code) = output.status.code() {
             eprintln!("exited with code {exit_code}");
@@ -463,12 +464,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         eprintln!("stderr:\n{}", stderr);
     }
 
-    let expected_exit_code = match (expect_command_fail, mutest_subcommand) {
-        (true, _) => 1,
-        (_, "run") => 101,
-        (false, _) => 0,
+    let expected_exit_code = match expect_build_fail {
+        true => 1,
+        false => 0,
     };
-
     if output.status.code() != Some(expected_exit_code) {
         results.failed_tests_count += 1;
         log_test(&name, TestResult::Failed, Some(&match output.status.code() {
@@ -478,6 +477,60 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         eprintln!("stdout:\n{}", stdout);
         eprintln!("stderr:\n{}", stderr);
         return;
+    }
+
+    if exec_build_artifact {
+        let build_artifact_path = Path::new(BUILD_OUT_DIR).join(test_crate_name);
+        let mut cmd = Command::new(&build_artifact_path);
+
+        let run_flags = directives.iter().filter_map(|d| d.strip_prefix("run-flags:").map(str::trim))
+            .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
+        cmd.args(run_flags);
+
+        if opts.verbosity >= 1 {
+            eprintln!("running {cmd:?}");
+        }
+
+        let full_stdout = &mut stdout;
+        let full_stderr = &mut stderr;
+
+        let output = cmd.output().expect(&format!("cannot spawn generated program `{}`", build_artifact_path.display()));
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+
+        if opts.verbosity >= 1 {
+            if let Some(exit_code) = output.status.code() {
+                eprintln!("exited with code {exit_code}");
+            }
+            eprintln!("stdout:\n{}", stdout);
+            eprintln!("stderr:\n{}", stderr);
+        }
+
+        let expected_exit_code = 0;
+        if output.status.code() != Some(expected_exit_code) {
+            results.failed_tests_count += 1;
+            log_test(&name, TestResult::Failed, Some(&match output.status.code() {
+                Some(exit_code) => format!("process exited with code {exit_code}, expected {expected_exit_code}"),
+                None => format!("process exited without exit code, expected {expected_exit_code}"),
+            }));
+            eprintln!("stdout:\n{}", stdout);
+            eprintln!("stderr:\n{}", stderr);
+            return;
+        }
+
+        // NOTE: We only add the divider in the concatenated stdout and stderr streams
+        //       if both the build stream and the run stream are not empty,
+        //       mainly to ensure that the expectations on stream emptiness are not broken
+        //       by these synthetic dividers.
+        if !full_stdout.is_empty() && !stdout.is_empty() {
+            full_stdout.push_str("\n---\n\n");
+        }
+        if !full_stderr.is_empty() && !stderr.is_empty() {
+            full_stderr.push_str("\n---\n\n");
+        }
+
+        full_stdout.push_str(&stdout);
+        full_stderr.push_str(&stderr);
     }
 
     if opts.bless {
