@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use rustc_error_messages::{FluentBundle, LazyFallbackBundle};
 use rustc_errors::{Diag, DiagCtxt, EmissionGuarantee, TerminalUrl};
-use rustc_errors::emitter::{DynEmitter, HumanEmitter, OutputTheme};
+use rustc_errors::emitter::{ColorConfig, Destination, DynEmitter, HumanEmitter, OutputTheme};
+use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 
 pub fn escape_literal(s: &str) -> String {
@@ -66,10 +67,15 @@ pub fn raw_output_full<G: EmissionGuarantee>(
     track_diagnostics: bool,
     terminal_url: TerminalUrl,
     theme: OutputTheme,
+    color_config: ColorConfig,
 ) -> Vec<u8> {
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
 
-    let dst = Box::new(termcolor::Ansi::new(SharedBuffer { data: output.clone() }));
+    let shared_buffer = SharedBuffer { data: output.clone() };
+    let dst: Destination = match color_config.to_color_choice() {
+        termcolor::ColorChoice::Never => Box::new(termcolor::NoColor::new(shared_buffer)),
+        _ => Box::new(termcolor::Ansi::new(shared_buffer)),
+    };
     let emitter = HumanEmitter::new(dst, fallback_bundle)
         .sm(source_map)
         .fluent_bundle(fluent_bundle)
@@ -100,26 +106,29 @@ pub fn output_full<G: EmissionGuarantee>(
     track_diagnostics: bool,
     terminal_url: TerminalUrl,
     theme: OutputTheme,
+    color_config: ColorConfig,
 ) -> String {
-    let bytes = raw_output_full(diagnostic, source_map, fluent_bundle, fallback_bundle, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme);
+    let bytes = raw_output_full(diagnostic, source_map, fluent_bundle, fallback_bundle, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config);
     String::from_utf8(bytes).unwrap()
 }
 
-pub fn output<G: EmissionGuarantee>(diagnostic: Diag<G>, source_map: Arc<SourceMap>) -> String {
+pub fn output<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> String {
+    let source_map = Some(sess.psess.clone_source_map());
     let fluent_bundle = None;
     let fallback_bundle = rustc_errors::fallback_fluent_bundle(vec![], true);
     let short_message = false;
-    let ui_testing = false;
+    let ui_testing = sess.opts.unstable_opts.ui_testing;
     let ignored_directories_in_source_blocks = vec![];
-    let diagnostic_width = None;
+    let diagnostic_width = sess.opts.diagnostic_width;
     let macro_backtrace = false;
     let track_diagnostics = false;
     let terminal_url = TerminalUrl::Yes;
     let theme = OutputTheme::Ascii;
+    let color_config = sess.opts.color;
 
-    output_full(diagnostic, Some(source_map), fluent_bundle, fallback_bundle, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme)
+    output_full(diagnostic, source_map, fluent_bundle, fallback_bundle, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config)
 }
 
-pub fn emit_str<G: EmissionGuarantee>(diagnostic: Diag<G>, source_map: Arc<SourceMap>) -> String {
-    output(diagnostic, source_map)
+pub fn emit_str<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> String {
+    output(diagnostic, sess)
 }

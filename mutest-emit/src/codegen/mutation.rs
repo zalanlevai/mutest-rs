@@ -235,7 +235,7 @@ impl<'trg, 'm> Mut<'trg, 'm> {
             ));
         }
 
-        diagnostic::emit_str(diagnostic, sess.psess.clone_source_map())
+        diagnostic::emit_str(diagnostic, sess)
     }
 
     pub fn is_unsafe(&self, unsafe_targeting: UnsafeTargeting) -> bool {
