@@ -15,12 +15,12 @@ profiling reference test run
 1: applying mutant with the following mutations:
 - 1: [bool_expr_negate] negate boolean expression at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:32:12: 32:16
 
-ran 1 out of 1 test
+1: ran 1 out of 1 test (1 lingering)
 
 2: applying mutant with the following mutations:
 - 2: [bool_expr_negate] negate boolean expression at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8: 54:13
 
-ran 1 out of 1 test
+2: ran 1 out of 1 test
 
 warning: [bool_expr_negate] mutation was not detected
   --> tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8

@@ -306,6 +306,7 @@ fn run_tests<S: SubstMap>(
     mutation_isolation: config::MutationIsolation,
     thread_pool: Option<ThreadPool>,
     eval_stream_writer: Option<EvaluationStreamWriter>,
+    verbosity: u8,
 ) -> (HashMap<u32, MutationTestResults>, Vec<(test_runner::RunningTest, &'static MutationMeta)>) {
     let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutant.mutations.len());
 
@@ -415,12 +416,19 @@ fn run_tests<S: SubstMap>(
         })
         .collect::<Vec<_>>();
 
-    println!("ran {completed} out of {total} {descr}",
+    if verbosity >= 1 {
+        print!("{}: ", mutant.id);
+    }
+    println!("ran {completed} out of {total} {descr}{lingering_opt}",
         completed = completed_tests_count,
         total = total_tests_count,
         descr = match total_tests_count {
             1 => "test",
             _ => "tests",
+        },
+        lingering_opt = match lingering_tests.is_empty() {
+            false => format!(" ({} lingering)", lingering_tests.len()),
+            true => "".to_owned(),
         },
     );
     println!();
@@ -512,7 +520,7 @@ fn run_mutation_analysis<S: SubstMap>(
             prioritize_tests_by_distance(&mut tests, mutant.mutations);
         }
 
-        let (mut run_results, lingering_tests) = run_tests(tests, mutant, opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone());
+        let (mut run_results, lingering_tests) = run_tests(tests, mutant, opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
         lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
 
         for &mutation in mutant.mutations {
