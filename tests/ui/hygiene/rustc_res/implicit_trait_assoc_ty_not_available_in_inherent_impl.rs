@@ -1,4 +1,4 @@
-//@ fail
+//@ build: fail
 //@ stderr
 //@ mutest-flags: --Zno-sanitize-macro-expns
 

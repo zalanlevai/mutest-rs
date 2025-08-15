@@ -1,4 +1,4 @@
-//@ fail
+//@ build: fail
 //@ stderr
 
 fn f() {

@@ -226,13 +226,25 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     let mut mutest_subcommand: Option<&str> = None;
     for directive in &directives {
         match directive.as_str() {
-            subcommand @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "run" | "run: fail") => {
+            action_directive @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "build: fail" | "run" | "run: fail") => {
+                // NOTE: The invariant here is that the moment any action directive resulting in the `build` subcommand is used,
+                //       then no other action directive of any kind can be specified afterwards.
+                //       This ensures the following:
+                //         1. `print-*` action directives must appear before any other action directive, e.g. `build`, and
+                //         2. the `build`, `build: fail`, `run`, `run: fail` action directives are mutually exclusive.
                 if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
                     results.ignored_tests_count += 1;
-                    log_test(&name, TestResult::Ignored, Some("invalid directives"));
+                    log_test(&name, TestResult::Ignored, Some("invalid action directives"));
                     return;
                 }
-                match subcommand {
+                match action_directive {
+                    "build" => {
+                        mutest_subcommand = Some("build");
+                    }
+                    "build: fail" => {
+                        expect_build_fail = true;
+                        mutest_subcommand = Some("build");
+                    }
                     "run" => {
                         exec_build_artifact = true;
                         mutest_subcommand = Some("build")
@@ -262,18 +274,8 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                         mutest_prints.insert("code");
                         mutest_subcommand.get_or_insert("print");
                     }
-                    subcommand => mutest_subcommand = Some(subcommand),
+                    _ => unreachable!(),
                 };
-            }
-
-            "fail" => {
-                if let Some(_previous_subcommand) = mutest_subcommand {
-                    results.ignored_tests_count += 1;
-                    log_test(&name, TestResult::Ignored, Some("invalid directives"));
-                    return;
-                }
-                expect_build_fail = true;
-                mutest_subcommand = Some("build");
             }
 
             _ if let Some(edition_str) = directive.strip_prefix("edition:").map(str::trim) => {
