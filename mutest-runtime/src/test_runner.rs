@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::env;
 use std::fmt;
@@ -7,6 +8,7 @@ use std::num::NonZeroUsize;
 use std::panic;
 use std::process::{self, Command};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{self, AtomicBool};
 use std::sync::mpsc;
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
@@ -194,18 +196,34 @@ pub enum ControlMsg {
     KillChildProcess,
 }
 
+thread_local! {
+    static TEST_THREAD_ACTIVE: Cell<Arc<AtomicBool>> = Cell::new(Arc::new(AtomicBool::new(true)));
+}
+
+pub fn is_test_thread_active() -> bool {
+    TEST_THREAD_ACTIVE.with(|cell| {
+        let value = (unsafe { &*cell.as_ptr() }).as_ref();
+        value.load(atomic::Ordering::SeqCst)
+    })
+}
+
 fn run_test_in_process(
     id: test::TestId,
     desc: test::TestDesc,
     test_fn: Box<dyn FnOnce() -> Result<(), String> + Send>,
     monitor_ch: mpsc::Sender<CompletedTest>,
     test_timeout: Option<Duration>,
+    active_signal: Option<Arc<AtomicBool>>,
     no_capture: bool,
 ) {
     let io_buffer = Arc::new(Mutex::new(Vec::new()));
 
     if !no_capture {
         io::set_output_capture(Some(io_buffer.clone()));
+    }
+
+    if let Some(active_signal) = active_signal {
+        TEST_THREAD_ACTIVE.set(active_signal);
     }
 
     fn fold_err<T, E>(result: Result<Result<T, E>, Box<dyn Any + Send>>) -> Result<T, Box<dyn Any + Send>>
@@ -387,6 +405,7 @@ fn run_test(
     control_ch: Option<mpsc::Receiver<ControlMsg>>,
     monitor_ch: mpsc::Sender<CompletedTest>,
     test_run_strategy: TestRunStrategy,
+    active_signal: Option<Arc<AtomicBool>>,
     no_capture: bool,
 ) -> Option<ThreadHandle> {
     let Test { desc, test_fn, timeout } = test;
@@ -413,6 +432,7 @@ fn run_test(
         control_ch: Option<mpsc::Receiver<ControlMsg>>,
         monitor_ch: mpsc::Sender<CompletedTest>,
         test_timeout: Option<Duration>,
+        active_signal: Option<Arc<AtomicBool>>,
         no_capture: bool,
     ) -> Option<ThreadHandle> {
         let thread_pool = match &test_run_strategy {
@@ -424,7 +444,7 @@ fn run_test(
         let run_test = move || {
             match test_run_strategy {
                 TestRunStrategy::InProcess(_)
-                => run_test_in_process(id, desc, test_fn, monitor_ch, test_timeout, no_capture),
+                => run_test_in_process(id, desc, test_fn, monitor_ch, test_timeout, active_signal, no_capture),
 
                 TestRunStrategy::InIsolatedChildProcess(cmd_hook)
                 => spawn_test_subprocess(id, desc, cmd_hook, control_ch, monitor_ch, test_timeout, no_capture),
@@ -466,7 +486,7 @@ fn run_test(
     match test_fn {
         test::TestFn::StaticTestFn(f) => {
             let test_fn = Box::new(move || __rust_begin_short_backtrace(f));
-            run_test_impl(id, desc, test_fn, test_run_strategy, control_ch, monitor_ch, timeout, no_capture)
+            run_test_impl(id, desc, test_fn, test_run_strategy, control_ch, monitor_ch, timeout, active_signal, no_capture)
         }
 
         test::TestFn::DynTestFn(_) => {
@@ -499,6 +519,7 @@ pub struct RunningTest {
     pub start_time: Instant,
     pub control_tx: mpsc::Sender<ControlMsg>,
     pub join_handle: Option<ThreadHandle>,
+    pub active_signal: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Debug)]
@@ -560,7 +581,7 @@ where
 
             let desc = test.desc.clone();
 
-            let join_handle = run_test(id, test, None, test_tx.clone(), test_run_strategy.clone(), no_capture);
+            let join_handle = run_test(id, test, None, test_tx.clone(), test_run_strategy.clone(), None, no_capture);
             event!(TestEvent::Wait(desc, join_handle.as_ref().map(|h| h.thread_id())));
             let mut completed_test = test_rx.recv().unwrap();
 
@@ -628,9 +649,13 @@ where
                 let timeout = test.timeout;
 
                 let (control_tx, control_rx) = mpsc::channel::<ControlMsg>();
-                let join_handle = run_test(id, test, Some(control_rx), test_tx.clone(), test_run_strategy.clone(), no_capture);
+                let active_signal = match &test_run_strategy {
+                    TestRunStrategy::InProcess(_) => Some(Arc::new(AtomicBool::new(true))),
+                    TestRunStrategy::InIsolatedChildProcess(_) => None,
+                };
+                let join_handle = run_test(id, test, Some(control_rx), test_tx.clone(), test_run_strategy.clone(), active_signal.clone(), no_capture);
                 event!(TestEvent::Wait(desc.clone(), join_handle.as_ref().map(|h| h.thread_id())));
-                running_tests.insert(id, RunningTest { desc, timeout, start_time: Instant::now(), control_tx, join_handle });
+                running_tests.insert(id, RunningTest { desc, timeout, start_time: Instant::now(), control_tx, join_handle, active_signal });
             }
 
             if let TestRunStrategy::InProcess(_) = &test_run_strategy {
@@ -653,6 +678,10 @@ where
 
                                 let running_test = running_tests.remove(&test_id).unwrap();
                                 event!(TestEvent::Queue(running_tests.len(), remaining_tests.len()));
+
+                                if let Some(active_signal) = &running_test.active_signal {
+                                    active_signal.store(false, atomic::Ordering::SeqCst);
+                                }
                                 lingering_tests.insert(test_id, running_test);
                                 event!(TestEvent::Result(completed_test));
                             }

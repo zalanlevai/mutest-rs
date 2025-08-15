@@ -113,6 +113,7 @@ pub mod path {
         default (::core::default::Default::default),
         None (::core::option::Option::None),
         Option (::core::option::Option),
+        panic (::core::panic),
         Some (::core::option::Option::Some),
         TestDescAndFn (::test::TestDescAndFn),
 
@@ -120,6 +121,7 @@ pub mod path {
         ActiveMutantHandle (::mutest_runtime::ActiveMutantHandle),
         active_mutant_handle_init_empty (::mutest_runtime::ActiveMutantHandle::empty),
         harness (crate::mutest_generated::harness),
+        is_test_thread_active (::mutest_runtime::is_test_thread_active),
         MutantMeta (::mutest_runtime::MutantMeta),
         MUTANTS (crate::mutest_generated::MUTANTS),
         mutations (crate::mutest_generated::mutations),

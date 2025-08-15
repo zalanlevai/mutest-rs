@@ -6,6 +6,7 @@ use thin_vec::{ThinVec, thin_vec};
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
+use crate::codegen::cancellation;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
@@ -54,6 +55,14 @@ fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, def
             ast::mk::arm(sp, pat_some_subst, Some(guard), Some(subst))
         })
         .collect::<ThinVec<_>>();
+
+    // NOTE: Before we evaluate any subsitution arms, we must check if the test thread is active, and
+    //       if not, cancel the test thread from within to ensure that it does not start executing
+    //       the code of other mutations, leading to undefined behavior.
+    //       See `tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst`.
+    // _ if !$test_thread_active_active_expr => $test_thread_cancel_expr,
+    let test_thread_active_guard_expr = ast::mk::expr_not(sp, cancellation::mk_is_test_thread_active_expr(sp));
+    arms.insert(0, ast::mk::arm(sp, ast::mk::pat_wild(sp), Some(test_thread_active_guard_expr), Some(cancellation::mk_test_thread_cancel_expr(sp))));
 
     // _ => $default
     arms.push(ast::mk::arm(sp, ast::mk::pat_wild(sp), None, match default {

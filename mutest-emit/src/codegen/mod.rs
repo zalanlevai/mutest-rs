@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod cancellation;
 pub mod entry_point;
 pub mod expansion;
 pub mod harness;

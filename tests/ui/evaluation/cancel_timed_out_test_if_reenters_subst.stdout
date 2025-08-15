@@ -1,0 +1,37 @@
+1 mutation
+  - [bool_expr_negate] negate boolean expression in needs_cancellation at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:32:12: 32:16
+    <-(0)- test1
+
+1 mutation
+  - [bool_expr_negate] negate boolean expression in trigger_second_mutation at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8: 54:13
+    <-(0)- test2
+
+2 mutants; 2 mutations; 2 safe; 0 unsafe (0 tainted); 0 batched; 2 unbatched
+
+---
+
+profiling reference test run
+
+1: applying mutant with the following mutations:
+- 1: [bool_expr_negate] negate boolean expression at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:32:12: 32:16
+
+ran 1 out of 1 test
+
+2: applying mutant with the following mutations:
+- 2: [bool_expr_negate] negate boolean expression at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8: 54:13
+
+ran 1 out of 1 test
+
+warning: [bool_expr_negate] mutation was not detected
+  --> tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8
+   |
+54 |     if false {
+   |        ^^^^^ negate boolean expression
+   |
+   = note: expression replaced with: `!false`
+
+bool_expr_negate:  50.00%. 1 detected (1 timed out; 0 crashed); 1 undetected
+
+mutations: 50.00%. 1 detected (1 timed out; 0 crashed); 1 undetected; 2 total
+     safe: 50.00%. 1 detected (1 timed out; 0 crashed); 1 undetected; 2 total
+   unsafe: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total
