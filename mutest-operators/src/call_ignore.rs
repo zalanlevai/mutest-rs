@@ -132,7 +132,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
 
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.id),
+                SubstLoc::Replace(expr.id, expr.span),
                 Subst::AstExpr(shadow_scope.into_inner()),
             ),
         ])
@@ -194,7 +194,7 @@ impl<'a> Operator<'a> for CallDelete {
 
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.id),
+                SubstLoc::Replace(expr.id, expr.span),
                 Subst::AstExpr(default.into_inner()),
             ),
         ])

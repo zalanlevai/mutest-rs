@@ -64,7 +64,7 @@ impl<'a> Operator<'a> for RelationalOpEqSwap {
 
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.id),
+                SubstLoc::Replace(expr.id, expr.span),
                 Subst::AstExpr(inverted_eq_bin_expr.into_inner()),
             ),
         ])

@@ -216,11 +216,19 @@ pub fn write_mutations<'tcx, 'trg>(
                 let substs = mutation.substs.iter()
                     .map(|subst| {
                         mutest_json::mutations::Substitution {
-                            // TODO: Collect actual substitution spans.
                             location: match &subst.location {
-                                SubstLoc::InsertBefore(_) => mutest_json::mutations::SubstitutionLocation::InsertBefore(origin_span.clone()),
-                                SubstLoc::InsertAfter(_) => mutest_json::mutations::SubstitutionLocation::InsertAfter(origin_span.clone()),
-                                SubstLoc::Replace(_) => mutest_json::mutations::SubstitutionLocation::Replace(origin_span.clone()),
+                                SubstLoc::InsertBefore(_, span) => {
+                                    let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                                    mutest_json::mutations::SubstitutionLocation::InsertBefore(subst_span)
+                                }
+                                SubstLoc::InsertAfter(_, span) => {
+                                    let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                                    mutest_json::mutations::SubstitutionLocation::InsertAfter(subst_span)
+                                }
+                                SubstLoc::Replace(_, span) => {
+                                    let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                                    mutest_json::mutations::SubstitutionLocation::Replace(subst_span)
+                                }
                             },
                             substitute: mutest_json::mutations::Substitute {
                                 kind: match &subst.substitute {

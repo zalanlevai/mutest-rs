@@ -134,7 +134,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
 
             mutations.push((mutation, smallvec![
                 SubstDef::new(
-                    SubstLoc::InsertBefore(first_valid_stmt.id),
+                    SubstLoc::InsertBefore(first_valid_stmt.id, first_valid_stmt.span),
                     // let $param: $ty = Default::default();
                     Subst::AstLocal(param_ident, param_mutbl, Some(param_ty_ast), default, None),
                 ),

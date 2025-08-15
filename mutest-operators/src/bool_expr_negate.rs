@@ -71,7 +71,7 @@ impl<'a> Operator<'a> for BoolExprNegate {
 
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.id),
+                SubstLoc::Replace(expr.id, expr.span),
                 Subst::AstExpr(negated_expr.into_inner()),
             ),
         ])

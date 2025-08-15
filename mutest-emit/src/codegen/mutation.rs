@@ -60,19 +60,43 @@ pub struct MutCtxt<'tcx, 'ast, 'op> {
     pub location: MutLoc<'ast, 'op>,
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub enum SubstLoc {
-    InsertBefore(ast::NodeId),
-    InsertAfter(ast::NodeId),
-    Replace(ast::NodeId),
+    InsertBefore(ast::NodeId, Span),
+    InsertAfter(ast::NodeId, Span),
+    Replace(ast::NodeId, Span),
+}
+
+impl Eq for SubstLoc {}
+impl PartialEq for SubstLoc {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::InsertBefore(node_id, _), Self::InsertBefore(other_node_id, _)) => node_id == other_node_id,
+            (Self::InsertBefore(..), _) => false,
+            (Self::InsertAfter(node_id, _), Self::InsertAfter(other_node_id, _)) => node_id == other_node_id,
+            (Self::InsertAfter(..), _) => false,
+            (Self::Replace(node_id, _), Self::Replace(other_node_id, _)) => node_id == other_node_id,
+            (Self::Replace(..), _) => false,
+        }
+    }
+}
+
+impl Hash for SubstLoc {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Self::InsertBefore(node_id, _) => node_id.hash(state),
+            Self::InsertAfter(node_id, _) => node_id.hash(state),
+            Self::Replace(node_id, _) => node_id.hash(state),
+        }
+    }
 }
 
 impl SubstLoc {
     pub fn is_dummy(&self) -> bool {
         match *self {
-            Self::InsertBefore(node_id) => node_id == ast::DUMMY_NODE_ID,
-            Self::InsertAfter(node_id) => node_id == ast::DUMMY_NODE_ID,
-            Self::Replace(node_id) => node_id == ast::DUMMY_NODE_ID,
+            Self::InsertBefore(node_id, _) => node_id == ast::DUMMY_NODE_ID,
+            Self::InsertAfter(node_id, _) => node_id == ast::DUMMY_NODE_ID,
+            Self::Replace(node_id, _) => node_id == ast::DUMMY_NODE_ID,
         }
     }
 }
@@ -221,8 +245,8 @@ impl<'trg, 'm> Mut<'trg, 'm> {
 
         for subst in &self.substs {
             let action = match &subst.location {
-                SubstLoc::InsertBefore(_) | SubstLoc::InsertAfter(_) => "inserted",
-                SubstLoc::Replace(_) => "replaced with",
+                SubstLoc::InsertBefore(_, _) | SubstLoc::InsertAfter(_, _) => "inserted",
+                SubstLoc::Replace(_, _) => "replaced with",
             };
             let node_kind = subst.substitute.descr();
             let new_node = subst.substitute.to_source_string();

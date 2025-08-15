@@ -92,7 +92,7 @@ impl<'a> Operator<'a> for RangeLimitSwap {
 
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
-                SubstLoc::Replace(expr.id),
+                SubstLoc::Replace(expr.id, expr.span),
                 Subst::AstExpr(swapped_limits_range_expr.into_inner()),
             ),
         ])

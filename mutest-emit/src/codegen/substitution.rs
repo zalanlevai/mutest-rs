@@ -31,9 +31,9 @@ impl SubstLoc {
 impl SubstLocId {
     pub fn into_symbol_name(&self) -> String {
         match self.0 {
-            SubstLoc::InsertBefore(node_id) => format!("subst_bef_{}", node_id),
-            SubstLoc::InsertAfter(node_id) => format!("subst_aft_{}", node_id),
-            SubstLoc::Replace(node_id) => format!("subst_rep_{}", node_id),
+            SubstLoc::InsertBefore(node_id, _) => format!("subst_bef_{}", node_id),
+            SubstLoc::InsertAfter(node_id, _) => format!("subst_aft_{}", node_id),
+            SubstLoc::Replace(node_id, _) => format!("subst_rep_{}", node_id),
         }
     }
 
@@ -160,9 +160,9 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
 
         let mut i = 0;
         while i < block.stmts.len() {
-            let stmt_id = block.stmts[i].id;
+            let ast::Stmt { id: stmt_id, span: stmt_span, .. } = block.stmts[i];
 
-            let insert_before_loc = SubstLoc::InsertBefore(stmt_id);
+            let insert_before_loc = SubstLoc::InsertBefore(stmt_id, stmt_span);
             if let Some(insertions_before) = self.substitutions.remove(&insert_before_loc) {
                 let subst_loc_idx = self.indexed_subst_locs.len();
                 self.indexed_subst_locs.push(insert_before_loc);
@@ -175,7 +175,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
                 i += replacement_stmts_count;
             }
 
-            let replacement_loc = SubstLoc::Replace(stmt_id);
+            let replacement_loc = SubstLoc::Replace(stmt_id, stmt_span);
             if let Some(replacements) = self.substitutions.remove(&replacement_loc) {
                 let subst_loc_idx = self.indexed_subst_locs.len();
                 self.indexed_subst_locs.push(replacement_loc);
@@ -188,7 +188,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
                 i += replacement_stmts_count - 1;
             }
 
-            let insert_after_loc = SubstLoc::InsertAfter(stmt_id);
+            let insert_after_loc = SubstLoc::InsertAfter(stmt_id, stmt_span);
             if let Some(insertions_after) = self.substitutions.remove(&insert_after_loc) {
                 let subst_loc_idx = self.indexed_subst_locs.len();
                 self.indexed_subst_locs.push(insert_after_loc);
@@ -212,8 +212,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
             // substituted.
             ast::ExprKind::Struct(struct_expr) => {
                 for field in &mut struct_expr.fields {
-                    assert!(!self.substitutions.contains_key(&SubstLoc::Replace(field.id)), "field expression may not be mutated directly");
-                    if self.substitutions.contains_key(&SubstLoc::Replace(field.expr.id)) {
+                    assert!(!self.substitutions.contains_key(&SubstLoc::Replace(field.id, field.span)), "field expression may not be mutated directly");
+                    if self.substitutions.contains_key(&SubstLoc::Replace(field.expr.id, field.expr.span)) {
                         field.is_shorthand = false;
                     }
                 }
@@ -223,13 +223,11 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
 
         ast::mut_visit::walk_expr(self, expr);
 
-        let expr_id = expr.id;
-
-        if let Some(_insertions_before) = self.substitutions.remove(&SubstLoc::InsertBefore(expr_id)) {
+        if let Some(_insertions_before) = self.substitutions.remove(&SubstLoc::InsertBefore(expr.id, expr.span)) {
             panic!("invalid substitution: substitutions cannot be inserted before expressions");
         }
 
-        let replacement_loc = SubstLoc::Replace(expr_id);
+        let replacement_loc = SubstLoc::Replace(expr.id, expr.span);
         if let Some(replacements) = self.substitutions.remove(&replacement_loc) {
             let subst_loc_idx = self.indexed_subst_locs.len();
             self.indexed_subst_locs.push(replacement_loc);
@@ -237,7 +235,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
             *expr = expand_subst_match_expr(expr.span, replacement_loc, subst_loc_idx, Some(expr.clone()), replacements);
         }
 
-        if let Some(_insertions_after) = self.substitutions.remove(&SubstLoc::InsertAfter(expr_id)) {
+        if let Some(_insertions_after) = self.substitutions.remove(&SubstLoc::InsertAfter(expr.id, expr.span)) {
             panic!("invalid substitution: substitutions cannot be inserted after expressions");
         }
     }
