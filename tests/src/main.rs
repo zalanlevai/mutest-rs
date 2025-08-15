@@ -222,10 +222,11 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     let mut expectations = BTreeSet::new();
     let mut mutest_prints = BTreeSet::new();
     let mut exec_build_artifact = false;
+    let mut expect_run_fail = false;
     let mut mutest_subcommand: Option<&str> = None;
     for directive in &directives {
         match directive.as_str() {
-            subcommand @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "run") => {
+            subcommand @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "run" | "run: fail") => {
                 if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
                     results.ignored_tests_count += 1;
                     log_test(&name, TestResult::Ignored, Some("invalid directives"));
@@ -234,6 +235,11 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                 match subcommand {
                     "run" => {
                         exec_build_artifact = true;
+                        mutest_subcommand = Some("build")
+                    }
+                    "run: fail" => {
+                        exec_build_artifact = true;
+                        expect_run_fail = true;
                         mutest_subcommand = Some("build")
                     }
                     "print-tests" => {
@@ -506,7 +512,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
             eprintln!("stderr:\n{}", stderr);
         }
 
-        let expected_exit_code = 0;
+        let expected_exit_code = match expect_run_fail {
+            true => 101,
+            false => 0,
+        };
         if output.status.code() != Some(expected_exit_code) {
             results.failed_tests_count += 1;
             log_test(&name, TestResult::Failed, Some(&match output.status.code() {
