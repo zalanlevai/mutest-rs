@@ -226,7 +226,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     let mut mutest_subcommand: Option<&str> = None;
     for directive in &directives {
         match directive.as_str() {
-            action_directive @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutants" | "print-code" | "build" | "build: fail" | "run" | "run: fail") => {
+            action_directive @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutations" | "print-code" | "build" | "build: fail" | "run" | "run: fail") => {
                 // NOTE: The invariant here is that the moment any action directive resulting in the `build` subcommand is used,
                 //       then no other action directive of any kind can be specified afterwards.
                 //       This ensures the following:
@@ -266,8 +266,8 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                         mutest_prints.insert("targets");
                         mutest_subcommand.get_or_insert("print");
                     }
-                    "print-mutants" => {
-                        mutest_prints.insert("mutants");
+                    "print-mutations" => {
+                        mutest_prints.insert("mutations");
                         mutest_subcommand.get_or_insert("print");
                     }
                     "print-code" => {

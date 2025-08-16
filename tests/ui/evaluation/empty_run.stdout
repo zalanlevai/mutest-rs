@@ -6,9 +6,9 @@ tests -(0)-> non_mutable_fn at tests/ui/evaluation/empty_run.rs:8:1: 8:20 (#0)
 
 targets: 1 total; 1 safe; 0 unsafe (0 tainted)
 
-@@@ mutants @@@
+@@@ mutations @@@
 
-0 mutants; 0 mutations; 0 safe; 0 unsafe (0 tainted); 0 batched; 0 unbatched
+0 mutations; 0 safe; 0 unsafe (0 tainted)
 
 ---
 

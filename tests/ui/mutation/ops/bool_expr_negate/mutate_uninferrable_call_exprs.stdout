@@ -1,5 +1,4 @@
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/mutate_uninferrable_call_exprs.rs:8:19: 8:37
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/mutate_uninferrable_call_exprs.rs:8:19: 8:37
+  <-(0)- test
 
-1 mutants; 1 mutations; 1 safe; 0 unsafe (0 tainted); 0 batched; 1 unbatched
+1 mutations; 1 safe; 0 unsafe (0 tainted)

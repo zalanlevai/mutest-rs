@@ -2,18 +2,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::io::BufWriter;
-use std::mem::{self, MaybeUninit};
 use std::time::Duration;
 
 use mutest_emit::analysis::call_graph::{CallGraph, Callee, Target, Unsafety};
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
-use mutest_emit::codegen::mutation::{Mutant, MutationConflictGraph, Subst, SubstLoc, UnsafeTargeting};
+use mutest_emit::codegen::mutation::{Mut, MutationConflictGraph, MutationParallelism, Subst, SubstLoc, UnsafeTargeting};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::{DefId, LocalDefId};
 
-use crate::config::{self, WriteOptions};
+use crate::config::WriteOptions;
 use crate::passes::analysis::AnalysisPassResult;
 use crate::passes::compilation::CompilationPassResult;
 
@@ -168,13 +167,13 @@ pub fn write_mutations<'tcx, 'trg>(
     all_mutable_fns_count: usize,
     json_definitions: &FxHashMap<DefId, mutest_json::DefId>,
     targets: impl Iterator<Item = &'trg Target<'trg>>,
-    mutants: &[Mutant],
+    mutations: &[Mut],
     unsafe_targeting: UnsafeTargeting,
     mutation_conflict_graph: &MutationConflictGraph,
-    mutation_batching_algorithm: &config::MutationBatchingAlgorithm,
+    mutation_parallelism: Option<MutationParallelism>,
     duration: Duration,
 ) {
-    let total_mutations_count = mutants.iter().map(|mutant| mutant.mutations.len()).sum();
+    let total_mutations_count = mutations.len();
 
     let mut json_targets = mutest_json::IdxVec::new();
     let mut target_id_allocation: FxHashMap<LocalDefId, mutest_json::mutations::TargetId> = Default::default();
@@ -202,86 +201,77 @@ pub fn write_mutations<'tcx, 'trg>(
         target_id_allocation.insert(target.def_id, json_target_id);
     }
 
-    let mutations = {
-        let mut mutations = mutest_json::IdxVec::with_capacity(total_mutations_count);
-        // NOTE: Mutation IDs are 1-based, so for N mutations, the last mutation's ID will be N.
-        mutations.ensure_contains(mutest_json::mutations::MutationId(total_mutations_count as u32), || MaybeUninit::uninit());
+    let mut json_mutations = mutest_json::IdxVec::with_capacity(total_mutations_count);
+    for mutation in mutations {
+        let mutation_id = json_mutations.next_index();
+        assert_eq!(mutation_id, mutest_json::mutations::MutationId(mutation.id.index()), "mutations are not supplied in id order");
 
-        for mutant in mutants {
-            for mutation in &mutant.mutations {
-                let mutation_id = mutest_json::mutations::MutationId(mutation.id.index());
+        let origin_span = mutest_json::Span::from_rustc_span(tcx.sess, mutation.span).expect("invalid span");
 
-                let origin_span = mutest_json::Span::from_rustc_span(tcx.sess, mutation.span).expect("invalid span");
-
-                let substs = mutation.substs.iter()
-                    .map(|subst| {
-                        mutest_json::mutations::Substitution {
-                            location: match &subst.location {
-                                SubstLoc::InsertBefore(_, span) => {
-                                    let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
-                                    mutest_json::mutations::SubstitutionLocation::InsertBefore(subst_span)
-                                }
-                                SubstLoc::InsertAfter(_, span) => {
-                                    let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
-                                    mutest_json::mutations::SubstitutionLocation::InsertAfter(subst_span)
-                                }
-                                SubstLoc::Replace(_, span) => {
-                                    let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
-                                    mutest_json::mutations::SubstitutionLocation::Replace(subst_span)
-                                }
-                            },
-                            substitute: mutest_json::mutations::Substitute {
-                                kind: match &subst.substitute {
-                                    Subst::AstExpr(..) => mutest_json::mutations::SubstituteKind::Expr,
-                                    Subst::AstStmt(..) => mutest_json::mutations::SubstituteKind::Stmt,
-                                    Subst::AstLocal(..) => mutest_json::mutations::SubstituteKind::Local,
-                                },
-                                replacement: subst.substitute.to_source_string(),
-                            },
+        let substs = mutation.substs.iter()
+            .map(|subst| {
+                mutest_json::mutations::Substitution {
+                    location: match &subst.location {
+                        SubstLoc::InsertBefore(_, span) => {
+                            let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                            mutest_json::mutations::SubstitutionLocation::InsertBefore(subst_span)
                         }
-                    })
-                    .collect();
-
-                mutations[mutation_id].write(mutest_json::mutations::Mutation {
-                    mutation_id,
-                    target_id: *target_id_allocation.get(&mutation.target.def_id).expect("target def id not allocated"),
-                    origin_span,
-                    mutation_op: mutation.op_name().to_owned(),
-                    display_name: mutation.display_name(),
-                    substs,
-                    safety: match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
-                        (true, Unsafety::Tainted(_)) => mutest_json::mutations::MutationSafety::Tainted,
-                        (true, _) => mutest_json::mutations::MutationSafety::Unsafe,
-                        (false, _) => mutest_json::mutations::MutationSafety::Safe,
+                        SubstLoc::InsertAfter(_, span) => {
+                            let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                            mutest_json::mutations::SubstitutionLocation::InsertAfter(subst_span)
+                        }
+                        SubstLoc::Replace(_, span) => {
+                            let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                            mutest_json::mutations::SubstitutionLocation::Replace(subst_span)
+                        }
                     },
-                });
-            }
-        }
+                    substitute: mutest_json::mutations::Substitute {
+                        kind: match &subst.substitute {
+                            Subst::AstExpr(..) => mutest_json::mutations::SubstituteKind::Expr,
+                            Subst::AstStmt(..) => mutest_json::mutations::SubstituteKind::Stmt,
+                            Subst::AstLocal(..) => mutest_json::mutations::SubstituteKind::Local,
+                        },
+                        replacement: subst.substitute.to_source_string(),
+                    },
+                }
+            })
+            .collect();
 
-        // SAFETY: All mutations have been initialized.
-        unsafe { mem::transmute::<_, mutest_json::IdxVec<_, mutest_json::mutations::Mutation>>(mutations) }
-    };
+        json_mutations.push(mutest_json::mutations::Mutation {
+            mutation_id,
+            target_id: *target_id_allocation.get(&mutation.target.def_id).expect("target def id not allocated"),
+            origin_span,
+            mutation_op: mutation.op_name().to_owned(),
+            display_name: mutation.display_name(),
+            substs,
+            safety: match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
+                (true, Unsafety::Tainted(_)) => mutest_json::mutations::MutationSafety::Tainted,
+                (true, _) => mutest_json::mutations::MutationSafety::Unsafe,
+                (false, _) => mutest_json::mutations::MutationSafety::Safe,
+            },
+        });
+    }
 
-    let mutation_batches = match mutation_batching_algorithm {
-        config::MutationBatchingAlgorithm::None => None,
-        _ => {
-            let mut mutation_batches = mutest_json::IdxVec::with_capacity(mutants.len());
+    let mutation_batches = match mutation_parallelism {
+        Some(MutationParallelism::Batched(mutation_batches)) => {
+            let mut json_mutation_batches = mutest_json::IdxVec::with_capacity(mutation_batches.len());
 
-            for mutant in mutants {
-                let mutation_batch_id = mutation_batches.next_index();
-                assert_eq!(mutation_batch_id, mutest_json::mutations::MutationBatchId(mutant.id.index()), "mutants are not supplied in id order");
+            for mutation_batch in mutation_batches {
+                let mutation_batch_id = json_mutation_batches.next_index();
+                assert_eq!(mutation_batch_id, mutest_json::mutations::MutationBatchId(mutation_batch.id.index()), "mutation batches are not supplied in id order");
 
-                mutation_batches.push(mutest_json::mutations::MutationBatch {
+                json_mutation_batches.push(mutest_json::mutations::MutationBatch {
                     mutation_batch_id,
-                    mutation_ids: mutant.mutations.iter().map(|mutation| mutest_json::mutations::MutationId(mutation.id.index())).collect(),
+                    mutation_ids: mutation_batch.mutations.iter().map(|mutation| mutest_json::mutations::MutationId(mutation.id.index())).collect(),
                 });
             }
 
-            Some(mutation_batches)
-        },
+            Some(json_mutation_batches)
+        }
+        _ => None,
     };
 
-    let mutated_fns = mutants.iter().flat_map(|mutant| mutant.mutations.iter()).map(|mutation| mutation.target.def_id).collect::<FxHashSet<_>>();
+    let mutated_fns = mutations.iter().map(|mutation| mutation.target.def_id).collect::<FxHashSet<_>>();
     let mutated_fns_count = mutated_fns.len();
 
     let mut safe_mutations_count = 0;
@@ -291,38 +281,52 @@ pub fn write_mutations<'tcx, 'trg>(
     let mut unbatched_mutations_count = 0;
     let mut per_op_stats: HashMap<String, mutest_json::mutations::MutationOpStats> = Default::default();
 
-    for mutant in mutants {
-        for mutation in &mutant.mutations {
-            let op_stats = per_op_stats.entry(mutation.op_name().to_owned()).or_default();
+    for mutation in mutations {
+        let op_stats = per_op_stats.entry(mutation.op_name().to_owned()).or_default();
 
-            op_stats.total_mutations_count += 1;
+        op_stats.total_mutations_count += 1;
 
-            let is_unsafe_according_to_targeting = mutation.is_unsafe(unsafe_targeting);
-            let is_target_tainted = matches!(mutation.target.unsafety, Unsafety::Tainted(_));
+        let is_unsafe_according_to_targeting = mutation.is_unsafe(unsafe_targeting);
+        let is_target_tainted = matches!(mutation.target.unsafety, Unsafety::Tainted(_));
 
-            if is_unsafe_according_to_targeting {
-                unsafe_mutations_count += 1;
-                op_stats.unsafe_mutations_count += 1;
-            }
-            if is_target_tainted {
-                tainted_mutations_count += 1;
-                op_stats.tainted_mutations_count +=1;
-            }
+        if is_unsafe_according_to_targeting {
+            unsafe_mutations_count += 1;
+            op_stats.unsafe_mutations_count += 1;
+        }
+        if is_target_tainted {
+            tainted_mutations_count += 1;
+            op_stats.tainted_mutations_count +=1;
+        }
 
-            if !is_unsafe_according_to_targeting && !is_target_tainted {
-                safe_mutations_count += 1;
-                op_stats.safe_mutations_count += 1;
-            }
+        if !is_unsafe_according_to_targeting && !is_target_tainted {
+            safe_mutations_count += 1;
+            op_stats.safe_mutations_count += 1;
+        }
+    }
 
-            match &mutant.mutations[..] {
-                [_] => {
-                    unbatched_mutations_count += 1;
-                    op_stats.unbatched_mutations_count += 1;
+    match mutation_parallelism {
+        Some(MutationParallelism::Batched(mutation_batches)) => {
+            for mutation_batch in mutation_batches {
+                for mutation in &mutation_batch.mutations {
+                    let Some(op_stats) = per_op_stats.get_mut(mutation.op_name()) else { unreachable!() };
+
+                    match &mutation_batch.mutations[..] {
+                        [_] => {
+                            unbatched_mutations_count += 1;
+                            op_stats.unbatched_mutations_count += 1;
+                        }
+                        _ => {
+                            batched_mutations_count += 1;
+                            op_stats.batched_mutations_count += 1;
+                        }
+                    }
                 }
-                _ => {
-                    batched_mutations_count += 1;
-                    op_stats.batched_mutations_count += 1;
-                }
+            }
+        }
+        _ => {
+            unbatched_mutations_count = total_mutations_count;
+            for (_, op_stat) in &mut per_op_stats {
+                op_stat.unbatched_mutations_count = op_stat.total_mutations_count;
             }
         }
     }
@@ -343,7 +347,7 @@ pub fn write_mutations<'tcx, 'trg>(
             unbatched_mutations_count,
         },
         per_op_stats,
-        mutations,
+        mutations: json_mutations,
         mutation_batches,
         targets: json_targets,
         duration,

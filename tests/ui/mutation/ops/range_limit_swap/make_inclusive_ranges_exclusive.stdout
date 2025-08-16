@@ -1,33 +1,25 @@
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:10:14: 10:19
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:10:14: 10:19
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:11:19: 11:23
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:11:19: 11:23
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:13:17: 13:21
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:13:17: 13:21
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:13:29: 13:34
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:13:29: 13:34
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:17:12: 17:16
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:17:12: 17:16
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:17:31: 17:36
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:17:31: 17:36
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:21:12: 21:16
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:21:12: 21:16
+  <-(0)- test
 
-1 mutation
-  - [range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:22:12: 22:17
-    <-(0)- test
+[range_limit_swap] exclude limit from range expression in f at tests/ui/mutation/ops/range_limit_swap/make_inclusive_ranges_exclusive.rs:22:12: 22:17
+  <-(0)- test
 
-8 mutants; 8 mutations; 8 safe; 0 unsafe (0 tainted); 0 batched; 8 unbatched
+8 mutations; 8 safe; 0 unsafe (0 tainted)

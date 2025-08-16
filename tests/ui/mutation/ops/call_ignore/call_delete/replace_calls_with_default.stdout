@@ -1,9 +1,7 @@
-1 mutation
-  - [call_delete] delete call to `f::g` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_delete/replace_calls_with_default.rs:25:13: 25:18
-    <-(0)- test
+[call_delete] delete call to `f::g` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_delete/replace_calls_with_default.rs:25:13: 25:18
+  <-(0)- test
 
-1 mutation
-  - [call_delete] delete call to `f::h` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_delete/replace_calls_with_default.rs:31:13: 31:21
-    <-(0)- test
+[call_delete] delete call to `f::h` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_delete/replace_calls_with_default.rs:31:13: 31:21
+  <-(0)- test
 
-2 mutants; 2 mutations; 2 safe; 0 unsafe (0 tainted); 0 batched; 2 unbatched
+2 mutations; 2 safe; 0 unsafe (0 tainted)

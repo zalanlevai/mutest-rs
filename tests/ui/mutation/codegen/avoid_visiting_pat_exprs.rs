@@ -1,3 +1,4 @@
+//@ print-mutations
 //@ build
 //@ stderr: empty
 

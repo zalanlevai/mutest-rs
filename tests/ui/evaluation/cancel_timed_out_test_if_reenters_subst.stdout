@@ -1,12 +1,10 @@
-1 mutation
-  - [bool_expr_negate] negate boolean expression in needs_cancellation at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:32:12: 32:16
-    <-(0)- test1
+[bool_expr_negate] negate boolean expression in needs_cancellation at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:32:12: 32:16
+  <-(0)- test1
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in trigger_second_mutation at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8: 54:13
-    <-(0)- test2
+[bool_expr_negate] negate boolean expression in trigger_second_mutation at tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst.rs:54:8: 54:13
+  <-(0)- test2
 
-2 mutants; 2 mutations; 2 safe; 0 unsafe (0 tainted); 0 batched; 2 unbatched
+2 mutations; 2 safe; 0 unsafe (0 tainted)
 
 ---
 

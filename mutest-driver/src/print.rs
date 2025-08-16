@@ -3,7 +3,7 @@ use std::iter;
 use mutest_emit::analysis::call_graph::{CallGraph, Callee, Target, Unsafety};
 use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::symbols::span_diagnostic_ord;
-use mutest_emit::codegen::mutation::{Mut, MutId, Mutant, MutationConflictGraph, UnsafeTargeting};
+use mutest_emit::codegen::mutation::{Mut, MutId, MutationBatch, MutationConflictGraph, UnsafeTargeting};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::DefId;
@@ -404,77 +404,93 @@ where
     }
 }
 
-pub fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeting: UnsafeTargeting, verbosity: u8) {
+pub fn print_mutations<'tcx>(tcx: TyCtxt<'tcx>, mutations: &[Mut], mutation_batches: Option<&[MutationBatch]>, unsafe_targeting: UnsafeTargeting, verbosity: u8) {
     let mut total_mutations_count = 0;
     let mut unsafe_mutations_count = 0;
     let mut tainted_mutations_count = 0;
     let mut unbatched_mutations_count = 0;
 
-    for mutant in mutants {
-        total_mutations_count += mutant.mutations.len();
-        if mutant.mutations.len() == 1 {
-            unbatched_mutations_count += 1;
-        }
-
-        if verbosity >= 1 {
-            print!("{}: ", mutant.id.index());
-        }
-        match mutant.mutations.len() {
-            1 => println!("1 mutation"),
-            _ => println!("{} mutations", mutant.mutations.len()),
+    let mut print_mutation = |mutation: &Mut, nested: bool| {
+        let mut unsafe_marker = "";
+        match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
+            (true, Unsafety::Tainted(_)) => {
+                unsafe_mutations_count += 1;
+                tainted_mutations_count += 1;
+                unsafe_marker = "(tainted) ";
+            }
+            (true, _) => {
+                unsafe_mutations_count += 1;
+                unsafe_marker = "(unsafe) ";
+            }
+            (false, _) => {}
         };
 
-        // Mutations are printed in assigned ID order.
-        let mut mutations_in_print_order = mutant.mutations.iter().collect::<Vec<_>>();
-        mutations_in_print_order.sort_unstable_by_key(|mutation| mutation.id.index());
+        if nested { print!("  - "); }
+        if verbosity >= 1 {
+            print!("{}: ", mutation.id.index());
+        }
+        println!("{unsafe_marker}[{op_name}] {display_name} in {def_path} at {display_location}",
+            op_name = mutation.op_name(),
+            display_name = mutation.display_name(),
+            def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
+            display_location = mutation.display_location(tcx.sess),
+        );
 
-        for mutation in mutations_in_print_order {
-            let mut unsafe_marker = "";
-            match (mutation.is_unsafe(unsafe_targeting), mutation.target.unsafety) {
-                (true, Unsafety::Tainted(_)) => {
-                    unsafe_mutations_count += 1;
-                    tainted_mutations_count += 1;
-                    unsafe_marker = "(tainted) ";
-                }
-                (true, _) => {
-                    unsafe_mutations_count += 1;
-                    unsafe_marker = "(unsafe) ";
-                }
-                (false, _) => {}
-            };
+        // Entry points are printed in order of distance first, within that by lexical order of their definition path.
+        let mut entry_points_in_print_order = mutation.target.reachable_from.iter()
+            .map(|(&test, entry_point)| (test.path_str(), test, entry_point))
+            .collect::<Vec<_>>();
+        entry_points_in_print_order.sort_unstable_by(|(test_a_path_str, _, entry_point_a), (test_b_path_str, _, entry_point_b)| {
+            Ord::cmp(&entry_point_a.distance, &entry_point_b.distance).then(Ord::cmp(test_a_path_str, test_b_path_str))
+        });
 
-            print!("  - ");
-            if verbosity >= 1 {
-                print!("{}: ", mutation.id.index());
-            }
-            println!("{unsafe_marker}[{op_name}] {display_name} in {def_path} at {display_location}",
-                op_name = mutation.op_name(),
-                display_name = mutation.display_name(),
-                def_path = tcx.def_path_str(mutation.target.def_id.to_def_id()),
-                display_location = mutation.display_location(tcx.sess),
+        for (test_path_str, test, entry_point) in entry_points_in_print_order {
+            if nested { print!("  "); }
+            println!("  <-({distance})- {tainted_marker}{test}",
+                distance = entry_point.distance,
+                tainted_marker = match mutation.target.is_tainted(test, unsafe_targeting) {
+                    true => "(tainted) ",
+                    false => "",
+                },
+                test = test_path_str,
             );
+        }
+    };
 
-            // Entry points are printed in order of distance first, within that by lexical order of their definition path.
-            let mut entry_points_in_print_order = mutation.target.reachable_from.iter()
-                .map(|(&test, entry_point)| (test.path_str(), test, entry_point))
-                .collect::<Vec<_>>();
-            entry_points_in_print_order.sort_unstable_by(|(test_a_path_str, _, entry_point_a), (test_b_path_str, _, entry_point_b)| {
-                Ord::cmp(&entry_point_a.distance, &entry_point_b.distance).then(Ord::cmp(test_a_path_str, test_b_path_str))
-            });
-
-            for (test_path_str, test, entry_point) in entry_points_in_print_order {
-                println!("    <-({distance})- {tainted_marker}{test}",
-                    distance = entry_point.distance,
-                    tainted_marker = match mutation.target.is_tainted(test, unsafe_targeting) {
-                        true => "(tainted) ",
-                        false => "",
-                    },
-                    test = test_path_str,
-                );
+    match mutation_batches {
+        None => {
+            // Mutations are printed in assigned ID order.
+            for mutation in mutations {
+                total_mutations_count += 1;
+                print_mutation(mutation, false);
+                println!();
             }
         }
+        Some(mutation_batches) => {
+            for mutation_batch in mutation_batches {
+                total_mutations_count += mutation_batch.mutations.len();
+                if mutation_batch.mutations.len() == 1 {
+                    unbatched_mutations_count += 1;
+                }
 
-        println!();
+                if verbosity >= 1 {
+                    print!("{}: ", mutation_batch.id.index());
+                }
+                match mutation_batch.mutations.len() {
+                    1 => println!("batch of 1 mutation"),
+                    _ => println!("batch of {} mutations", mutation_batch.mutations.len()),
+                };
+
+                // Mutations are printed in assigned ID order.
+                let mut mutations_in_print_order = mutation_batch.mutations.iter().collect::<Vec<_>>();
+                mutations_in_print_order.sort_unstable_by_key(|mutation| mutation.id.index());
+
+                for mutation in mutations_in_print_order {
+                    print_mutation(mutation, true);
+                }
+                println!();
+            }
+        }
     }
 
     if verbosity >= 1 {
@@ -487,13 +503,19 @@ pub fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeti
         }
 
         let mut mutation_op_stats: FxHashMap<&str, MutationOpStats> = Default::default();
-        for mutant in mutants {
-            for mutation in &mutant.mutations {
-                let op_stats = mutation_op_stats.entry(mutation.op_name()).or_default();
-                op_stats.total_mutations_count += 1;
-                if mutation.is_unsafe(unsafe_targeting) { op_stats.unsafe_mutations_count += 1; }
-                if let Unsafety::Tainted(_) = mutation.target.unsafety { op_stats.tainted_mutations_count +=1; }
-                if mutant.mutations.len() == 1 { op_stats.unbatched_mutations_count += 1; }
+        for mutation in mutations {
+            let op_stats = mutation_op_stats.entry(mutation.op_name()).or_default();
+            op_stats.total_mutations_count += 1;
+            if mutation.is_unsafe(unsafe_targeting) { op_stats.unsafe_mutations_count += 1; }
+            if let Unsafety::Tainted(_) = mutation.target.unsafety { op_stats.tainted_mutations_count +=1; }
+        }
+        if let Some(mutation_batches) = mutation_batches {
+            for mutation_batch in mutation_batches {
+                if mutation_batch.mutations.len() > 1 { continue; }
+                for mutation in &mutation_batch.mutations {
+                    let Some(op_stats) = mutation_op_stats.get_mut(mutation.op_name()) else { unreachable!() };
+                    op_stats.unbatched_mutations_count += 1;
+                }
             }
         }
 
@@ -509,27 +531,36 @@ pub fn print_mutants<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], unsafe_targeti
         for op_name in mutest_operators::ALL {
             let op_stats = mutation_op_stats.get(op_name).map(|s| *s).unwrap_or_default();
 
-            println!("{op_name:>op_name_w$}: {mutations_pct:>6}. {mutations:>mutations_w$} mutations; {safe:>safe_w$} safe; {unsafe:>unsafe_w$} unsafe ({tainted:>tainted_w$} tainted); {batched:>batched_w$} batched; {unbatched:>unbatched_w$} unbatched",
+            print!("{op_name:>op_name_w$}: {mutations_pct:>6}. {mutations:>mutations_w$} mutations; {safe:>safe_w$} safe; {unsafe:>unsafe_w$} unsafe ({tainted:>tainted_w$} tainted)",
                 mutations_pct = format!("{:.2}%", op_stats.total_mutations_count as f64 / total_mutations_count as f64 * 100_f64),
                 mutations = op_stats.total_mutations_count,
                 safe = op_stats.total_mutations_count - op_stats.unsafe_mutations_count,
                 r#unsafe = op_stats.unsafe_mutations_count,
                 tainted = op_stats.tainted_mutations_count,
-                batched = op_stats.total_mutations_count - op_stats.unbatched_mutations_count,
-                unbatched = op_stats.unbatched_mutations_count,
             );
+            if let Some(_mutation_batches) = mutation_batches {
+                print!("; {batched:>batched_w$} batched; {unbatched:>unbatched_w$} unbatched",
+                    batched = op_stats.total_mutations_count - op_stats.unbatched_mutations_count,
+                    unbatched = op_stats.unbatched_mutations_count,
+                );
+            }
+            println!();
         }
 
         println!();
     }
 
-    println!("{mutants} mutants; {mutations} mutations; {safe} safe; {unsafe} unsafe ({tainted} tainted); {batched} batched; {unbatched} unbatched",
-        mutants = mutants.len(),
+    println!("{mutations} mutations; {safe} safe; {unsafe} unsafe ({tainted} tainted)",
         mutations = total_mutations_count,
         safe = total_mutations_count - unsafe_mutations_count,
         r#unsafe = unsafe_mutations_count,
         tainted = tainted_mutations_count,
-        batched = total_mutations_count - unbatched_mutations_count,
-        unbatched = unbatched_mutations_count,
     );
+    if let Some(mutation_batches) = mutation_batches {
+        println!("{batches} batches; {batched} batched; {unbatched} unbatched",
+            batches = mutation_batches.len(),
+            batched = total_mutations_count - unbatched_mutations_count,
+            unbatched = unbatched_mutations_count,
+        );
+    }
 }

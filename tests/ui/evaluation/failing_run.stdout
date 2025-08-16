@@ -1,20 +1,16 @@
-1 mutation
-  - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/failing_run.rs:7:15: 7:21
-    <-(0)- non_asserting_test
+[arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/failing_run.rs:7:15: 7:21
+  <-(0)- non_asserting_test
 
-1 mutation
-  - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/failing_run.rs:7:23: 7:29
-    <-(0)- non_asserting_test
+[arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/failing_run.rs:7:23: 7:29
+  <-(0)- non_asserting_test
 
-1 mutation
-  - [math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
-    <-(0)- non_asserting_test
+[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
+  <-(0)- non_asserting_test
 
-1 mutation
-  - [math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
-    <-(0)- non_asserting_test
+[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
+  <-(0)- non_asserting_test
 
-4 mutants; 4 mutations; 4 safe; 0 unsafe (0 tainted); 0 batched; 4 unbatched
+4 mutations; 4 safe; 0 unsafe (0 tainted)
 
 ---
 

@@ -1,8 +1,8 @@
 use std::iter;
 
-use rustc_hash::FxHashSet;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
+use smallvec::smallvec;
 use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::call_graph::Unsafety;
@@ -11,7 +11,7 @@ use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::expansion::TcxExpansionExt;
-use crate::codegen::mutation::{Mut, Mutant, SubstLoc, UnsafeTargeting};
+use crate::codegen::mutation::{Mut, MutationBatch, MutationBatchId, MutationParallelism, SubstLoc, UnsafeTargeting};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
@@ -72,10 +72,10 @@ pub fn bake_mutation(mutation: &Mut, sp: Span, sess: &Session, unsafe_targeting:
     ])
 }
 
-pub fn bake_mutant(mutant: &Mutant, sp: Span, _sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
+pub fn bake_mutation_batch(mutation_batch: &MutationBatch, sp: Span, _sess: &Session, mutations_expr: P<ast::Expr>, subst_map_expr: P<ast::Expr>) -> P<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutantMeta(sp)), thin_vec![
         ast::mk::expr_struct_field(sp, Ident::new(*sym::id, sp), {
-            ast::mk::expr_u32(sp, mutant.id.index())
+            ast::mk::expr_u32(sp, mutation_batch.id.index())
         }),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::mutations, sp), mutations_expr),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::substitutions, sp), subst_map_expr),
@@ -103,7 +103,7 @@ fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
     })))
 }
 
-fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &[&Mut], unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
+fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &[Mut], unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
     let g = &sess.psess.attr_id_generator;
 
     let items = iter::once(ast::mk::item_extern_crate(sp, *sym::mutest_runtime, None))
@@ -131,11 +131,20 @@ fn mk_mutations_mod(sp: Span, sess: &Session, mutations: &[&Mut], unsafe_targeti
     ast::mk::item_mod(sp, vis, ident, items).map(|mut m| { m.attrs = thin_vec![allow_non_upper_case_globals_attr]; m })
 }
 
-fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_locs: &[SubstLoc]) -> P<ast::Item> {
-    let elements = mutants.iter()
-        .map(|mutant| {
+fn mk_mutants_slice_const<'trg, 'm>(sp: Span, sess: &Session, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>, subst_locs: &[SubstLoc]) -> P<ast::Item> {
+    // HACK: The generated harness code still requires mutation batches in all cases, so we crudely emulate them for now.
+    let mutation_batches: Box<dyn Iterator<Item = MutationBatch>> = match mutation_parallelism {
+        None
+        => Box::new(mutations.iter().enumerate().map(|(i, mutation)| MutationBatch { id: MutationBatchId(i as u32 + 1), mutations: smallvec![mutation] })),
+
+        Some(MutationParallelism::Batched(mutation_batches))
+        => Box::new(mutation_batches.iter().map(|mutation_batch| mutation_batch.clone())),
+    };
+
+    let elements = mutation_batches
+        .map(|mutation_batch| {
             // &[...]
-            let elements = mutant.mutations.iter()
+            let elements = mutation_batch.mutations.iter()
                 .map(|mutation| {
                     // &mutations::$mut_id
                     ast::mk::expr_ref(sp, ast::mk::expr_path(ast::mk::pathx(sp,
@@ -149,7 +158,7 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_lo
             let subst_map_entries = subst_locs.iter().enumerate()
                 .flat_map(|(subst_loc_idx, subst_loc)| {
                     // ($subst_loc_idx, SubstMeta { mutation: &crate::mutest_generated::mutations::$mut_id })
-                    let mutation = mutant.mutations.iter().find(|m| m.substs.iter().any(|s| s.location == *subst_loc));
+                    let mutation = mutation_batch.mutations.iter().find(|m| m.substs.iter().any(|s| s.location == *subst_loc));
                     match mutation {
                         Some(mutation) => {
                             let subst_loc_idx_expr = ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&subst_loc_idx.to_string()), None);
@@ -181,7 +190,7 @@ fn mk_mutants_slice_const(sp: Span, sess: &Session, mutants: &[Mutant], subst_lo
             ]));
 
             // &MutantMeta { ... }
-            ast::mk::expr_ref(sp, bake_mutant(mutant, sp, sess, mutations_expr, subst_map_expr))
+            ast::mk::expr_ref(sp, bake_mutation_batch(&mutation_batch, sp, sess, mutations_expr, subst_map_expr))
         })
         .collect::<ThinVec<_>>();
 
@@ -237,8 +246,9 @@ fn mk_harness_fn(sp: Span) -> P<ast::Item> {
 struct HarnessGenerator<'tcx, 'trg, 'm> {
     sess: &'tcx Session,
     unsafe_targeting: UnsafeTargeting,
-    mutants: &'m [Mutant<'trg, 'm>],
+    mutations: &'m [Mut<'trg, 'm>],
     subst_locs: &'m [SubstLoc],
+    mutation_parallelism: Option<MutationParallelism<'trg, 'm>>,
     def_site: Span,
 }
 
@@ -249,8 +259,6 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
         let g = &self.sess.psess.attr_id_generator;
 
         let def = self.def_site;
-
-        let mutations = FxHashSet::from_iter(self.mutants.iter().flat_map(|m| &m.mutations)).into_iter().collect::<Vec<_>>();
 
         // #![feature(test)]
         let feature_test_attr = ast::mk::attr_inner(g, def,
@@ -291,8 +299,8 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
                 extern_crate_test,
                 extern_crate_mutest_runtime,
                 mk_subst_map_ty_alias(def, &self.subst_locs),
-                mk_mutations_mod(def, self.sess, &mutations, self.unsafe_targeting),
-                mk_mutants_slice_const(def, self.sess, self.mutants, &self.subst_locs),
+                mk_mutations_mod(def, self.sess, self.mutations, self.unsafe_targeting),
+                mk_mutants_slice_const(def, self.sess, self.mutations, self.mutation_parallelism, &self.subst_locs),
                 mk_active_mutant_handle_static(def),
                 mk_harness_fn(def),
             ],
@@ -302,7 +310,14 @@ impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg,
     }
 }
 
-pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], subst_locs: &[SubstLoc], krate: &mut ast::Crate, unsafe_targeting: UnsafeTargeting) {
+pub fn generate_harness<'tcx, 'trg, 'm>(
+    tcx: TyCtxt<'tcx>,
+    mutations: &'m [Mut<'trg, 'm>],
+    subst_locs: &'m [SubstLoc],
+    mutation_parallelism: Option<MutationParallelism<'trg, 'm>>,
+    krate: &mut ast::Crate,
+    unsafe_targeting: UnsafeTargeting,
+) {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
         DUMMY_SP,
@@ -310,6 +325,6 @@ pub fn generate_harness<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], subst_locs:
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut generator = HarnessGenerator { sess: tcx.sess, unsafe_targeting, mutants, subst_locs, def_site };
+    let mut generator = HarnessGenerator { sess: tcx.sess, unsafe_targeting, mutations, subst_locs, mutation_parallelism, def_site };
     generator.visit_crate(krate);
 }

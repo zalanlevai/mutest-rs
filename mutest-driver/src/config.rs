@@ -33,7 +33,7 @@ pub struct PrintOptions {
     pub mutation_targets: Option<()>,
     pub call_graph: Option<CallGraphOptions>,
     pub conflict_graph: Option<ConflictGraphOptions>,
-    pub mutants: Option<()>,
+    pub mutations: Option<()>,
     pub code: Option<()>,
 }
 
@@ -44,7 +44,7 @@ impl PrintOptions {
             && self.mutation_targets.is_none()
             && self.call_graph.is_none()
             && self.conflict_graph.is_none()
-            && self.mutants.is_none()
+            && self.mutations.is_none()
             && self.code.is_none()
     }
 }
@@ -61,7 +61,6 @@ pub enum Mode {
 pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
 
 pub enum MutationBatchingAlgorithm {
-    None,
     Random,
     Greedy { ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>, epsilon: Option<f64> },
     SimulatedAnnealing,
@@ -84,6 +83,16 @@ impl MutationBatchingRandomness {
     }
 }
 
+pub struct MutationBatchingOptions {
+    pub algorithm: MutationBatchingAlgorithm,
+    pub randomness: MutationBatchingRandomness,
+    pub batch_max_mutations_count: usize,
+}
+
+pub enum MutationParallelism {
+    Batching(MutationBatchingOptions),
+}
+
 pub struct VerifyOptions {
     pub ast_lowering: bool,
 }
@@ -98,9 +107,7 @@ pub struct Options<'op, 'm> {
     pub call_graph_depth_limit: Option<usize>,
     pub call_graph_trace_length_limit: Option<usize>,
     pub mutation_depth: usize,
-    pub mutation_batching_algorithm: MutationBatchingAlgorithm,
-    pub mutation_batching_randomness: MutationBatchingRandomness,
-    pub mutant_max_mutations_count: usize,
+    pub mutation_parallelism: Option<MutationParallelism>,
 
     pub write_opts: Option<WriteOptions>,
     pub verify_opts: VerifyOptions,

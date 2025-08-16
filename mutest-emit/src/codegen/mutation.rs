@@ -657,28 +657,9 @@ pub fn validate_mutations<'trg, 'm>(mutations: &'m [Mut<'trg, 'm>]) -> Result<()
     Err(errors)
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct MutantId(u32);
-
-impl MutantId {
-    pub fn index(&self) -> u32 {
-        self.0
-    }
-}
-
-pub struct Mutant<'trg, 'm> {
-    pub id: MutantId,
-    pub mutations: Vec<Mut<'trg, 'm>>,
-}
-
-impl<'trg, 'm> Mutant<'trg, 'm> {
-    pub fn iter_mutations(&self) -> impl Iterator<Item = &BoxedMutation<'m>> {
-        self.mutations.iter().map(|m| &m.mutation)
-    }
-
-    pub fn iter_substitutions(&self) -> impl Iterator<Item = &SubstDef> {
-        self.mutations.iter().flat_map(|m| &m.substs)
-    }
+#[derive(Copy, Clone)]
+pub enum MutationParallelism<'trg, 'm> {
+    Batched(&'m [MutationBatch<'trg, 'm>]),
 }
 
 pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
@@ -767,7 +748,7 @@ pub fn generate_mutation_conflict_graph<'trg, 'm>(mutations: &[Mut<'trg, 'm>], u
                 // Unsafe mutations cannot be batched with any other mutation.
                 || mutation.is_unsafe(unsafe_targeting)
                 || other.is_unsafe(unsafe_targeting)
-                // To discern results related to the various mutations of a mutant, they have to have distinct entry points.
+                // To discern results related to the various concurrent mutations, they have to have distinct entry points.
                 || conflicting_targets(&mutation.target, &other.target)
                 // The substitutions that make up each mutation cannot conflict with each other.
                 || mutation.substs.iter().any(|s| other.substs.iter().any(|s_other| conflicting_substs(s, s_other)));
@@ -783,21 +764,46 @@ pub fn generate_mutation_conflict_graph<'trg, 'm>(mutations: &[Mut<'trg, 'm>], u
     MutationConflictGraph { n_mutations, unsafes, conflicts, phantom: PhantomData }
 }
 
-pub enum MutationBatchesValidationError<'trg, 'm> {
-    ConflictingMutationsInBatch(&'m Mutant<'trg, 'm>, SmallVec<[&'m Mut<'trg, 'm>; 2]>),
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct MutationBatchId(pub(crate) u32);
+
+impl MutationBatchId {
+    pub fn index(&self) -> u32 {
+        self.0
+    }
 }
 
-pub fn validate_mutation_batches<'trg, 'm>(mutants: &'m [Mutant<'trg, 'm>], mutation_conflict_graph: &MutationConflictGraph<'m>) -> Result<(), Vec<MutationBatchesValidationError<'trg, 'm>>> {
+#[derive(Clone)]
+pub struct MutationBatch<'trg, 'm> {
+    pub id: MutationBatchId,
+    pub mutations: SmallVec<[&'m Mut<'trg, 'm>; 1]>,
+}
+
+impl<'trg, 'm> MutationBatch<'trg, 'm> {
+    pub fn iter_mutations(&self) -> impl Iterator<Item = &BoxedMutation<'m>> {
+        self.mutations.iter().map(|m| &m.mutation)
+    }
+
+    pub fn iter_substitutions(&self) -> impl Iterator<Item = &SubstDef> {
+        self.mutations.iter().flat_map(|m| &m.substs)
+    }
+}
+
+pub enum MutationBatchesValidationError<'trg, 'm, 'b> {
+    ConflictingMutationsInBatch(&'b MutationBatch<'trg, 'm>, SmallVec<[&'m Mut<'trg, 'm>; 2]>),
+}
+
+pub fn validate_mutation_batches<'trg, 'm, 'b>(mutation_batches: &'b [MutationBatch<'trg, 'm>], mutation_conflict_graph: &MutationConflictGraph<'m>) -> Result<(), Vec<MutationBatchesValidationError<'trg, 'm, 'b>>> {
     use MutationBatchesValidationError::*;
 
     let mut errors = vec![];
 
-    for mutant in mutants {
-        let mut iterator = mutant.mutations.iter();
+    for mutation_batch in mutation_batches {
+        let mut iterator = mutation_batch.mutations.iter();
         while let Some(mutation) = iterator.next() {
             for other in iterator.clone() {
                 if mutation_conflict_graph.conflicting_mutations(mutation.id, other.id) {
-                    errors.push(ConflictingMutationsInBatch(mutant, smallvec![mutation, other]))
+                    errors.push(ConflictingMutationsInBatch(mutation_batch, smallvec![*mutation, *other]))
                 }
             }
         }
@@ -807,53 +813,53 @@ pub fn validate_mutation_batches<'trg, 'm>(mutants: &'m [Mutant<'trg, 'm>], muta
     Err(errors)
 }
 
-pub fn batch_mutations_dummy<'trg, 'm>(mutations: Vec<Mut<'trg, 'm>>) -> Vec<Mutant<'trg, 'm>> {
-    let mut mutants: Vec<Mutant<'trg, 'm>> = Vec::with_capacity(mutations.len());
-    let mut next_mutant_index = 1;
+pub fn batch_mutations_dummy<'trg, 'm>(mutations: &'m [Mut<'trg, 'm>]) -> Vec<MutationBatch<'trg, 'm>> {
+    let mut batches = Vec::with_capacity(mutations.len());
+    let mut next_batch_index = 1;
 
     for mutation in mutations {
-        mutants.push(Mutant { id: MutantId(next_mutant_index), mutations: vec![mutation] });
-        next_mutant_index += 1;
+        batches.push(MutationBatch { id: MutationBatchId(next_batch_index), mutations: smallvec![mutation] });
+        next_batch_index += 1;
     }
 
-    mutants
+    batches
 }
 
-fn compatible_mutant<'trg, 'm>(
+fn compatible_mutation_batch<'trg, 'm>(
     mutation: &Mut<'trg, 'm>,
-    mutant: &Mutant<'trg, 'm>,
+    mutation_batch: &MutationBatch<'trg, 'm>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
-    mutant_max_mutations_count: usize,
+    batch_max_mutations_count: usize,
 ) -> bool {
-    // Ensure the mutant has not already reached capacity.
-    if mutant.mutations.len() >= mutant_max_mutations_count { return false; }
+    // Ensure the mutation batch has not already reached capacity.
+    if mutation_batch.mutations.len() >= batch_max_mutations_count { return false; }
 
-    // The mutation must not conflict with any other mutation already in the mutant.
-    if mutant.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { return false; }
+    // The mutation must not conflict with any other mutation already in the batch.
+    if mutation_batch.mutations.iter().any(|m| mutation_conflict_graph.conflicting_mutations(m.id, mutation.id)) { return false; }
 
     true
 }
 
-/// Pick a compatible mutant for the mutation by randomly picking one from all compatible mutants.
-/// If no compatible mutants are available, then the function returns `None`.
-fn choose_random_mutant<'trg, 'm, 'a>(
+/// Pick a compatible mutation batch for the mutation by randomly picking one from all compatible mutation batches.
+/// If no compatible mutation batches are available, then the function returns `None`.
+fn choose_random_mutation_batch<'trg, 'm, 'a>(
     mutation: &Mut<'trg, 'm>,
-    mutants: &'a mut [Mutant<'trg, 'm>],
+    mutation_batches: &'a mut [MutationBatch<'trg, 'm>],
     mutation_conflict_graph: &MutationConflictGraph<'m>,
-    mutant_max_mutations_count: usize,
+    batch_max_mutations_count: usize,
     rng: &mut impl rand::Rng,
-) -> Option<&'a mut Mutant<'trg, 'm>> {
+) -> Option<&'a mut MutationBatch<'trg, 'm>> {
     use rand::prelude::*;
 
-    if mutants.is_empty() { return None; }
+    if mutation_batches.is_empty() { return None; }
 
-    // Unsafe mutations are isolated into their own mutant.
+    // Unsafe mutations are isolated into their own mutation batch.
     if mutation_conflict_graph.is_unsafe(mutation.id) { return None; }
 
-    // Filter out mutants so that we only consider compatible mutants.
-    let possible_mutants = mutants.iter_mut().filter(|mutant| compatible_mutant(mutation, mutant, mutation_conflict_graph, mutant_max_mutations_count));
-    // Choose random compatible mutant, if available.
-    possible_mutants.choose_stable(rng)
+    // Filter out mutation batches so that we only consider compatible ones.
+    let possible_mutation_batches = mutation_batches.iter_mut().filter(|mutation_batch| compatible_mutation_batch(mutation, mutation_batch, mutation_conflict_graph, batch_max_mutations_count));
+    // Choose random compatible mutation batch, if available.
+    possible_mutation_batches.choose_stable(rng)
 }
 
 #[derive(Clone, Copy)]
@@ -864,20 +870,22 @@ pub enum GreedyMutationBatchingOrderingHeuristic {
 }
 
 pub fn batch_mutations_greedy<'trg, 'm>(
-    mut mutations: Vec<Mut<'trg, 'm>>,
+    mutations: &'m [Mut<'trg, 'm>],
     mutation_conflict_graph: &MutationConflictGraph<'m>,
     ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>,
     epsilon: Option<f64>,
     mut rng: Option<&mut impl rand::Rng>,
-    mutant_max_mutations_count: usize,
-) -> Vec<Mutant<'trg, 'm>> {
+    batch_max_mutations_count: usize,
+) -> Vec<MutationBatch<'trg, 'm>> {
+    let mut mutations_in_consideration_order = mutations.iter().collect::<Vec<_>>();
+
     use GreedyMutationBatchingOrderingHeuristic::*;
     match ordering_heuristic {
         Some(ConflictsAsc | ConflictsDesc) => {
             let mutation_conflict_heuristic = mutations.iter()
                 .map(|mutation| {
                     let mut conflict_heuristic = 0_usize;
-                    for other in &mutations {
+                    for other in mutations {
                         if mutation == other { continue; }
                         if mutation_conflict_graph.conflicting_mutations(mutation.id, other.id) {
                             conflict_heuristic += 1;
@@ -887,9 +895,9 @@ pub fn batch_mutations_greedy<'trg, 'm>(
                 })
                 .collect::<FxHashMap<_, _>>();
 
-            mutations.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)));
+            mutations_in_consideration_order.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)));
             if let Some(ConflictsDesc) = ordering_heuristic {
-                mutations.reverse();
+                mutations_in_consideration_order.reverse();
             }
         }
 
@@ -897,140 +905,143 @@ pub fn batch_mutations_greedy<'trg, 'm>(
             use rand::prelude::*;
             let Some(ref mut rng) = rng else { panic!("random ordering requested but rng not provided") };
 
-            mutations.shuffle(rng);
+            mutations_in_consideration_order.shuffle(rng);
         }
 
         None => {}
     }
 
-    let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
-    let mut next_mutant_index = 1;
+    let mut batches = vec![];
+    let mut next_batch_index = 1;
 
-    for mutation in mutations {
-        let mutant_candidate = 'mutant_candidate: {
-            // Unsafe mutations are isolated into their own mutant.
-            if mutation_conflict_graph.is_unsafe(mutation.id) { break 'mutant_candidate None; }
+    for mutation in mutations_in_consideration_order {
+        let batch_candidate = 'batch_candidate: {
+            // Unsafe mutations are isolated into their own batch.
+            if mutation_conflict_graph.is_unsafe(mutation.id) { break 'batch_candidate None; }
 
             // Attempt to make a random choice if the optional epsilon parameter is used.
             if let Some(epsilon) = epsilon {
                 let Some(ref mut rng) = rng else { panic!("epsilon random choice requested but rng not provided") };
 
-                // When using epsilon greedy batching, a random choice with probability epsilon is made for every
-                // mutation. If the random choice is true, then instead of making a greedy choice, a random compatible
-                // mutant is picked the same way as in random batching.
+                // When using epsilon greedy batching, a random choice with probability epsilon
+                // is made for every mutation.
+                // If the random choice is true, then instead of making a greedy choice,
+                // a random compatible mutation batch is picked the same way as in random batching.
                 if rng.random_bool(epsilon) {
-                    break 'mutant_candidate choose_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
+                    break 'batch_candidate choose_random_mutation_batch(&mutation, &mut batches, mutation_conflict_graph, batch_max_mutations_count, rng);
                 }
             }
 
-            // Pick the first mutant the current mutation is compatible with.
-            mutants.iter_mut().find(|mutant| compatible_mutant(&mutation, mutant, mutation_conflict_graph, mutant_max_mutations_count))
+            // Pick the first mutation batch the current mutation is compatible with.
+            batches.iter_mut().find(|mutation_batch| compatible_mutation_batch(&mutation, mutation_batch, mutation_conflict_graph, batch_max_mutations_count))
         };
 
-        match mutant_candidate {
-            Some(mutant) => mutant.mutations.push(mutation),
+        match batch_candidate {
+            Some(batch) => batch.mutations.push(mutation),
             None => {
-                mutants.push(Mutant { id: MutantId(next_mutant_index), mutations: vec![mutation] });
-                next_mutant_index += 1;
+                batches.push(MutationBatch { id: MutationBatchId(next_batch_index), mutations: smallvec![mutation] });
+                next_batch_index += 1;
             }
         }
     }
 
-    mutants
+    batches
 }
 
 pub fn batch_mutations_random<'trg, 'm>(
-    mutations: Vec<Mut<'trg, 'm>>,
+    mutations: &'m [Mut<'trg, 'm>],
     mutation_conflict_graph: &MutationConflictGraph<'m>,
-    mutant_max_mutations_count: usize,
+    batch_max_mutations_count: usize,
     rng: &mut impl rand::Rng,
-) -> Vec<Mutant<'trg, 'm>> {
-    let mut mutants: Vec<Mutant<'trg, 'm>> = vec![];
-    let mut next_mutant_index = 1;
+) -> Vec<MutationBatch<'trg, 'm>> {
+    let mut batches = vec![];
+    let mut next_batch_index = 1;
 
     for mutation in mutations {
-        let mutant_candidate = choose_random_mutant(&mutation, &mut mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
+        let batch_candidate = choose_random_mutation_batch(&mutation, &mut batches, mutation_conflict_graph, batch_max_mutations_count, rng);
 
-        match mutant_candidate {
-            Some(mutant) => mutant.mutations.push(mutation),
+        match batch_candidate {
+            Some(batch) => batch.mutations.push(mutation),
             None => {
-                mutants.push(Mutant { id: MutantId(next_mutant_index), mutations: vec![mutation] });
-                next_mutant_index += 1;
+                batches.push(MutationBatch { id: MutationBatchId(next_batch_index), mutations: smallvec![mutation] });
+                next_batch_index += 1;
             }
         }
     }
 
-    mutants
+    batches
 }
 
 pub fn optimize_batches_simulated_annealing<'trg, 'm>(
-    mutants: &mut Vec<Mutant<'trg, 'm>>,
+    mutation_batches: &mut Vec<MutationBatch<'trg, 'm>>,
     mutation_conflict_graph: &MutationConflictGraph<'m>,
-    mutant_max_mutations_count: usize,
+    batch_max_mutations_count: usize,
     max_iterations: usize,
     rng: &mut impl rand::Rng,
 ) {
     #[derive(Clone, Copy)]
     enum StateChange {
-        MoveMutation { mutation_id: MutId, old_mutant_id: MutantId, new_mutant_id: MutantId },
+        MoveMutation { mutation_id: MutId, old_batch_id: MutationBatchId, new_batch_id: MutationBatchId },
     }
 
     impl StateChange {
-        fn apply<'trg, 'm>(&self, mutants: &mut Vec<Mutant<'trg, 'm>>) {
+        fn apply<'trg, 'm>(&self, mutation_batches: &mut Vec<MutationBatch<'trg, 'm>>) {
             match self {
-                Self::MoveMutation { mutation_id, old_mutant_id, new_mutant_id } => {
-                    let Some(old_mutant_idx) = mutants.iter().position(|m| m.id == *old_mutant_id) else { unreachable!(); };
-                    let old_mutant = &mut mutants[old_mutant_idx];
-                    let Some(mutation) = old_mutant.mutations.extract_if(.., |m| m.id == *mutation_id).next() else { unreachable!() };
-                    if old_mutant.mutations.is_empty() { mutants.remove(old_mutant_idx); }
+                Self::MoveMutation { mutation_id, old_batch_id, new_batch_id } => {
+                    let Some(old_batch_idx) = mutation_batches.iter().position(|m| m.id == *old_batch_id) else { unreachable!(); };
+                    let old_batch = &mut mutation_batches[old_batch_idx];
+                    // TODO: Use `extract_if` once SmallVec adds stable support for it.
+                    let Some(mutation_idx) = old_batch.mutations.iter().position(|m| m.id == *mutation_id) else { unreachable!() };
+                    let mutation = old_batch.mutations.remove(mutation_idx);
+                    if old_batch.mutations.is_empty() { mutation_batches.remove(old_batch_idx); }
 
-                    let Some(new_mutant) = mutants.iter_mut().find(|m| m.id == *new_mutant_id) else { unreachable!(); };
-                    new_mutant.mutations.push(mutation);
+                    let Some(new_batch) = mutation_batches.iter_mut().find(|m| m.id == *new_batch_id) else { unreachable!(); };
+                    new_batch.mutations.push(mutation);
                 }
             }
         }
     }
 
     fn random_neighbour_state<'trg, 'm>(
-        mutants: &mut Vec<Mutant<'trg, 'm>>,
+        mutation_batches: &mut Vec<MutationBatch<'trg, 'm>>,
         mutation_conflict_graph: &MutationConflictGraph<'m>,
-        mutant_max_mutations_count: usize,
+        batch_max_mutations_count: usize,
         rng: &mut impl rand::Rng,
     ) -> StateChange {
         use rand::prelude::*;
 
-        let (random_mutant, random_mutation, new_random_mutant) = loop {
-            let Some(random_mutant) = mutants.choose(rng) else { unreachable!(); };
-            let Some(random_mutation) = random_mutant.mutations.choose(rng) else { unreachable!(); };
+        let (random_batch, random_mutation, new_random_batch) = loop {
+            let Some(random_batch) = mutation_batches.choose(rng) else { unreachable!(); };
+            let Some(random_mutation) = random_batch.mutations.choose(rng) else { unreachable!(); };
 
-            let compatible_mutants = mutants.iter()
-                .filter(|m| m.id != random_mutant.id)
-                .filter(|m| compatible_mutant(random_mutation, m, mutation_conflict_graph, mutant_max_mutations_count));
-            let Some(new_random_mutant) = compatible_mutants.choose_stable(rng) else { continue; };
+            let compatible_mutation_batches = mutation_batches.iter()
+                .filter(|m| m.id != random_batch.id)
+                .filter(|m| compatible_mutation_batch(random_mutation, m, mutation_conflict_graph, batch_max_mutations_count));
+            let Some(new_random_batch) = compatible_mutation_batches.choose_stable(rng) else { continue; };
 
-            break (random_mutant, random_mutation, new_random_mutant);
+            break (random_batch, random_mutation, new_random_batch);
         };
 
-        StateChange::MoveMutation { mutation_id: random_mutation.id, old_mutant_id: random_mutant.id, new_mutant_id: new_random_mutant.id }
+        StateChange::MoveMutation { mutation_id: random_mutation.id, old_batch_id: random_batch.id, new_batch_id: new_random_batch.id }
     }
 
     fn temperature(iterations_expended: f64, max_iterations: usize) -> f64 {
         max_iterations as f64 * (1_f64 - iterations_expended)
     }
 
-    fn energy<'trg, 'm>(mutants: &[Mutant<'trg, 'm>], state_change: Option<StateChange>) -> f64 {
-        let mut mutants_count = mutants.len();
+    fn energy<'trg, 'm>(mutation_batches: &[MutationBatch<'trg, 'm>], state_change: Option<StateChange>) -> f64 {
+        let mut batch_count = mutation_batches.len();
 
         if let Some(state_change) = state_change {
             match state_change {
-                StateChange::MoveMutation { mutation_id: _, old_mutant_id, new_mutant_id: _ } => {
-                    let Some(old_mutant) = mutants.iter().find(|m| m.id == old_mutant_id) else { unreachable!(); };
-                    if old_mutant.mutations.len() <= 1 { mutants_count -= 1; }
+                StateChange::MoveMutation { mutation_id: _, old_batch_id, new_batch_id: _ } => {
+                    let Some(old_batch) = mutation_batches.iter().find(|m| m.id == old_batch_id) else { unreachable!(); };
+                    if old_batch.mutations.len() <= 1 { batch_count -= 1; }
                 }
             }
         }
 
-        mutants_count as f64
+        batch_count as f64
     }
 
     fn acceptance_probability(curr_energy: f64, next_energy: f64, temp: f64) -> f64 {
@@ -1041,12 +1052,12 @@ pub fn optimize_batches_simulated_annealing<'trg, 'm>(
     for i in 0..max_iterations {
         let temp = temperature(1_f64 - ((i + 1) as f64 / max_iterations as f64), max_iterations);
 
-        let curr_energy = energy(mutants, None);
+        let curr_energy = energy(mutation_batches, None);
 
-        let state_change = random_neighbour_state(mutants, mutation_conflict_graph, mutant_max_mutations_count, rng);
-        let next_energy = energy(mutants, Some(state_change));
+        let state_change = random_neighbour_state(mutation_batches, mutation_conflict_graph, batch_max_mutations_count, rng);
+        let next_energy = energy(mutation_batches, Some(state_change));
         if acceptance_probability(curr_energy, next_energy, temp) >= rng.random_range(0_f64..1_f64) {
-            state_change.apply(mutants);
+            state_change.apply(mutation_batches);
         }
     }
 }

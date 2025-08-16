@@ -1,65 +1,49 @@
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:8:13: 8:40
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:8:13: 8:40
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:34
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:34
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:29
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:29
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:24
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:24
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:19
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:9:13: 9:19
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:11:13: 11:27
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:11:13: 11:27
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:12:13: 12:26
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:12:13: 12:26
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:12:13: 12:21
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:12:13: 12:21
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:13: 14:49
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:13: 14:49
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:13: 14:44
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:13: 14:44
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:15: 14:29
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:15: 14:29
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:15: 14:24
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:14:15: 14:24
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:16:8: 16:14
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `<<` for `>>` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:16:8: 16:14
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:18:11: 18:18
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:18:11: 18:18
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:19:14: 19:21
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:19:14: 19:21
+  <-(0)- test
 
-1 mutation
-  - [bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:23:18: 23:25
-    <-(0)- test
+[bit_op_shift_dir_swap] swap bitwise operator `>>` for `<<` in f at tests/ui/mutation/ops/op_swap/bit_op_shift_dir_swap/invert_bit_shift_dir.rs:23:18: 23:25
+  <-(0)- test
 
-16 mutants; 16 mutations; 16 safe; 0 unsafe (0 tainted); 0 batched; 16 unbatched
+16 mutations; 16 safe; 0 unsafe (0 tainted)

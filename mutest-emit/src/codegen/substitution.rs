@@ -10,7 +10,7 @@ use crate::codegen::cancellation;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
-use crate::codegen::mutation::{Mutant, MutId, Subst, SubstDef, SubstLoc};
+use crate::codegen::mutation::{Mut, MutId, Subst, SubstDef, SubstLoc};
 
 pub fn conflicting_substs(a: &SubstDef, b: &SubstDef) -> bool {
     match (&a.substitute, &b.substitute) {
@@ -241,17 +241,15 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
     }
 }
 
-pub fn write_substitutions<'tcx>(tcx: TyCtxt<'tcx>, mutants: &[Mutant], krate: &mut ast::Crate) -> Vec<SubstLoc> {
+pub fn write_substitutions<'tcx>(tcx: TyCtxt<'tcx>, mutations: &[Mut], krate: &mut ast::Crate) -> Vec<SubstLoc> {
     let mut substitutions: FxHashMap<SubstLoc, Vec<(MutId, &Subst)>> = Default::default();
-    for mutant in mutants {
-        for mutation in &mutant.mutations {
-            for subst in &mutation.substs {
-                let substitution = (mutation.id, &subst.substitute);
+    for mutation in mutations {
+        for subst in &mutation.substs {
+            let substitution = (mutation.id, &subst.substitute);
 
-                substitutions.entry(subst.location)
-                    .and_modify(|substs| substs.push(substitution))
-                    .or_insert_with(|| vec![substitution]);
-            }
+            substitutions.entry(subst.location)
+                .and_modify(|substs| substs.push(substitution))
+                .or_insert_with(|| vec![substitution]);
         }
     }
 

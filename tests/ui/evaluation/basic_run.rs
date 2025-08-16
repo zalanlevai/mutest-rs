@@ -1,4 +1,4 @@
-//@ print-mutants
+//@ print-mutations
 //@ run
 //@ stdout
 //@ stderr: empty

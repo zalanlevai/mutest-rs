@@ -149,7 +149,7 @@ pub fn main() {
                 mutation_targets: None,
                 call_graph: None,
                 conflict_graph: None,
-                mutants: None,
+                mutations: None,
                 code: None,
             };
 
@@ -184,7 +184,7 @@ pub fn main() {
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
                         print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format: graph_format });
                     }
-                    opts::MUTANTS => print_opts.mutants = Some(()),
+                    opts::MUTATIONS => print_opts.mutations = Some(()),
                     opts::CODE => print_opts.code = Some(()),
                     _ => unreachable!("invalid print information name: `{print_name}`"),
                 }
@@ -258,12 +258,15 @@ pub fn main() {
             call_graph_trace_length_limit = None;
         }
 
-        let mutation_batching_algorithm = {
+        let mutation_parallelism = 'mutation_parallelism: {
             use mutest_driver_cli::mutant_batch_algorithm as opts;
+            let mutation_batching_algorithm = mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str);
 
-            match mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str) {
-                None | Some(opts::NONE) => config::MutationBatchingAlgorithm::None,
+            if let None | Some(opts::NONE) = mutation_batching_algorithm {
+                break 'mutation_parallelism None;
+            }
 
+            let mutation_batching_algorithm = match mutation_batching_algorithm {
                 Some(opts::RANDOM) => config::MutationBatchingAlgorithm::Random,
 
                 Some(opts::GREEDY) => {
@@ -287,19 +290,25 @@ pub fn main() {
                 Some(opts::SIMULATED_ANNEALING) => config::MutationBatchingAlgorithm::SimulatedAnnealing,
 
                 _ => unreachable!(),
-            }
+            };
+
+            let mutation_batching_randomness = {
+                use rand_seeder::Seeder;
+
+                let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
+                let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<config::RandomSeed>());
+
+                config::MutationBatchingRandomness { seed }
+            };
+
+            let batch_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
+
+            Some(config::MutationParallelism::Batching(config::MutationBatchingOptions {
+                algorithm: mutation_batching_algorithm,
+                randomness: mutation_batching_randomness,
+                batch_max_mutations_count,
+            }))
         };
-
-        let mutation_batching_randomness = {
-            use rand_seeder::Seeder;
-
-            let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
-            let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<config::RandomSeed>());
-
-            config::MutationBatchingRandomness { seed }
-        };
-
-        let mutant_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
 
         let write_opts = 'write_opts: {
             let Some(out_dir) = mutest_arg_matches.get_one::<PathBuf>("Zwrite-json").cloned() else {
@@ -345,9 +354,7 @@ pub fn main() {
                 call_graph_depth_limit,
                 call_graph_trace_length_limit,
                 mutation_depth,
-                mutation_batching_algorithm,
-                mutation_batching_randomness,
-                mutant_max_mutations_count,
+                mutation_parallelism,
 
                 write_opts,
                 verify_opts,

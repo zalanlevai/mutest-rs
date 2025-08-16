@@ -11,7 +11,7 @@ use mutest_emit::codegen::symbols::span_diagnostic_ord;
 
 use crate::config::{self, Config};
 use crate::passes::{Flow, base_compiler_config};
-use crate::print::{print_call_graph, print_mutants, print_mutation_graph, print_targets, print_tests};
+use crate::print::{print_call_graph, print_mutations, print_mutation_graph, print_targets, print_tests};
 use crate::write::{write_call_graph, write_mutations, write_tests, write_timings};
 
 pub struct AnalysisPassResult {
@@ -315,69 +315,82 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
             }
 
-            let t_mutation_batching_start = Instant::now();
-            let mutants = match opts.mutation_batching_algorithm {
-                config::MutationBatchingAlgorithm::None
-                => mutest_emit::codegen::mutation::batch_mutations_dummy(mutations),
+            let mutation_batches = match &opts.mutation_parallelism {
+                None => None,
 
-                config::MutationBatchingAlgorithm::Random => {
-                    let mut rng = opts.mutation_batching_randomness.rng();
-                    mutest_emit::codegen::mutation::batch_mutations_random(mutations, &mutation_conflict_graph, opts.mutant_max_mutations_count, &mut rng)
-                }
+                Some(config::MutationParallelism::Batching(mutation_batching_opts)) => {
+                    let t_mutation_batching_start = Instant::now();
+                    let mutation_batches = match mutation_batching_opts.algorithm {
+                        config::MutationBatchingAlgorithm::Random => {
+                            let mut rng = mutation_batching_opts.randomness.rng();
+                            mutest_emit::codegen::mutation::batch_mutations_random(&mutations, &mutation_conflict_graph, mutation_batching_opts.batch_max_mutations_count, &mut rng)
+                        }
 
-                config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon } => {
-                    let mut rng = opts.mutation_batching_randomness.rng();
-                    if let Some(v) = epsilon {
-                        if v < 0_f64 || v > 1_f64 { panic!("epsilon must be a valid probability"); }
+                        config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon } => {
+                            let mut rng = mutation_batching_opts.randomness.rng();
+                            if let Some(v) = epsilon {
+                                if v < 0_f64 || v > 1_f64 { panic!("epsilon must be a valid probability"); }
+                            }
+                            mutest_emit::codegen::mutation::batch_mutations_greedy(
+                                &mutations,
+                                &mutation_conflict_graph,
+                                ordering_heuristic,
+                                epsilon,
+                                Some(&mut rng),
+                                mutation_batching_opts.batch_max_mutations_count,
+                            )
+                        }
+
+                        config::MutationBatchingAlgorithm::SimulatedAnnealing => {
+                            let mut mutation_batches = mutest_emit::codegen::mutation::batch_mutations_dummy(&mutations);
+
+                            let mut rng = mutation_batching_opts.randomness.rng();
+                            mutest_emit::codegen::mutation::optimize_batches_simulated_annealing(&mut mutation_batches, &mutation_conflict_graph, mutation_batching_opts.batch_max_mutations_count, 5000, &mut rng);
+
+                            mutation_batches
+                        }
+                    };
+                    pass_result.mutation_batching_duration = t_mutation_batching_start.elapsed();
+
+                    if let Err(errors) = mutest_emit::codegen::mutation::validate_mutation_batches(&mutation_batches, &mutation_conflict_graph) {
+                        for error in &errors {
+                            use mutest_emit::codegen::mutation::MutationBatchesValidationError::*;
+                            match error {
+                                ConflictingMutationsInBatch(_mutation_batch, mutations) => {
+                                    let mut diagnostic = tcx.dcx().struct_err("batch contains conflicting mutations");
+                                    for mutation in mutations {
+                                        diagnostic.span_warn(mutation.span, format!("incompatible mutation: {}", mutation.mutation.span_label()));
+                                    }
+                                    diagnostic.emit();
+                                }
+                            }
+                        }
+
+                        println!("found {} mutation batching errors", errors.len());
+                        FatalError.raise();
                     }
-                    mutest_emit::codegen::mutation::batch_mutations_greedy(
-                        mutations,
-                        &mutation_conflict_graph,
-                        ordering_heuristic,
-                        epsilon,
-                        Some(&mut rng),
-                        opts.mutant_max_mutations_count,
-                    )
-                }
 
-                config::MutationBatchingAlgorithm::SimulatedAnnealing => {
-                    let mut mutants = mutest_emit::codegen::mutation::batch_mutations_dummy(mutations);
-
-                    let mut rng = opts.mutation_batching_randomness.rng();
-                    mutest_emit::codegen::mutation::optimize_batches_simulated_annealing(&mut mutants, &mutation_conflict_graph, opts.mutant_max_mutations_count, 5000, &mut rng);
-
-                    mutants
+                    Some(mutation_batches)
                 }
             };
-            pass_result.mutation_batching_duration = t_mutation_batching_start.elapsed();
 
-            if let Err(errors) = mutest_emit::codegen::mutation::validate_mutation_batches(&mutants, &mutation_conflict_graph) {
-                for error in &errors {
-                    use mutest_emit::codegen::mutation::MutationBatchesValidationError::*;
-                    match error {
-                        ConflictingMutationsInBatch(_mutant, mutations) => {
-                            let mut diagnostic = tcx.dcx().struct_err("mutant contains conflicting mutations");
-                            for mutation in mutations {
-                                diagnostic.span_warn(mutation.span, format!("incompatible mutation: {}", mutation.mutation.span_label()));
-                            }
-                            diagnostic.emit();
-                        }
-                    }
+            let mutation_parallelism = match opts.mutation_parallelism {
+                None => None,
+                Some(config::MutationParallelism::Batching(_)) => {
+                    let Some(mutation_batches) = &mutation_batches else { unreachable!() };
+                    Some(mutest_emit::codegen::mutation::MutationParallelism::Batched(mutation_batches))
                 }
-
-                println!("found {} mutation batching errors", errors.len());
-                FatalError.raise();
-            }
+            };
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
-                write_mutations(write_opts, tcx, all_mutable_fns_count, &json_definitions, targets.clone(), &mutants, opts.unsafe_targeting, &mutation_conflict_graph, &opts.mutation_batching_algorithm, t_mutation_generation_start.elapsed());
+                write_mutations(write_opts, tcx, all_mutable_fns_count, &json_definitions, targets.clone(), &mutations, opts.unsafe_targeting, &mutation_conflict_graph, mutation_parallelism, t_mutation_generation_start.elapsed());
                 pass_result.write_duration += t_write_start.elapsed();
             }
 
-            if let Some(_) = opts.print_opts.mutants.take() {
-                if opts.print_opts.print_headers { println!("\n@@@ mutants @@@\n"); }
-                print_mutants(tcx, &mutants, opts.unsafe_targeting, opts.verbosity);
+            if let Some(_) = opts.print_opts.mutations.take() {
+                if opts.print_opts.print_headers { println!("\n@@@ mutations @@@\n"); }
+                print_mutations(tcx, &mutations, mutation_batches.as_deref(), opts.unsafe_targeting, opts.verbosity);
                 if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                     if let Some(write_opts) = &opts.write_opts {
                         pass_result.duration = t_start.elapsed();
@@ -398,7 +411,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let t_codegen_start = Instant::now();
 
-            let subst_locs = mutest_emit::codegen::substitution::write_substitutions(tcx, &mutants, &mut generated_crate_ast);
+            let subst_locs = mutest_emit::codegen::substitution::write_substitutions(tcx, &mutations, &mut generated_crate_ast);
 
             // HACK: See below.
             mutest_emit::codegen::expansion::insert_generated_code_crate_refs(tcx, &mut generated_crate_ast);
@@ -414,7 +427,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             mutest_emit::codegen::substitution::resolve_syntax_ambiguities(tcx, &mut generated_crate_ast);
 
-            mutest_emit::codegen::harness::generate_harness(tcx, &mutants, &subst_locs, &mut generated_crate_ast, opts.unsafe_targeting);
+            mutest_emit::codegen::harness::generate_harness(tcx, &mutations, &subst_locs, mutation_parallelism, &mut generated_crate_ast, opts.unsafe_targeting);
 
             pass_result.codegen_duration = t_codegen_start.elapsed();
 

@@ -1,173 +1,130 @@
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:10:23: 10:28
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:10:23: 10:28
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:10:24: 10:28
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:10:24: 10:28
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:12:12: 12:21
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:12:12: 12:21
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:12:14: 12:20
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:12:14: 12:20
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:13:23: 13:29
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:13:23: 13:29
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:13:24: 13:29
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:13:24: 13:29
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:24: 17:74
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:24: 17:74
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:24: 17:49
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:24: 17:49
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:26: 17:48
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:26: 17:48
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:53: 17:74
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:53: 17:74
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:55: 17:73
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:17:55: 17:73
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:8: 19:37
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:8: 19:37
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:8: 19:15
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:8: 19:15
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:19: 19:37
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:19: 19:37
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:21: 19:36
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:19:21: 19:36
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:15: 21:44
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:15: 21:44
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:15: 21:22
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:15: 21:22
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:26: 21:44
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:26: 21:44
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:28: 21:43
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:21:28: 21:43
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:15: 23:30
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:15: 23:30
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:16: 23:30
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:16: 23:30
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:17: 23:30
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:17: 23:30
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:18: 23:30
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:23:18: 23:30
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:30:14: 30:28
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:30:14: 30:28
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:30:15: 30:28
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:30:15: 30:28
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:30:16: 30:28
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:30:16: 30:28
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:15: 31:44
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:15: 31:44
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:15: 31:33
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:15: 31:33
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:17: 31:32
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:17: 31:32
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:37: 31:44
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:31:37: 31:44
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:33: 35:48
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:33: 35:48
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:34: 35:48
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:34: 35:48
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:35: 35:48
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:35: 35:48
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:36: 35:48
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:35:36: 35:48
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:32: 36:56
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:32: 36:56
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:33: 36:56
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:33: 36:56
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:34: 36:56
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:34: 36:56
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:35: 36:56
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:35: 36:56
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:37: 36:55
-    <-(0)- test
+[bool_expr_negate] remove negation from boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:37: 36:55
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:39: 36:54
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:36:39: 36:54
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:38:13: 38:58
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:38:13: 38:58
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:38:13: 38:34
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:38:13: 38:34
+  <-(0)- test
 
-1 mutation
-  - [bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:38:38: 38:58
-    <-(0)- test
+[bool_expr_negate] negate boolean expression in f at tests/ui/mutation/ops/bool_expr_negate/remove_negation_from_negated_exprs.rs:38:38: 38:58
+  <-(0)- test
 
-43 mutants; 43 mutations; 43 safe; 0 unsafe (0 tainted); 0 batched; 43 unbatched
+43 mutations; 43 safe; 0 unsafe (0 tainted)
