@@ -16,7 +16,7 @@
 
 profiling reference test run
 
-applying mutant with the following mutations:
+applying mutation:
 - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/failing_run.rs:7:15: 7:21
 
 ran 1 out of 1 test
@@ -29,7 +29,7 @@ warning: [arg_default_shadow] mutation was not detected
   |
   = note: local `a` inserted: `let a: u32 = ::core::default::Default::default();`
 
-applying mutant with the following mutations:
+applying mutation:
 - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/failing_run.rs:7:23: 7:29
 
 ran 1 out of 1 test
@@ -42,12 +42,12 @@ warning: [arg_default_shadow] mutation was not detected
   |
   = note: local `b` inserted: `let b: u32 = ::core::default::Default::default();`
 
-applying mutant with the following mutations:
+applying mutation:
 - [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/failing_run.rs:8:5: 8:10
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying mutation:
 - [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/failing_run.rs:8:5: 8:10
 
 ran 1 out of 1 test

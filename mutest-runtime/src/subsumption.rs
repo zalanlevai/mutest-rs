@@ -3,7 +3,7 @@ use std::iter;
 use crate::data_structures::TestArray;
 use crate::detections::MutationDetectionMatrix;
 use crate::harness::MutationTestResult;
-use crate::metadata::{MutantMeta, SubstMap};
+use crate::metadata::MutationMeta;
 use crate::test_runner;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -130,8 +130,8 @@ impl MutationSubsumptionMatrix {
     }
 }
 
-pub fn print_mutation_subsumption_matrix<S: SubstMap>(mutation_subsumption_matrix: &MutationSubsumptionMatrix, mutants: &[&MutantMeta<S>], warn_non_exhaustive: bool) {
-    let total_mutations_count: usize = mutants.iter().map(|mutant| mutant.mutations.len()).sum();
+pub fn print_mutation_subsumption_matrix(mutation_subsumption_matrix: &MutationSubsumptionMatrix, mutations: &[&MutationMeta], warn_non_exhaustive: bool) {
+    let total_mutations_count = mutations.len();
     let mutation_id_w = total_mutations_count.checked_ilog10().unwrap_or(0) as usize + 1;
 
     // Print mutation ID numbers in 10's for matrix heading, like so `1        10        20...`.
@@ -191,7 +191,7 @@ pub fn print_mutation_subsumption_matrix<S: SubstMap>(mutation_subsumption_matri
         print!(" {:>mutation_id_w$}", subsumes_count);
         print!(" {:>mutation_id_w$}", indistinguishable_count);
 
-        let mutation = mutants.iter().find_map(|mutant| mutant.mutations.iter().find(|mutation| mutation.id == mutation_id)).unwrap();
+        let mutation = mutations.iter().find(|mutation| mutation.id == mutation_id).unwrap();
         print!(" {}", mutation.op_name);
 
         println!();

@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
+use std::fmt::{self, Debug};
 use std::iter;
 use std::path::PathBuf;
 use std::process;
@@ -11,11 +12,10 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::MutationSafety;
 use crate::config::{self, Options};
 use crate::detections::{MutationDetectionMatrix, print_mutation_detection_matrix};
 use crate::flakiness::{MutationFlakinessMatrix, print_mutation_flakiness_epilogue, print_mutation_flakiness_matrix};
-use crate::metadata::{MutantMeta, MutationMeta, SubstLocIdx, SubstMap, SubstMeta};
+use crate::metadata::{MetaMutant, Mutant, MutationMeta, MutationParallelism, MutationSafety, StandaloneMutantMeta, SubstLocIdx, SubstMap, SubstMeta};
 use crate::subsumption::{MutationSubsumptionMatrix, print_mutation_subsumption_matrix};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
@@ -39,8 +39,9 @@ mod test {
 ///
 /// Reading from this handle remains valid even as the substitution map stored in the handle
 /// is changed or swapped out, as it represents a static memory location.
-/// For example, it is considered valid for a read from the handle to return substitution metadata
-/// for new substitution maps if the handle is simultaneously modified from another thread.
+/// For example, it is considered valid for a read from the handle to
+/// return substitution metadata from either the new or the possibly stale substitution maps
+/// if the handle is simultaneously modified from another thread.
 pub struct ActiveMutantHandle<S: SubstMap>(Cell<Option<S>>);
 
 impl<S: SubstMap> ActiveMutantHandle<S> {
@@ -86,6 +87,14 @@ impl<S: SubstMap> ActiveMutantHandle<S> {
 // SAFETY: While access to the handle data is not synchronized, the handle can only be mutated using
 //         unsafe, crate-private functions, see above.
 unsafe impl<S: SubstMap> Sync for ActiveMutantHandle<S> {}
+
+impl<S: SubstMap> Debug for ActiveMutantHandle<S> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_tuple("ActiveMutantHandle")
+            .field(&format_args!("_"))
+            .finish()
+    }
+}
 
 const ERROR_EXIT_CODE: i32 = 101;
 
@@ -171,7 +180,7 @@ fn sort_profiled_tests_by_exec_time(profiled_tests: &mut Vec<ProfiledTest>) {
     });
 }
 
-fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, mutations: &'static [&'static MutationMeta]) {
+fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, mutations: &[&'static MutationMeta]) {
     tests.sort_by(|a, b| {
         let distance_a = mutations.iter().filter_map(|&m| m.reachable_from.get(a.desc.name.as_slice())).reduce(Ord::min);
         let distance_b = mutations.iter().filter_map(|&m| m.reachable_from.get(b.desc.name.as_slice())).reduce(Ord::min);
@@ -185,7 +194,7 @@ fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, mutations: &
     });
 }
 
-fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: &'static [&'static MutationMeta]) {
+fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: &[&'static MutationMeta]) {
     let mut parallelized_tests = Vec::<test_runner::Test>::with_capacity(tests.len());
 
     while !tests.is_empty() {
@@ -299,26 +308,33 @@ pub struct MutationTestResults {
     pub results_per_test: HashMap<test::TestName, Option<MutationTestResult>>,
 }
 
-fn run_tests<S: SubstMap>(
+fn run_tests(
     mut tests: Vec<test_runner::Test>,
-    mutant: &MutantMeta<S>,
+    mutant: Mutant<impl SubstMap>,
     exhaustive: bool,
     mutation_isolation: config::MutationIsolation,
     thread_pool: Option<ThreadPool>,
     eval_stream_writer: Option<EvaluationStreamWriter>,
     verbosity: u8,
 ) -> (HashMap<u32, MutationTestResults>, Vec<(test_runner::RunningTest, &'static MutationMeta)>) {
-    let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutant.mutations.len());
+    let mutations = match mutant {
+        Mutant::Mutation(mutant) => &[mutant.mutation],
+        Mutant::Batch(mutant) => mutant.mutations,
+    };
 
-    for &mutation in mutant.mutations {
+    let mut results = HashMap::<u32, MutationTestResults>::with_capacity(mutations.len());
+
+    for &mutation in mutations {
         results.insert(mutation.id, MutationTestResults {
             result: MutationTestResult::Undetected,
             results_per_test: HashMap::with_capacity(mutation.reachable_from.len()),
         });
     }
 
-    tests.retain(|test| mutant.mutations.iter().any(|m| m.reachable_from.contains_key(test.desc.name.as_slice())));
-    maximize_mutation_parallelism(&mut tests, mutant.mutations);
+    tests.retain(|test| mutations.iter().any(|mutation| mutation.reachable_from.contains_key(test.desc.name.as_slice())));
+    if let Mutant::Batch(mutant) = mutant {
+        maximize_mutation_parallelism(&mut tests, mutant.mutations);
+    }
 
     let total_tests_count = tests.len();
     let mut completed_tests_count = 0;
@@ -327,7 +343,7 @@ fn run_tests<S: SubstMap>(
         match event {
             test_runner::TestEvent::Wait(test_desc, thread_id) => {
                 if let Some(eval_stream_writer) = &eval_stream_writer {
-                    let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test_desc.name.as_slice()))
+                    let mutation = mutations.iter().find(|mutation| mutation.reachable_from.contains_key(test_desc.name.as_slice()))
                         .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
 
                     eval_stream_writer.write_test_start(mutation, &test_desc, thread_id);
@@ -336,7 +352,7 @@ fn run_tests<S: SubstMap>(
             test_runner::TestEvent::Result(test) => {
                 completed_tests_count += 1;
 
-                let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
+                let mutation = mutations.iter().find(|mutation| mutation.reachable_from.contains_key(test.desc.name.as_slice()))
                     .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
 
                 if let Some(eval_stream_writer) = &eval_stream_writer {
@@ -393,31 +409,41 @@ fn run_tests<S: SubstMap>(
         Ok(test_runner::Flow::Continue)
     };
 
-    let test_run_strategy = match (mutation_isolation, mutant.is_unsafe()) {
-        | (config::MutationIsolation::Unsafe, true)
-        | (config::MutationIsolation::All, _)
-        => test_runner::TestRunStrategy::InIsolatedChildProcess({
-            let mutant_id = mutant.id;
-            Arc::new(move |cmd| {
-                cmd.env(MUTEST_ISOLATED_WORKER_MUTANT_ID, mutant_id.to_string());
-            })
-        }),
+    let test_run_strategy = match (mutation_isolation, mutations) {
+        (_, []) => { return Default::default(); }
 
-        _ => test_runner::TestRunStrategy::InProcess(thread_pool),
+        (config::MutationIsolation::All, [_, _, ..]) => panic!("cannot isolate multiple mutations into separate processes from one run_tests loop"),
+        // NOTE: Encountered batch of multiple mutations, so we assume none of them are unsafe,
+        //       as that would be an invalid mutation batch.
+        (_, [_, _, ..]) => test_runner::TestRunStrategy::InProcess(thread_pool),
+
+        (config::MutationIsolation::Unsafe, [mutation]) if !mutation.is_unsafe()
+        => test_runner::TestRunStrategy::InProcess(thread_pool),
+
+        (_, [mutation]) => test_runner::TestRunStrategy::InIsolatedChildProcess({
+            let mutation_id = mutation.id;
+            Arc::new(move |cmd| {
+                cmd.env(MUTEST_ISOLATED_WORKER_MUTATION_ID, mutation_id.to_string());
+            })
+        })
     };
 
     let Ok((_, lingering_tests)) = test_runner::run_tests(tests, on_test_event, test_run_strategy, false);
 
     let lingering_tests = lingering_tests.into_iter()
         .map(|test| {
-            let mutation = mutant.mutations.iter().find(|m| m.reachable_from.contains_key(test.desc.name.as_slice()))
+            let mutation = mutations.iter().find(|mutation| mutation.reachable_from.contains_key(test.desc.name.as_slice()))
                 .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
             (test, *mutation)
         })
         .collect::<Vec<_>>();
 
     if verbosity >= 1 {
-        print!("{}: ", mutant.id);
+        let id = match mutant {
+            Mutant::Mutation(mutant) => mutant.mutation.id,
+            Mutant::Batch(mutant) => mutant.batch_id,
+        };
+        print!("{id}: ");
     }
     println!("ran {completed} out of {total} {descr}{lingering_opt}",
         completed = completed_tests_count,
@@ -459,11 +485,53 @@ pub struct MutationAnalysisResults {
     pub duration: Duration,
 }
 
+impl MutationAnalysisResults {
+    fn record_mutation_results(&mut self, mutation: &'static MutationMeta, mutation_result: MutationTestResults) {
+        let op_stats = self.mutation_op_stats.entry(mutation.op_name).or_default();
+
+        self.total_mutations_count += 1;
+        op_stats.total_mutations_count += 1;
+        if let MutationSafety::Safe = mutation.safety {
+            self.total_safe_mutations_count += 1;
+        }
+
+        match mutation_result.result {
+            MutationTestResult::Undetected => {
+                self.all_test_runs_failed_successfully = false;
+
+                self.undetected_mutations_count += 1;
+                op_stats.undetected_mutations_count += 1;
+                if let MutationSafety::Safe = mutation.safety {
+                    self.undetected_safe_mutations_count += 1;
+                }
+            }
+
+            MutationTestResult::Detected => {}
+            MutationTestResult::TimedOut => {
+                self.timed_out_mutations_count += 1;
+                op_stats.timed_out_mutations_count += 1;
+                if let MutationSafety::Safe = mutation.safety {
+                    self.timed_out_safe_mutations_count += 1;
+                }
+
+            }
+            MutationTestResult::Crashed => {
+                self.crashed_mutations_count += 1;
+                op_stats.crashed_mutations_count += 1;
+                if let MutationSafety::Safe = mutation.safety {
+                    self.crashed_safe_mutations_count += 1;
+                }
+            }
+        }
+
+        self.mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
+    }
+}
+
 fn run_mutation_analysis<S: SubstMap>(
     opts: &Options,
     tests: &[test_runner::Test],
-    mutants: &'static [&'static MutantMeta<S>],
-    active_mutant_handle: &'static ActiveMutantHandle<S>,
+    meta_mutant: &'static MetaMutant<S>,
     thread_pool: Option<ThreadPool>,
     lingering_test_monitoring_thread: Arc<LingeringTestMonitoringThread>,
     eval_stream_writer: Option<EvaluationStreamWriter>,
@@ -478,94 +546,105 @@ fn run_mutation_analysis<S: SubstMap>(
         timed_out_safe_mutations_count: 0,
         crashed_mutations_count: 0,
         crashed_safe_mutations_count: 0,
-        mutation_detection_matrix: MutationDetectionMatrix::new(mutants.iter().map(|mutant| mutant.mutations.len()).sum()),
+        mutation_detection_matrix: MutationDetectionMatrix::new(meta_mutant.mutations.len()),
         mutation_op_stats: Default::default(),
         duration: Duration::ZERO,
     };
 
     let t_start = Instant::now();
 
-    for &mutant in mutants {
-        // SAFETY: Ideally, since the previous test runs all completed, no other thread is running, no one else is
-        //         reading from the handle.
-        //         As for lingering test cases from previous test runs, their behaviour will change accordingly, but we
-        //         have already marked them as timed out and abandoned them by this point. The behaviour in such cases
-        //         stays the same, regardless of whether the handle performs locking or not.
-        unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
+    match meta_mutant.mutation_parallelism {
+        MutationParallelism::None(mutants) => {
+            for mutant in mutants {
+                // SAFETY: Ideally, since the previous test runs all completed,
+                //         no other thread is running, no one else is reading from the handle.
+                //         Lingering test cases from previous test runs are forcibly terminated
+                //         before they try to read from the handle after the corresponding thread
+                //         has been marked inactive.
+                unsafe { meta_mutant.active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
 
-        if opts.verbosity >= 1 {
-            print!("{}: ", mutant.id);
-        }
-        println!("applying mutant with the following mutations:");
-        for mutation in mutant.mutations {
-            print!("- ");
-            if opts.verbosity >= 1 {
-                print!("{}: ", mutation.id);
-            }
-            println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
-                unsafe_marker = match mutation.safety {
-                    MutationSafety::Safe => "",
-                    MutationSafety::Tainted => "(tainted) ",
-                    MutationSafety::Unsafe => "(unsafe) ",
-                },
-                op_name = mutation.op_name,
-                display_name = mutation.display_name,
-                display_location = mutation.display_location,
-            );
-        }
-        println!();
+                println!("applying mutation:");
+                print!("- ");
+                if opts.verbosity >= 1 {
+                    print!("{}: ", mutant.mutation.id);
+                }
+                println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
+                    unsafe_marker = match mutant.mutation.safety {
+                        MutationSafety::Safe => "",
+                        MutationSafety::Tainted => "(tainted) ",
+                        MutationSafety::Unsafe => "(unsafe) ",
+                    },
+                    op_name = mutant.mutation.op_name,
+                    display_name = mutant.mutation.display_name,
+                    display_location = mutant.mutation.display_location,
+                );
+                println!();
 
-        let mut tests = clone_tests(tests);
-        if let config::TestOrdering::MutationDistance = opts.test_ordering {
-            prioritize_tests_by_distance(&mut tests, mutant.mutations);
-        }
-
-        let (mut run_results, lingering_tests) = run_tests(tests, mutant, opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
-        lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
-
-        for &mutation in mutant.mutations {
-            let op_stats = results.mutation_op_stats.entry(mutation.op_name).or_default();
-
-            results.total_mutations_count += 1;
-            op_stats.total_mutations_count += 1;
-            if let MutationSafety::Safe = mutation.safety {
-                results.total_safe_mutations_count += 1;
-            }
-
-            let Some(mutation_result) = run_results.remove(&mutation.id) else { unreachable!() };
-
-            match mutation_result.result {
-                MutationTestResult::Undetected => {
-                    results.all_test_runs_failed_successfully = false;
-
-                    results.undetected_mutations_count += 1;
-                    op_stats.undetected_mutations_count += 1;
-                    if let MutationSafety::Safe = mutation.safety {
-                        results.undetected_safe_mutations_count += 1;
-                    }
-
-                    print!("{}", mutation.undetected_diagnostic);
+                let mut tests = clone_tests(tests);
+                if let config::TestOrdering::MutationDistance = opts.test_ordering {
+                    prioritize_tests_by_distance(&mut tests, &[mutant.mutation]);
                 }
 
-                MutationTestResult::Detected => {}
-                MutationTestResult::TimedOut => {
-                    results.timed_out_mutations_count += 1;
-                    op_stats.timed_out_mutations_count += 1;
-                    if let MutationSafety::Safe = mutation.safety {
-                        results.timed_out_safe_mutations_count += 1;
-                    }
+                let (mut run_results, lingering_tests) = run_tests(tests, Mutant::Mutation(mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
+                lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
 
+                let Some(mutation_result) = run_results.remove(&mutant.mutation.id) else { unreachable!() };
+                if let MutationTestResult::Undetected = mutation_result.result {
+                    print!("{}", mutant.mutation.undetected_diagnostic);
                 }
-                MutationTestResult::Crashed => {
-                    results.crashed_mutations_count += 1;
-                    op_stats.crashed_mutations_count += 1;
-                    if let MutationSafety::Safe = mutation.safety {
-                        results.crashed_safe_mutations_count += 1;
+                results.record_mutation_results(mutant.mutation, mutation_result);
+            }
+        }
+        MutationParallelism::Batched(batched_mutants) => {
+            for batched_mutant in batched_mutants {
+                // SAFETY: Ideally, since the previous test runs all completed,
+                //         no other thread is running, no one else is reading from the handle.
+                //         Lingering test cases from previous test runs are forcibly terminated
+                //         before they try to read from the handle after the corresponding thread
+                //         has been marked inactive.
+                unsafe { meta_mutant.active_mutant_handle.replace(Some(batched_mutant.substitutions.clone())); }
+
+                if opts.verbosity >= 1 {
+                    print!("{}: ", batched_mutant.batch_id);
+                }
+                match batched_mutant.mutations.len() {
+                    1 => println!("applying batch of 1 mutation:"),
+                    n => println!("applying batch of {n} mutations:"),
+                }
+                for mutation in batched_mutant.mutations {
+                    print!("- ");
+                    if opts.verbosity >= 1 {
+                        print!("{}: ", mutation.id);
                     }
+                    println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
+                        unsafe_marker = match mutation.safety {
+                            MutationSafety::Safe => "",
+                            MutationSafety::Tainted => "(tainted) ",
+                            MutationSafety::Unsafe => "(unsafe) ",
+                        },
+                        op_name = mutation.op_name,
+                        display_name = mutation.display_name,
+                        display_location = mutation.display_location,
+                    );
+                }
+                println!();
+
+                let mut tests = clone_tests(tests);
+                if let config::TestOrdering::MutationDistance = opts.test_ordering {
+                    prioritize_tests_by_distance(&mut tests, batched_mutant.mutations);
+                }
+
+                let (mut run_results, lingering_tests) = run_tests(tests, Mutant::Batch(batched_mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
+                lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
+
+                for mutation in batched_mutant.mutations {
+                    let Some(mutation_result) = run_results.remove(&mutation.id) else { unreachable!() };
+                    if let MutationTestResult::Undetected = mutation_result.result {
+                        print!("{}", mutation.undetected_diagnostic);
+                    }
+                    results.record_mutation_results(mutation, mutation_result);
                 }
             }
-
-            results.mutation_detection_matrix.insert(mutation.id, mutation_result.result, mutation_result.results_per_test.into_iter());
         }
     }
 
@@ -635,7 +714,7 @@ fn print_mutation_analysis_epilogue(results: &MutationAnalysisResults, verbosity
     );
 }
 
-pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
+pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, meta_mutant: &'static MetaMutant<impl SubstMap>) {
     let mode = match () {
         _ if let Some(flakes_arg) = args.iter().flat_map(|arg| arg.strip_prefix("--flakes=")).next() => {
             let Some(iterations_count) = flakes_arg.parse::<usize>().ok() else {
@@ -776,7 +855,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
     match opts.mode {
         config::Mode::Evaluate => {
-            let results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool, lingering_test_monitoring_thread.clone(), eval_stream_writer);
+            let results = run_mutation_analysis(&opts, &tests, meta_mutant, thread_pool, lingering_test_monitoring_thread.clone(), eval_stream_writer);
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
@@ -790,7 +869,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
             if let Some(()) = &opts.print_opts.subsumption_matrix {
                 let mutation_subsumption_matrix = MutationSubsumptionMatrix::build(&results.mutation_detection_matrix, &tests);
-                print_mutation_subsumption_matrix(&mutation_subsumption_matrix, mutants, !opts.exhaustive);
+                print_mutation_subsumption_matrix(&mutation_subsumption_matrix, meta_mutant.mutations, !opts.exhaustive);
             }
 
             drop(lingering_test_monitoring_thread);
@@ -820,7 +899,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 println!("running iteration {iteration} out of {iterations_count}");
                 println!();
 
-                let iteration_results = run_mutation_analysis(&opts, &tests, mutants, active_mutant_handle, thread_pool.clone(), lingering_test_monitoring_thread.clone(), eval_stream_writer.clone());
+                let iteration_results = run_mutation_analysis(&opts, &tests, meta_mutant, thread_pool.clone(), lingering_test_monitoring_thread.clone(), eval_stream_writer.clone());
 
                 if let Some(()) = &opts.print_opts.detection_matrix {
                     print_mutation_detection_matrix(&iteration_results.mutation_detection_matrix, &tests, !opts.exhaustive);
@@ -828,7 +907,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
 
                 if let Some(()) = &opts.print_opts.subsumption_matrix {
                     let mutation_subsumption_matrix = MutationSubsumptionMatrix::build(&iteration_results.mutation_detection_matrix, &tests);
-                    print_mutation_subsumption_matrix(&mutation_subsumption_matrix, mutants, !opts.exhaustive);
+                    print_mutation_subsumption_matrix(&mutation_subsumption_matrix, meta_mutant.mutations, !opts.exhaustive);
                 }
 
                 print_mutation_analysis_epilogue(&iteration_results, opts.verbosity);
@@ -852,7 +931,7 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
                 write_duration += t_write_start.elapsed();
             }
 
-            let total_mutations_count = mutants.iter().map(|mutant| mutant.mutations.len()).sum();
+            let total_mutations_count = meta_mutant.mutations.len();
             let mutation_detection_matrices = results.iter().map(|run_results| &run_results.mutation_detection_matrix).collect::<Vec<_>>();
             let mutation_flakiness_matrix = MutationFlakinessMatrix::build(total_mutations_count, &mutation_detection_matrices);
 
@@ -870,23 +949,23 @@ pub fn mutest_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, 
     }
 }
 
-const MUTEST_ISOLATED_WORKER_MUTANT_ID: &str = "__MUTEST_ISOLATED_WORKER_MUTANT_ID";
+const MUTEST_ISOLATED_WORKER_MUTATION_ID: &str = "__MUTEST_ISOLATED_WORKER_MUTATION_ID";
 
-fn mutest_isolated_worker<S: SubstMap>(test: test::TestDescAndFn, mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) -> ! {
-    let mutant_id = env::var(MUTEST_ISOLATED_WORKER_MUTANT_ID).unwrap()
-        .parse::<u32>().expect(&format!("{MUTEST_ISOLATED_WORKER_MUTANT_ID} must be a number"));
+fn mutest_isolated_worker(test: test::TestDescAndFn, meta_mutant: &'static MetaMutant<impl SubstMap>) -> ! {
+    let mutation_id = env::var(MUTEST_ISOLATED_WORKER_MUTATION_ID).unwrap()
+        .parse::<u32>().expect(&format!("{MUTEST_ISOLATED_WORKER_MUTATION_ID} must be a number"));
 
-    let Some(mutant) = mutants.iter().find(|m| m.id == mutant_id) else {
-        panic!("{MUTEST_ISOLATED_WORKER_MUTANT_ID} must be a valid id");
+    let Some(mutant) = meta_mutant.find_mutant_with_mutation(mutation_id) else {
+        panic!("{MUTEST_ISOLATED_WORKER_MUTATION_ID} must be a valid id");
     };
 
     // SAFETY: No other thread is running yet, no one else is reading from the handle yet.
-    unsafe { active_mutant_handle.replace(Some(mutant.substitutions.clone())); }
+    unsafe { meta_mutant.active_mutant_handle.replace(Some(mutant.substitutions().clone())); }
 
     test_runner::run_test_in_spawned_subprocess(test);
 }
 
-fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutant: &'static MutantMeta<S>, active_mutant_handle: &'static ActiveMutantHandle<S>) {
+fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAndFn>, mutant: &'static StandaloneMutantMeta<S>, active_mutant_handle: &'static ActiveMutantHandle<S>) {
     let _verbosity = args.iter().filter(|&arg| *arg == "-v").count() as u8;
     let report_timings = args.contains(&"--timings");
     let use_thread_pool = args.contains(&"--use-thread-pool");
@@ -950,12 +1029,12 @@ fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAnd
         Ok(test_runner::Flow::Continue)
     };
 
-    let test_run_strategy = match mutant.is_unsafe() {
+    let test_run_strategy = match mutant.mutation.is_unsafe() {
         false => test_runner::TestRunStrategy::InProcess(thread_pool),
         true => test_runner::TestRunStrategy::InIsolatedChildProcess({
-            let mutant_id = mutant.id;
+            let mutation_id = mutant.mutation.id;
             Arc::new(move |cmd| {
-                cmd.env(MUTEST_ISOLATED_WORKER_MUTANT_ID, mutant_id.to_string());
+                cmd.env(MUTEST_ISOLATED_WORKER_MUTATION_ID, mutation_id.to_string());
             })
         }),
     };
@@ -986,7 +1065,7 @@ fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAnd
     }
 }
 
-pub fn mutest_main_static<S: SubstMap>(tests: &[&test::TestDescAndFn], mutants: &'static [&'static MutantMeta<S>], active_mutant_handle: &'static ActiveMutantHandle<S>) {
+pub fn mutest_main_static(tests: &[&test::TestDescAndFn], meta_mutant: &'static MetaMutant<impl SubstMap>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
         // SAFETY: No other thread is running.
         unsafe { env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION) };
@@ -995,25 +1074,29 @@ pub fn mutest_main_static<S: SubstMap>(tests: &[&test::TestDescAndFn], mutants: 
             .expect(&format!("cannot find test with name `{test_name}`"));
         let test = make_owned_test_def(test);
 
-        mutest_isolated_worker(test, mutants, active_mutant_handle);
+        mutest_isolated_worker(test, meta_mutant);
     }
 
     let args = env::args().collect::<Vec<_>>();
     let args = args.iter().map(String::as_ref).collect::<Vec<&str>>();
     let owned_tests = tests.iter().map(|test| make_owned_test_def(test)).collect::<Vec<_>>();
 
-    if let Some(mutation_id) = args.iter().flat_map(|arg| arg.strip_prefix("--simulate=")).next().and_then(|mutation_id| mutation_id.parse::<u32>().ok()) {
-        let Some(mutant) = mutants.iter().find(|mutant| mutant.mutations.iter().any(|mutation| mutation.id == mutation_id)) else {
+    if let Some(mutation_id_str) = args.iter().flat_map(|arg| arg.strip_prefix("--simulate=")).next() {
+        let Some(mutation_id) = mutation_id_str.parse::<u32>().ok() else {
+            println!("invalid mutation id `{mutation_id_str}`");
+            process::exit(ERROR_EXIT_CODE);
+        };
+        let Some(mutant) = meta_mutant.find_mutant_with_mutation(mutation_id) else {
             println!("cannot find mutation with id {mutation_id}");
             process::exit(ERROR_EXIT_CODE);
         };
-        if mutant.mutations.len() > 1 {
-            println!("cannot simulate mutation: mutation is not in a singleton mutant, disable mutation batching");
+        let Mutant::Mutation(mutant) = mutant else {
+            println!("cannot simulate individual mutations: mutations are baked into batches, disable mutation batching");
             process::exit(ERROR_EXIT_CODE);
-        }
+        };
 
-        return mutest_simulate_main(&args, owned_tests, mutant, active_mutant_handle);
+        return mutest_simulate_main(&args, owned_tests, mutant, meta_mutant.active_mutant_handle);
     }
 
-    mutest_main(&args, owned_tests, mutants, active_mutant_handle)
+    mutest_main(&args, owned_tests, meta_mutant)
 }

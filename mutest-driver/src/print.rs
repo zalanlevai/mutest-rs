@@ -478,7 +478,7 @@ pub fn print_mutations<'tcx>(tcx: TyCtxt<'tcx>, mutations: &[Mut], mutation_batc
                 }
                 match mutation_batch.mutations.len() {
                     1 => println!("batch of 1 mutation"),
-                    _ => println!("batch of {} mutations", mutation_batch.mutations.len()),
+                    n => println!("batch of {n} mutations"),
                 };
 
                 // Mutations are printed in assigned ID order.

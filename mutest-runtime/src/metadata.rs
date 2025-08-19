@@ -1,3 +1,5 @@
+use crate::harness::ActiveMutantHandle;
+
 pub macro static_map($($input:tt)*) {
     {
         // NOTE: The `phf` crate name must exist in this generated scope
@@ -75,15 +77,67 @@ pub struct MutationMeta {
     pub undetected_diagnostic: &'static str,
 }
 
+impl MutationMeta {
+    pub fn is_unsafe(&self) -> bool {
+        !matches!(self.safety, MutationSafety::Safe)
+    }
+}
+
 #[derive(Debug)]
-pub struct MutantMeta<S: SubstMap + 'static> {
-    pub id: u32,
+pub struct StandaloneMutantMeta<S: SubstMap + 'static> {
+    pub mutation: &'static MutationMeta,
+    pub substitutions: &'static S,
+}
+
+#[derive(Debug)]
+pub struct BatchedMutantMeta<S: SubstMap + 'static> {
+    pub batch_id: u32,
     pub mutations: &'static [&'static MutationMeta],
     pub substitutions: &'static S,
 }
 
-impl<S: SubstMap> MutantMeta<S> {
-    pub fn is_unsafe(&self) -> bool {
-        self.mutations.iter().any(|m| !matches!(m.safety, MutationSafety::Safe))
+#[derive(Copy, Clone)]
+pub enum Mutant<S: SubstMap + 'static> {
+    Mutation(&'static StandaloneMutantMeta<S>),
+    Batch(&'static BatchedMutantMeta<S>),
+}
+
+impl<S: SubstMap + 'static> Mutant<S> {
+    pub fn substitutions(&self) -> &'static S {
+        match self {
+            Self::Mutation(mutant) => mutant.substitutions,
+            Self::Batch(mutant) => mutant.substitutions,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum MutationParallelism<S: SubstMap + 'static> {
+    None(&'static [StandaloneMutantMeta<S>]),
+    Batched(&'static [BatchedMutantMeta<S>]),
+}
+
+#[derive(Debug)]
+pub struct MetaMutant<S: SubstMap + 'static> {
+    pub active_mutant_handle: &'static ActiveMutantHandle<S>,
+    pub mutations: &'static [&'static MutationMeta],
+    pub mutation_parallelism: MutationParallelism<S>,
+}
+
+impl<S: SubstMap + 'static> MetaMutant<S> {
+    pub fn mutants(&self) -> Box<dyn Iterator<Item = Mutant<S>>> {
+        match self.mutation_parallelism {
+            MutationParallelism::None(mutants) => Box::new(mutants.iter().map(|mutant| Mutant::Mutation(mutant))),
+            MutationParallelism::Batched(mutants) => Box::new(mutants.iter().map(|mutant| Mutant::Batch(mutant))),
+        }
+    }
+
+    pub fn find_mutant_with_mutation(&self, mutation_id: u32) -> Option<Mutant<S>> {
+        self.mutants().find(|mutant| {
+            match mutant {
+                Mutant::Mutation(mutant) => mutant.mutation.id == mutation_id,
+                Mutant::Batch(mutant) => mutant.mutations.iter().any(|mutation| mutation.id == mutation_id),
+            }
+        })
     }
 }

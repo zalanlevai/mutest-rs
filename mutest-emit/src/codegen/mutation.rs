@@ -765,7 +765,7 @@ pub fn generate_mutation_conflict_graph<'trg, 'm>(mutations: &[Mut<'trg, 'm>], u
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct MutationBatchId(pub(crate) u32);
+pub struct MutationBatchId(u32);
 
 impl MutationBatchId {
     pub fn index(&self) -> u32 {

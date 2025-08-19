@@ -53,50 +53,50 @@ batch of 1 mutation
 
 profiling reference test run
 
-applying mutant with the following mutations:
+applying batch of 3 mutations:
 - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:8:15: 8:21
 - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:17:21: 17:27
 - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:26:23: 26:29
 
 ran 3 out of 3 tests
 
-applying mutant with the following mutations:
+applying batch of 3 mutations:
 - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:8:23: 8:29
 - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:17:29: 17:35
 - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:26:31: 26:37
 
 ran 3 out of 3 tests
 
-applying mutant with the following mutations:
+applying batch of 3 mutations:
 - [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/batched_run.rs:9:5: 9:10
 - [math_op_mul_div_swap] swap operator `*` for `/` at tests/ui/evaluation/batched_run.rs:18:5: 18:10
 - [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/batched_run.rs:27:5: 27:10
 
 ran 3 out of 3 tests
 
-applying mutant with the following mutations:
+applying batch of 3 mutations:
 - [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/batched_run.rs:9:5: 9:10
 - [math_op_add_mul_swap] swap operator `*` for `+` at tests/ui/evaluation/batched_run.rs:18:5: 18:10
 - [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/batched_run.rs:27:5: 27:10
 
 ran 3 out of 3 tests
 
-applying mutant with the following mutations:
+applying batch of 1 mutation:
 - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:30:29: 30:35
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying batch of 1 mutation:
 - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/batched_run.rs:30:37: 30:43
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying batch of 1 mutation:
 - [math_op_mul_div_swap] swap operator `*` for `/` at tests/ui/evaluation/batched_run.rs:31:5: 31:10
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying batch of 1 mutation:
 - [math_op_add_mul_swap] swap operator `*` for `+` at tests/ui/evaluation/batched_run.rs:31:5: 31:10
 
 ran 1 out of 1 test

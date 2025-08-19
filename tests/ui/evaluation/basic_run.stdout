@@ -16,22 +16,22 @@
 
 profiling reference test run
 
-applying mutant with the following mutations:
+applying mutation:
 - [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/basic_run.rs:7:15: 7:21
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying mutation:
 - [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/basic_run.rs:7:23: 7:29
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying mutation:
 - [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
 
 ran 1 out of 1 test
 
-applying mutant with the following mutations:
+applying mutation:
 - [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
 
 ran 1 out of 1 test
