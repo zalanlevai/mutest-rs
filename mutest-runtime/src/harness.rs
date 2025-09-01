@@ -113,8 +113,8 @@ fn make_owned_test_def(test: &test::TestDescAndFn) -> test::TestDescAndFn {
     }
 }
 
-fn clone_tests(tests: &[test_runner::Test]) -> Vec<test_runner::Test> {
-    tests.iter()
+fn clone_tests<'a>(tests: impl IntoIterator<Item = &'a test_runner::Test>) -> Vec<test_runner::Test> {
+    tests.into_iter()
         .map(|test| {
             test_runner::Test {
                 desc: test.desc.clone(),
@@ -123,6 +123,10 @@ fn clone_tests(tests: &[test_runner::Test]) -> Vec<test_runner::Test> {
             }
         })
         .collect()
+}
+
+fn is_reachable_test(mutation: &'static MutationMeta, test_desc: &test::TestDesc) -> bool {
+    mutation.reachable_from.contains_key(test_desc.name.as_slice())
 }
 
 struct ProfiledTest {
@@ -309,7 +313,7 @@ pub struct MutationTestResults {
 }
 
 fn run_tests(
-    mut tests: Vec<test_runner::Test>,
+    tests: Vec<test_runner::Test>,
     mutant: Mutant<impl SubstMap>,
     exhaustive: bool,
     mutation_isolation: config::MutationIsolation,
@@ -331,11 +335,6 @@ fn run_tests(
         });
     }
 
-    tests.retain(|test| mutations.iter().any(|mutation| mutation.reachable_from.contains_key(test.desc.name.as_slice())));
-    if let Mutant::Batch(mutant) = mutant {
-        maximize_mutation_parallelism(&mut tests, mutant.mutations);
-    }
-
     let total_tests_count = tests.len();
     let mut completed_tests_count = 0;
 
@@ -343,8 +342,13 @@ fn run_tests(
         match event {
             test_runner::TestEvent::Wait(test_desc, thread_id) => {
                 if let Some(eval_stream_writer) = &eval_stream_writer {
-                    let mutation = mutations.iter().find(|mutation| mutation.reachable_from.contains_key(test_desc.name.as_slice()))
-                        .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
+                    let mutation = match mutant {
+                        Mutant::Mutation(mutant) => mutant.mutation,
+                        Mutant::Batch(mutant) => {
+                            mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test_desc))
+                                .expect("only tests which reach mutations should have been run: no mutation is reachable from this test")
+                        }
+                    };
 
                     eval_stream_writer.write_test_start(mutation, &test_desc, thread_id);
                 }
@@ -352,8 +356,13 @@ fn run_tests(
             test_runner::TestEvent::Result(test) => {
                 completed_tests_count += 1;
 
-                let mutation = mutations.iter().find(|mutation| mutation.reachable_from.contains_key(test.desc.name.as_slice()))
-                    .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
+                let mutation = match mutant {
+                    Mutant::Mutation(mutant) => mutant.mutation,
+                    Mutant::Batch(mutant) => {
+                        mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test.desc))
+                            .expect("only tests which reach mutations should have been run: no mutation is reachable from this test")
+                    }
+                };
 
                 if let Some(eval_stream_writer) = &eval_stream_writer {
                     eval_stream_writer.write_test_result(mutation, &test);
@@ -432,9 +441,14 @@ fn run_tests(
 
     let lingering_tests = lingering_tests.into_iter()
         .map(|test| {
-            let mutation = mutations.iter().find(|mutation| mutation.reachable_from.contains_key(test.desc.name.as_slice()))
-                .expect("only tests which reach mutations should have been run: no mutation is reachable from this test");
-            (test, *mutation)
+            let mutation = match mutant {
+                Mutant::Mutation(mutant) => mutant.mutation,
+                Mutant::Batch(mutant) => {
+                    mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test.desc))
+                        .expect("only tests which reach mutations should have been run: no mutation is reachable from this test")
+                }
+            };
+            (test, mutation)
         })
         .collect::<Vec<_>>();
 
@@ -580,7 +594,7 @@ fn run_mutation_analysis<S: SubstMap>(
                 );
                 println!();
 
-                let mut tests = clone_tests(tests);
+                let mut tests = clone_tests(tests.iter().filter(|test| is_reachable_test(mutant.mutation, &test.desc)));
                 if let config::TestOrdering::MutationDistance = opts.test_ordering {
                     prioritize_tests_by_distance(&mut tests, &[mutant.mutation]);
                 }
@@ -629,10 +643,11 @@ fn run_mutation_analysis<S: SubstMap>(
                 }
                 println!();
 
-                let mut tests = clone_tests(tests);
+                let mut tests = clone_tests(tests.iter().filter(|test| batched_mutant.mutations.iter().any(|mutation| is_reachable_test(mutation, &test.desc))));
                 if let config::TestOrdering::MutationDistance = opts.test_ordering {
                     prioritize_tests_by_distance(&mut tests, batched_mutant.mutations);
                 }
+                maximize_mutation_parallelism(&mut tests, batched_mutant.mutations);
 
                 let (mut run_results, lingering_tests) = run_tests(tests, Mutant::Batch(batched_mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
                 lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
