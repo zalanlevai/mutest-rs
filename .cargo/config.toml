@@ -1,0 +1,2 @@
+[alias]
+ui-test = "run -p mutest-tests --"

@@ -46,4 +46,4 @@ jobs:
           cargo test -p mutest-runtime --no-fail-fast -- --color=always
 
       - name: Run UI tests
-        run: cargo run -p mutest-tests
+        run: cargo ui-test

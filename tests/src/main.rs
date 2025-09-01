@@ -618,7 +618,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
 fn main() {
     let matches = clap::command!()
-        .bin_name("cargo run -p mutest-tests --")
+        .bin_name("cargo ui-test")
         .disable_help_flag(true)
         .disable_version_flag(true)
         .arg(clap::arg!(--bless "Update expectation snapshots for new and existing tests."))
