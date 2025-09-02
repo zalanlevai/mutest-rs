@@ -72,8 +72,15 @@ pub fn raw_output_full<G: EmissionGuarantee>(
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
 
     let shared_buffer = SharedBuffer { data: output.clone() };
-    let dst: Destination = match color_config.to_color_choice() {
-        termcolor::ColorChoice::Never => Box::new(termcolor::NoColor::new(shared_buffer)),
+    // NOTE: Cargo always requests colored JSON output, and pipes both stdout and stderr.
+    //       This effectively disallows us from determining support for colored output automatically.
+    //       Because of this, we can only respect the explicit `--color=never` flag, and
+    //       print colors when the default `--color=auto` is specified.
+    // NOTE: Similar to Cargo, we could always embed colors, and strip them during printing,
+    //       if needed, using `anstream::adapter::strip_str`.
+    //       However, this would require mutest_runtime to depend on anstream.
+    let dst: Destination = match color_config {
+        ColorConfig::Never => Box::new(termcolor::NoColor::new(shared_buffer)),
         _ => Box::new(termcolor::Ansi::new(shared_buffer)),
     };
     let emitter = HumanEmitter::new(dst, fallback_bundle)

@@ -419,6 +419,9 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     cmd.env("CARGO_PRIMARY_PACKAGE", "1");
     cmd.arg("--test");
 
+    // Explicitly disable color output. This mainly affects diagnostic messages generated for undetected mutations.
+    cmd.arg("--color=never");
+
     cmd.env("MUTEST_SEARCH_PATH", "target/release");
 
     #[cfg(windows)]
