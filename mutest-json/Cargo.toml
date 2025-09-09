@@ -3,6 +3,13 @@
 [package]
 name = "mutest-json"
 version = "0.0.0"
+authors = ["Zalán Bálint Lévai"]
+description = "JSON output type definitions for mutest-rs."
+keywords = ["mutation", "mutation-analysis", "mutation-testing", "testing"]
+categories = ["development-tools::testing", "development-tools::cargo-plugins", "security"]
+homepage = "https://mutest.rs"
+repository = "https://github.com/zalanlevai/mutest-rs"
+license = "Apache-2.0 OR MIT"
 edition = "2024"
 
 [package.metadata.rust-analyzer]

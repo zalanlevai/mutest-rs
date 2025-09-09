@@ -3,6 +3,13 @@
 [package]
 name = "mutest-driver-cli"
 version = "0.0.0"
+authors = ["Zalán Bálint Lévai"]
+description = "Shared CLI definitions between mutest-driver and cargo-mutest for mutest-rs."
+keywords = ["mutation", "mutation-analysis", "mutation-testing", "testing"]
+categories = ["development-tools::testing", "development-tools::cargo-plugins", "security"]
+homepage = "https://mutest.rs"
+repository = "https://github.com/zalanlevai/mutest-rs"
+license = "Apache-2.0 OR MIT"
 edition = "2024"
 
 [dependencies]
