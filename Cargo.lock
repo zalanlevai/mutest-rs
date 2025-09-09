@@ -89,7 +89,6 @@ version = "0.0.0"
 dependencies = [
  "cargo_metadata",
  "clap",
- "mutest-driver",
  "mutest-driver-cli",
  "mutest-operators",
  "serde",
@@ -386,12 +385,12 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 name = "mutest-driver"
 version = "0.0.0"
 dependencies = [
+ "cargo_metadata",
  "clap",
  "mutest-driver-cli",
  "mutest-emit",
  "mutest-json",
  "mutest-operators",
- "mutest-runtime",
  "rand",
  "rand_seeder",
  "serde",
@@ -432,7 +431,6 @@ name = "mutest-runtime"
 version = "0.0.0"
 dependencies = [
  "atomic-wait",
- "cargo_metadata",
  "mutest-json",
  "phf",
  "serde",

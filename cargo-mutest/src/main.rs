@@ -189,6 +189,7 @@ fn main() {
     let target_dir = matches.get_one::<String>("target-dir").map(ToOwned::to_owned)
         .unwrap_or(metadata.target_directory.join("mutest").into_string());
     cmd.args(["--target-dir", &target_dir]);
+    cmd.env("MUTEST_TARGET_DIR_ROOT", target_dir);
 
     if matches.get_flag("release") {
         cmd.arg("--release");

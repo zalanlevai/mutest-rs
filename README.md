@@ -59,15 +59,11 @@ cargo install --force --path cargo-mutest
 ## Usage
 
 > [!IMPORTANT]
-> Currently, the invocation of the tool requires manually specifying the following values:
-> * `MUTEST_SEARCH_PATH`: environment variable pointing to the local build artifacts.
+> Currently, the Cargo test target may have to be specified explicitly with the `--lib` or `--bin <BIN>` options, alongside the `-p <PACKAGE>` option. For more targeting options, see `--help`.
 >
-> In addition, the Cargo test target may have to be specified explicitly with the `--lib` or `--bin <BIN>` options. For more targeting options, see `--help`.
->
-> Thus, a typical invocation, with the code checked out and built in `~/Developer/mutest-rs` and a library target will look as follows:
+> Thus, a typical invocation with a library target will look as follows:
 >
 > ```sh
-> export MUTEST_SEARCH_PATH=~/Developer/mutest-rs/target/release
 > cargo mutest --lib run
 > ```
 

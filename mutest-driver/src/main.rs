@@ -124,9 +124,8 @@ pub fn main() {
 
         let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 
-        let mutest_search_path = env::var("MUTEST_SEARCH_PATH").ok().map(PathBuf::from)
-            .or_else(|| env::current_dir().ok().map(|v| v.join("target").join("debug")))
-            .expect("specify MUTEST_SEARCH_PATH environment variable");
+        let mutest_target_dir_root = env::var("MUTEST_TARGET_DIR_ROOT").ok().map(PathBuf::from);
+        let mutest_search_path = env::var("MUTEST_SEARCH_PATH").ok().map(PathBuf::from);
 
         let mode = match mutest_arg_matches.subcommand() {
             Some(("print", _)) => config::Mode::Print,
@@ -343,6 +342,7 @@ pub fn main() {
         let config = Config {
             compiler_config,
             invocation_fingerprint: mutest_args,
+            mutest_target_dir_root,
             mutest_search_path,
             opts: config::Options {
                 mode,

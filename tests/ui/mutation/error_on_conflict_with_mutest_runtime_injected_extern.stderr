@@ -1,0 +1,4 @@
+error: mutest-injected crate conflicts with existing extern `__mutest_runtime_public_dep_phf`
+  |
+  = note: mutest-injected crates use the reserved `__mutest_runtime_public_dep_` prefix: if you see this error for any other crate, please file a bug report
+

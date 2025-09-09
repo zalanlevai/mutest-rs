@@ -22,6 +22,7 @@ extern crate itertools;
 extern crate smallvec;
 
 pub mod config;
+pub mod inject;
 pub mod passes;
 pub mod print;
 pub mod write;
@@ -35,6 +36,9 @@ use crate::write::write_timings;
 
 pub fn run(mut config: Config) -> CompilerResult<()> {
     let t_start = Instant::now();
+
+    #[cfg(feature = "embed-runtime")]
+    inject::extract_runtime_crate_and_deps(&config.target_dir_root());
 
     let Some(analysis_pass) = passes::analysis::run(&mut config)? else { return Ok(()) };
 

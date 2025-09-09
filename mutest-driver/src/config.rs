@@ -117,6 +117,13 @@ pub struct Options<'op, 'm> {
 pub struct Config<'op, 'm> {
     pub compiler_config: CompilerConfig,
     pub invocation_fingerprint: Option<String>,
-    pub mutest_search_path: PathBuf,
+    pub mutest_target_dir_root: Option<PathBuf>,
+    pub mutest_search_path: Option<PathBuf>,
     pub opts: Options<'op, 'm>,
+}
+
+impl<'op, 'm> Config<'op, 'm> {
+    pub fn target_dir_root(&self) -> PathBuf {
+        self.mutest_target_dir_root.clone().unwrap_or(self.compiler_config.output_dir.clone().unwrap_or_default())
+    }
 }

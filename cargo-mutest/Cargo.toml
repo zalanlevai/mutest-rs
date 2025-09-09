@@ -8,7 +8,6 @@ edition = "2024"
 
 [dependencies]
 mutest-driver-cli = { path = "../mutest-driver-cli" }
-mutest-driver = { path = "../mutest-driver" }
 mutest-operators = { path = "../mutest-operators" }
 
 cargo_metadata = "0.21"
