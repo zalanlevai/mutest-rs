@@ -8,7 +8,6 @@ use crate::analysis::call_graph::Unsafety;
 use crate::analysis::diagnostic;
 use crate::codegen::ast;
 use crate::codegen::ast::P;
-use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::mutation::{Mut, MutationBatch, MutationParallelism, SubstLoc, UnsafeTargeting};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
@@ -330,74 +329,6 @@ fn mk_harness_fn(sp: Span) -> P<ast::Item> {
     ast::mk::item_fn(sp, vis, ident, None, None, inputs, None, Some(body))
 }
 
-struct HarnessGenerator<'tcx, 'trg, 'm> {
-    sess: &'tcx Session,
-    unsafe_targeting: UnsafeTargeting,
-    mutations: &'m [Mut<'trg, 'm>],
-    subst_locs: &'m [SubstLoc],
-    mutation_parallelism: Option<MutationParallelism<'trg, 'm>>,
-    def_site: Span,
-}
-
-impl<'tcx, 'trg, 'm> ast::mut_visit::MutVisitor for HarnessGenerator<'tcx, 'trg, 'm> {
-    fn visit_crate(&mut self, c: &mut ast::Crate) {
-        ast::mut_visit::walk_crate(self, c);
-
-        let g = &self.sess.psess.attr_id_generator;
-
-        let def = self.def_site;
-
-        // #![feature(test)]
-        let feature_test_attr = ast::mk::attr_inner(g, def,
-            Ident::new(sym::feature, def),
-            ast::mk::attr_args_delimited(def, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(def, ast::TokenKind::Ident(sym::test, ast::token::IdentIsRaw::No)),
-            ])),
-        );
-        // #![feature(custom_test_frameworks)]
-        let feature_custom_test_frameworks_attr = ast::mk::attr_inner(g, def,
-            Ident::new(sym::feature, def),
-            ast::mk::attr_args_delimited(def, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(def, ast::TokenKind::Ident(sym::custom_test_frameworks, ast::token::IdentIsRaw::No)),
-            ])),
-        );
-        // #![test_runner(mutest_generated::harness)]
-        let test_runner_mutest_harness_attr = ast::mk::attr_inner(g, def,
-            Ident::new(sym::test_runner, def),
-            ast::mk::attr_args_delimited(def, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(
-                ast::mk::ts_path(def, ast::mk::path_local(path::harness(def))),
-            )),
-        );
-
-        c.attrs.push(feature_test_attr);
-        c.attrs.push(feature_custom_test_frameworks_attr);
-        c.attrs.push(test_runner_mutest_harness_attr);
-
-        // extern crate test;
-        let extern_crate_test = ast::mk::item_extern_crate(def, sym::test, None);
-        // extern crate mutest_runtime;
-        let extern_crate_mutest_runtime = ast::mk::item_extern_crate(def, *sym::mutest_runtime, None);
-
-        // pub(crate) mod mutest_generated { ... }
-        let mutest_generated_mod = ast::mk::item_mod(def,
-            ast::mk::vis_pub_crate(def),
-            Ident::new(*sym::mutest_generated, def),
-            thin_vec![
-                extern_crate_test,
-                extern_crate_mutest_runtime,
-                mk_subst_map_ty_alias(def, &self.subst_locs),
-                mk_active_mutant_handle_static(def),
-                mk_mutations_mod(def, self.sess, self.mutations, self.unsafe_targeting),
-                mk_mutants_slice_const(def, self.mutations, self.mutation_parallelism, &self.subst_locs),
-                mk_meta_mutant_struct_static(def, self.mutations, self.mutation_parallelism),
-                mk_harness_fn(def),
-            ],
-        );
-
-        c.items.push(mutest_generated_mod);
-    }
-}
-
 pub fn generate_harness<'tcx, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
     mutations: &'m [Mut<'trg, 'm>],
@@ -413,6 +344,54 @@ pub fn generate_harness<'tcx, 'trg, 'm>(
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut generator = HarnessGenerator { sess: tcx.sess, unsafe_targeting, mutations, subst_locs, mutation_parallelism, def_site };
-    generator.visit_crate(krate);
+    let g = &tcx.sess.psess.attr_id_generator;
+
+    // #![feature(test)]
+    let feature_test_attr = ast::mk::attr_inner(g, def_site,
+        Ident::new(sym::feature, def_site),
+        ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+            ast::mk::tt_token_joint(def_site, ast::TokenKind::Ident(sym::test, ast::token::IdentIsRaw::No)),
+        ])),
+    );
+    // #![feature(custom_test_frameworks)]
+    let feature_custom_test_frameworks_attr = ast::mk::attr_inner(g, def_site,
+        Ident::new(sym::feature, def_site),
+        ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+            ast::mk::tt_token_joint(def_site, ast::TokenKind::Ident(sym::custom_test_frameworks, ast::token::IdentIsRaw::No)),
+        ])),
+    );
+    // #![test_runner(mutest_generated::harness)]
+    let test_runner_mutest_harness_attr = ast::mk::attr_inner(g, def_site,
+        Ident::new(sym::test_runner, def_site),
+        ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(
+            ast::mk::ts_path(def_site, ast::mk::path_local(path::harness(def_site))),
+        )),
+    );
+
+    krate.attrs.push(feature_test_attr);
+    krate.attrs.push(feature_custom_test_frameworks_attr);
+    krate.attrs.push(test_runner_mutest_harness_attr);
+
+    // extern crate test;
+    let extern_crate_test = ast::mk::item_extern_crate(def_site, sym::test, None);
+    // extern crate mutest_runtime;
+    let extern_crate_mutest_runtime = ast::mk::item_extern_crate(def_site, *sym::mutest_runtime, None);
+
+    // pub mod mutest_generated { ... }
+    let mutest_generated_mod = ast::mk::item_mod(def_site,
+        ast::mk::vis_pub(def_site),
+        Ident::new(*sym::mutest_generated, def_site),
+        thin_vec![
+            extern_crate_test,
+            extern_crate_mutest_runtime,
+            mk_subst_map_ty_alias(def_site, subst_locs),
+            mk_active_mutant_handle_static(def_site),
+            mk_mutations_mod(def_site, tcx.sess, mutations, unsafe_targeting),
+            mk_mutants_slice_const(def_site, mutations, mutation_parallelism, subst_locs),
+            mk_meta_mutant_struct_static(def_site, mutations, mutation_parallelism),
+            mk_harness_fn(def_site),
+        ],
+    );
+
+    krate.items.push(mutest_generated_mod);
 }
