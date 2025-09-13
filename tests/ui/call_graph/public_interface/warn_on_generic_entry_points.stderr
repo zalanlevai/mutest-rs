@@ -1,0 +1,12 @@
+warning: encountered generic function in public interface
+  --> tests/ui/call_graph/public_interface/warn_on_generic_entry_points.rs:11:1
+   |
+11 | / pub fn public_generic_fn<T: Trait>() {
+12 | |     T::assoc_fn()
+13 | | }
+   | |_^
+   |
+   = note: ignoring generic function: unable to trace all calls accurately due to uninstantiated type and const parameters
+
+warning: 1 warning emitted
+

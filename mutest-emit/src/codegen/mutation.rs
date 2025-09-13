@@ -7,7 +7,7 @@ use rustc_span::source_map::SourceMap;
 use smallvec::{SmallVec, smallvec};
 
 use crate::analysis::ast_lowering;
-use crate::analysis::call_graph::{Target, UnsafeSource, Unsafety};
+use crate::analysis::call_graph::{Target, TargetKind, UnsafeSource, Unsafety};
 use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::analysis::res;
@@ -217,7 +217,7 @@ impl MutId {
 
 pub struct Mut<'trg, 'm> {
     pub id: MutId,
-    pub target: &'trg Target<'trg>,
+    pub target: &'trg Target,
     pub span: Span,
     pub is_in_unsafe_block: bool,
     pub mutation: BoxedMutation<'m>,
@@ -316,7 +316,7 @@ struct MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
     body_res: &'op ast_lowering::BodyResolutions<'tcx>,
     def_site: Span,
     unsafe_targeting: UnsafeTargeting,
-    target: Option<&'trg Target<'trg>>,
+    target: Option<&'trg Target>,
     current_fn: Option<(ast::FnItem<'ast>, hir::FnItem<'tcx>)>,
     current_closure: Option<hir::BodyId>,
     is_in_unsafe_block: bool,
@@ -589,7 +589,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
     def_res: &ast_lowering::DefResolutions,
     body_res: &ast_lowering::BodyResolutions<'tcx>,
     krate: &'ast ast::Crate,
-    targets: impl Iterator<Item = &'trg Target<'trg>>,
+    targets: impl Iterator<Item = &'trg Target>,
     ops: Operators<'_, 'm>,
     unsafe_targeting: UnsafeTargeting,
     opts: &Options,
@@ -625,7 +625,8 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
         collector.target = Some(target);
         collector.is_in_unsafe_block = target.unsafety == Unsafety::Unsafe(UnsafeSource::Unsafe);
 
-        let Some(target_item) = ast_lowering::find_def_in_ast(tcx, def_res, target.def_id, krate) else { continue; };
+        let TargetKind::LocalMutable(local_def_id) = target.kind else { continue; };
+        let Some(target_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) else { continue; };
 
         match target_item {
             ast::DefItem::Item(item) => collector.visit_item(item),
@@ -663,8 +664,8 @@ pub enum MutationParallelism<'trg, 'm> {
 }
 
 pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
-    let reachable_from_a = a.reachable_from.iter().map(|(test, _)| test.item.id).collect();
-    let reachable_from_b = b.reachable_from.iter().map(|(test, _)| test.item.id).collect();
+    let reachable_from_a = a.reachable_from.iter().map(|(entry_point_def_id, _)| entry_point_def_id).collect();
+    let reachable_from_b = b.reachable_from.iter().map(|(entry_point_def_id, _)| entry_point_def_id).collect();
     !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
 }
 

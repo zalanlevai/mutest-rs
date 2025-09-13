@@ -4,7 +4,7 @@ use std::fs;
 use std::io::BufWriter;
 use std::time::Duration;
 
-use mutest_emit::analysis::call_graph::{CallGraph, Callee, Target, Unsafety};
+use mutest_emit::analysis::call_graph::{CallGraph, Callee, EntryPoints, Target, TargetKind, TargetReachability, Unsafety};
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::mutation::{Mut, MutationConflictGraph, MutationParallelism, Subst, SubstLoc, UnsafeTargeting};
@@ -43,65 +43,71 @@ pub fn write_tests<'tcx>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, tests: &[
     });
 }
 
-pub fn write_call_graph<'tcx>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, all_mutable_fns_count: usize, call_graph: &CallGraph<'tcx>, reachable_fns: &[Target], duration: Duration) -> FxHashMap<DefId, mutest_json::DefId> {
+pub fn write_call_graph<'tcx, 'ent>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, all_mutable_fns_count: usize, entry_points: EntryPoints<'ent>, call_graph: &CallGraph<'tcx>, reachable_fns: &[Target], duration: Duration) -> FxHashMap<DefId, mutest_json::DefId> {
     let mut definitions = mutest_json::IdxVec::new();
     let mut unique_definitions: FxHashMap<DefId, mutest_json::DefId> = Default::default();
 
-    let mut register_def = |def_id: DefId| {
-        let json_def_id = unique_definitions.entry(def_id).or_insert_with(|| {
-            let json_def_id = definitions.next_index();
-            definitions.push(mutest_json::Definition {
-                def_id: json_def_id,
-                name: tcx.opt_item_name(def_id).map(|symbol| symbol.as_str().to_owned()),
-                path: Some(tcx.def_path_str(def_id)),
-                span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(def_id)),
-            });
+    macro register_def($def_id:expr) {
+        {
+            let def_id = $def_id;
 
-            json_def_id
-        });
+            *unique_definitions.entry(def_id).or_insert_with(|| {
+                let json_def_id = definitions.next_index();
+                definitions.push(mutest_json::Definition {
+                    def_id: json_def_id,
+                    name: tcx.opt_item_name(def_id).map(|symbol| symbol.as_str().to_owned()),
+                    path: Some(tcx.def_path_str(def_id)),
+                    span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(def_id)),
+                });
 
-        *json_def_id
-    };
+                json_def_id
+            })
+        }
+    }
 
     // HACK: The later, nested mutations of the collection are not handled well by the compiler,
     //       so we use a `RefCell` instead.
     let callees = RefCell::new(mutest_json::IdxVec::new());
     let mut unique_callees: FxHashMap<Callee<'tcx>, mutest_json::call_graph::CalleeId> = Default::default();
 
-    let mut register_callee = |callee: Callee<'tcx>| -> mutest_json::call_graph::CalleeId {
-        let json_def_id = register_def(callee.def_id);
+    macro register_callee($callee:expr) {
+        {
+            let callee = $callee;
 
-        let json_callee_id = unique_callees.entry(callee).or_insert_with(|| {
-            let json_callee_id = callees.borrow().next_index();
-            callees.borrow_mut().push(mutest_json::call_graph::Callee {
-                callee_id: json_callee_id,
-                def_id: json_def_id,
-                generic_args: callee.generic_args.iter().map(|arg| arg.to_string()).collect(),
-                path_with_generic_args: callee.display_str(tcx),
-                calls: Default::default(),
-            });
+            let json_def_id = register_def!(callee.def_id);
 
-            json_callee_id
-        });
+            *unique_callees.entry(callee).or_insert_with(|| {
+                let json_callee_id = callees.borrow().next_index();
+                callees.borrow_mut().push(mutest_json::call_graph::Callee {
+                    callee_id: json_callee_id,
+                    def_id: json_def_id,
+                    generic_args: callee.generic_args.iter().map(|arg| arg.to_string()).collect(),
+                    path_with_generic_args: callee.display_str(tcx),
+                    calls: Default::default(),
+                });
 
-        json_callee_id.clone()
-    };
+                json_callee_id
+            })
+        }
+    }
 
-    let mut entry_points = mutest_json::IdxVec::new();
-    for (root_def_id, calls) in &call_graph.root_calls {
-        let json_entry_point_id = entry_points.next_index();
-        let mut entry_point = mutest_json::call_graph::EntryPoint {
+    let mut json_entry_points = mutest_json::IdxVec::new();
+    for entry_point in entry_points.iter() {
+        let _ = register_def!(entry_point.def_id.to_def_id());
+
+        let json_entry_point_id = json_entry_points.next_index();
+        let mut json_entry_point = mutest_json::call_graph::EntryPoint {
             entry_point_id: json_entry_point_id,
-            name: tcx.opt_item_name(root_def_id.to_def_id()).map(|symbol| symbol.as_str().to_owned()).unwrap_or_default(),
-            path: tcx.def_path_str(root_def_id.to_def_id()),
-            span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(root_def_id.to_def_id())),
+            name: tcx.opt_item_name(entry_point.def_id.to_def_id()).map(|symbol| symbol.as_str().to_owned()).unwrap_or_default(),
+            path: tcx.def_path_str(entry_point.def_id.to_def_id()),
+            span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(entry_point.def_id.to_def_id())),
             calls: Default::default(),
         };
 
-        for call in calls {
-            let json_callee_id = register_callee(call.callee);
+        for call in call_graph.root_calls.get(&entry_point.def_id).into_iter().flatten() {
+            let json_callee_id = register_callee!(call.callee);
 
-            let call_instances = entry_point.calls.entry(json_callee_id).or_default();
+            let call_instances = json_entry_point.calls.entry(json_callee_id).or_default();
             call_instances.push(mutest_json::call_graph::CallInstance {
                 span: mutest_json::Span::from_rustc_span(tcx.sess, call.span),
                 safety: match call.safety {
@@ -111,19 +117,19 @@ pub fn write_call_graph<'tcx>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, all_
             });
         }
 
-        entry_points.push(entry_point);
+        json_entry_points.push(json_entry_point);
     }
 
     for nested_calls in &call_graph.nested_calls {
         for (caller, calls) in nested_calls {
-            let json_callee_id = register_callee(*caller);
+            let json_callee_id = register_callee!(*caller);
             // HACK: The mutations extending `callees` in the nested loop may
             //       invalidate the mutable reference to this entry,
             //       so we make a copy, and write the updates back afterwards.
             let mut callee_calls = callees.borrow()[json_callee_id].calls.clone();
 
             for call in calls {
-                let json_callee_id = register_callee(call.callee);
+                let json_callee_id = register_callee!(call.callee);
 
                 let call_instances = callee_calls.entry(json_callee_id).or_default();
                 call_instances.push(mutest_json::call_graph::CallInstance {
@@ -151,7 +157,11 @@ pub fn write_call_graph<'tcx>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, all_
             call_graph_depth: call_graph.depth(),
         },
         call_graph: mutest_json::call_graph::CallGraph {
-            entry_points,
+            entry_points_kind: match entry_points {
+                EntryPoints::Tests(_) => mutest_json::call_graph::EntryPointsKind::Tests,
+                EntryPoints::PublicInterface(_) => mutest_json::call_graph::EntryPointsKind::PublicInterface,
+            },
+            entry_points: json_entry_points,
             callees: callees.take(),
         },
         definitions,
@@ -166,7 +176,7 @@ pub fn write_mutations<'tcx, 'trg>(
     tcx: TyCtxt<'tcx>,
     all_mutable_fns_count: usize,
     json_definitions: &FxHashMap<DefId, mutest_json::DefId>,
-    targets: impl Iterator<Item = &'trg Target<'trg>>,
+    targets: impl Iterator<Item = &'trg Target>,
     mutations: &[Mut],
     unsafe_targeting: UnsafeTargeting,
     mutation_conflict_graph: &MutationConflictGraph,
@@ -178,31 +188,42 @@ pub fn write_mutations<'tcx, 'trg>(
     let mut json_targets = mutest_json::IdxVec::new();
     let mut target_id_allocation: FxHashMap<LocalDefId, mutest_json::mutations::TargetId> = Default::default();
     for target in targets {
+        let TargetKind::LocalMutable(local_def_id) = target.kind else {
+            tcx.dcx().fatal("encountered non-mutation target while writing mutations");
+        };
+
         let json_target_id = json_targets.next_index();
         json_targets.push(mutest_json::mutations::Target {
             target_id: json_target_id,
-            def_id: *json_definitions.get(&target.def_id.to_def_id()).expect("json definitions missing target def id"),
-            distance: target.distance,
+            def_id: *json_definitions.get(&target.def_id()).expect("json definitions missing target def id"),
             safety: match target.unsafety {
                 Unsafety::Unsafe(_) => mutest_json::mutations::MutationSafety::Unsafe,
                 Unsafety::Tainted(_) => mutest_json::mutations::MutationSafety::Tainted,
                 Unsafety::None => mutest_json::mutations::MutationSafety::Safe,
             },
+            reachability: match target.reachability {
+                TargetReachability::DirectEntry => mutest_json::mutations::TargetReachability::DirectEntryPoint,
+                TargetReachability::NestedCallee { distance } => mutest_json::mutations::TargetReachability::NestedCallee { distance },
+            },
             reachable_from: target.reachable_from.iter()
-                .map(|(test, entry_point_association)| {
-                    (test.path_str(), mutest_json::mutations::EntryPointAssociation {
-                        distance: entry_point_association.distance,
-                        tainted_call_path: target.is_tainted(test, unsafe_targeting),
+                .map(|(&entry_point, entry_point_assoc)| {
+                    (entry_point.path_str(tcx), mutest_json::mutations::EntryPointAssociation {
+                        distance: entry_point_assoc.distance,
+                        tainted_call_path: target.is_tainted(entry_point, unsafe_targeting),
                     })
                 })
                 .collect(),
         });
 
-        target_id_allocation.insert(target.def_id, json_target_id);
+        target_id_allocation.insert(local_def_id, json_target_id);
     }
 
     let mut json_mutations = mutest_json::IdxVec::with_capacity(total_mutations_count);
     for mutation in mutations {
+        let TargetKind::LocalMutable(local_def_id) = mutation.target.kind else {
+            tcx.dcx().fatal("encountered mutation with non-mutation target while writing mutations");
+        };
+
         let mutation_id = json_mutations.next_index();
         assert_eq!(mutation_id, mutest_json::mutations::MutationId(mutation.id.index()), "mutations are not supplied in id order");
 
@@ -239,7 +260,7 @@ pub fn write_mutations<'tcx, 'trg>(
 
         json_mutations.push(mutest_json::mutations::Mutation {
             mutation_id,
-            target_id: *target_id_allocation.get(&mutation.target.def_id).expect("target def id not allocated"),
+            target_id: *target_id_allocation.get(&local_def_id).expect("target def id not allocated"),
             origin_span,
             mutation_op: mutation.op_name().to_owned(),
             display_name: mutation.display_name(),
@@ -271,7 +292,7 @@ pub fn write_mutations<'tcx, 'trg>(
         _ => None,
     };
 
-    let mutated_fns = mutations.iter().map(|mutation| mutation.target.def_id).collect::<FxHashSet<_>>();
+    let mutated_fns = mutations.iter().map(|mutation| mutation.target.def_id()).collect::<FxHashSet<_>>();
     let mutated_fns_count = mutated_fns.len();
 
     let mut safe_mutations_count = 0;

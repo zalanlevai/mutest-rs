@@ -1,0 +1,28 @@
+
+@@@ call graph @@@
+
+entry points:
+
+public public_and_nested_fn
+  -> private_reachable_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:10:1: 10:26 (#0)
+public public_fn
+  -> private_reachable_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:10:1: 10:26 (#0)
+  -> public_and_nested_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:18:1: 18:30 (#0)
+
+nested calls at distance 1:
+
+public_and_nested_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:18:1: 18:30 (#0)
+  -> private_reachable_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:10:1: 10:26 (#0)
+
+@@@ targets @@@
+
+public interface -(0)-> private_reachable_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:10:1: 10:26 (#0)
+  (0) public_and_nested_fn
+  (0) public_fn
+
+public interface public_and_nested_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:18:1: 18:30 (#0)
+  (0) public_fn
+
+public interface public_fn at tests/ui/call_graph/public_interface/ignore_private_functions.rs:22:1: 22:19 (#0)
+
+targets: 3 total; 3 safe; 0 unsafe (0 tainted)

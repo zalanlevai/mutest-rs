@@ -1,0 +1,10 @@
+
+@@@ call graph @@@
+
+entry points:
+
+public public_generic_fn
+
+@@@ targets @@@
+
+targets: 0 total; 0 safe; 0 unsafe (0 tainted)

@@ -18,6 +18,7 @@ use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
 use rustc_session::EarlyDiagCtxt;
+use rustc_session::config::Input;
 
 struct DefaultCallbacks;
 impl rustc_driver::Callbacks for DefaultCallbacks {}
@@ -75,6 +76,33 @@ fn fetch_sysroot() -> Option<PathBuf> {
         .or_else(|| toolchain_path(option_env!("MULTIRUST_HOME").map(ToOwned::to_owned), option_env!("MULTIRUST_TOOLCHAIN").map(ToOwned::to_owned)))
 }
 
+enum TestType {
+    UnitTest,
+    IntegrationTest,
+    Unknown,
+}
+
+// See `rustc_builtin_macros::test::test_type`.
+fn guess_test_type(input: &Input) -> TestType {
+    let input_file_path = input.opt_path().expect("cannot get input file path").to_owned();
+    let input_dir_path = input_file_path.parent().unwrap_or(&input_file_path).to_owned();
+
+    match () {
+        _ if input_dir_path.ends_with("src") => TestType::UnitTest,
+        _ if input_dir_path.ends_with("tests") => TestType::IntegrationTest,
+        _ => TestType::Unknown,
+    }
+}
+
+mod crate_kind {
+    mutest_driver_cli::exclusive_opts! { pub(crate) possible_values where
+        INFER = "infer"; ["Infer crate kind based on the Cargo rustc invocation."]
+        MUTANT_WITH_INTERNAL_TESTS = "mutant-with-internal-tests"; ["Crate mutated against its own internal test suite."]
+        MUTANT_FOR_EXTERNAL_TESTS = "mutant-for-external-tests"; ["Crate mutated against its public interface, driven by an external test suite."]
+        INTEGRATION_TESTS = "integration-tests"; ["External integration test crate that links against a generic mutated crate."]
+    }
+}
+
 pub fn main() {
     let mut args = env::args().collect::<Vec<_>>();
 
@@ -102,14 +130,17 @@ pub fn main() {
     }
 
     let primary_package = env::var("CARGO_PRIMARY_PACKAGE").is_ok();
-    let test_target = args.iter().any(|arg| arg.starts_with("--test"));
+    let test_target = args.iter().any(|arg| arg == "--test");
     let normal_rustc = args.iter().any(|arg| arg.starts_with("--print"));
+
+    let bin_target = args.iter().any(|arg| arg == "--crate-type=bin")
+        || args.iter().position(|arg| arg == "--crate-type").is_some_and(|i| args.get(i + 1).is_some_and(|v| v == "bin"));
 
     let mutest_args = (!rustc_wrapper)
         .then_some(args.iter().skip(1).map(ToOwned::to_owned).collect::<Vec<_>>().join(" "))
         .or_else(|| env::var("MUTEST_ARGS").ok());
 
-    if normal_rustc || !primary_package || !test_target {
+    if normal_rustc || !primary_package || (bin_target && !test_target) {
         process::exit(rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args })
         }));
@@ -117,6 +148,8 @@ pub fn main() {
 
     let mutest_arg_matches = mutest_driver_cli::command()
         .no_binary_name(true)
+        // Target-related Arguments
+        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER).display_order(200))
         .get_matches_from(mutest_args.as_deref().unwrap_or_default().split(" "));
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
@@ -126,6 +159,24 @@ pub fn main() {
 
         let mutest_target_dir_root = env::var("MUTEST_TARGET_DIR_ROOT").ok().map(PathBuf::from);
         let mutest_search_path = env::var("MUTEST_SEARCH_PATH").ok().map(PathBuf::from);
+
+        let crate_kind = {
+            use crate::crate_kind as opts;
+
+            match mutest_arg_matches.get_one::<String>("crate-kind").map(String::as_str) {
+                Some(opts::MUTANT_WITH_INTERNAL_TESTS) => config::CrateKind::MutantWithInternalTests,
+                Some(opts::MUTANT_FOR_EXTERNAL_TESTS) => config::CrateKind::MutantForExternalTests,
+                Some(opts::INTEGRATION_TESTS) => config::CrateKind::IntegrationTest,
+
+                None | Some(opts::INFER) => match (test_target, guess_test_type(&compiler_config.input)) {
+                    (false, _) => config::CrateKind::MutantForExternalTests,
+                    (true, TestType::UnitTest | TestType::Unknown) => config::CrateKind::MutantWithInternalTests,
+                    (true, TestType::IntegrationTest) => config::CrateKind::IntegrationTest,
+                },
+
+                _ => unreachable!(),
+            }
+        };
 
         let mode = match mutest_arg_matches.subcommand() {
             Some(("print", _)) => config::Mode::Print,
@@ -167,7 +218,7 @@ pub fn main() {
                     opts::TESTS => print_opts.tests = Some(()),
                     opts::TARGETS => print_opts.mutation_targets = Some(()),
                     opts::CALL_GRAPH => {
-                        let test_filters = mutest_arg_matches.get_many::<String>("call-graph-filter-tests").map(|s| s.map(|f| f.trim().to_owned()).collect::<Vec<_>>()).unwrap_or_default();
+                        let entry_point_filters = mutest_arg_matches.get_many::<String>("call-graph-filter-entry-points").map(|s| s.map(|f| f.trim().to_owned()).collect::<Vec<_>>()).unwrap_or_default();
                         let non_local_call_view = {
                             use mutest_driver_cli::call_graph_non_local_call_view as opts;
                             match mutest_arg_matches.get_one::<String>("call-graph-non-local-calls").map(String::as_str) {
@@ -176,7 +227,7 @@ pub fn main() {
                                 _ => unreachable!(),
                             }
                         };
-                        print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, test_filters, non_local_call_view });
+                        print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, entry_point_filters, non_local_call_view });
                     }
                     opts::CONFLICT_GRAPH | opts::COMPATIBILITY_GRAPH => {
                         let compatibility_graph = matches!(print_name, opts::COMPATIBILITY_GRAPH);
@@ -345,6 +396,8 @@ pub fn main() {
             mutest_target_dir_root,
             mutest_search_path,
             opts: config::Options {
+                crate_kind,
+
                 mode,
                 verbosity,
                 report_timings,

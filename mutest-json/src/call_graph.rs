@@ -31,6 +31,16 @@ pub struct CallGraphStats {
     pub call_graph_depth: usize,
 }
 
+/// Kinds of crate entry points.
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryPointsKind {
+    /// Collection of test function definitions.
+    Tests,
+    /// Collection of public, reachable functions.
+    PublicInterface,
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct EntryPointId(pub u32);
 
@@ -103,6 +113,8 @@ pub struct CallInstance {
 /// Call graph of multiple entry points.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallGraph {
+    /// The kind of entry points the call graph was generated for.
+    pub entry_points_kind: EntryPointsKind,
     /// Entry point functions to the call graph.
     pub entry_points: IdxVec<EntryPointId, EntryPoint>,
     /// Callee functions of other callees and entry points within the call graph.

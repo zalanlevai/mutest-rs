@@ -1,5 +1,6 @@
 use std::cell::UnsafeCell;
 use std::collections::hash_map;
+use std::hash::{Hash, Hasher};
 use std::iter;
 
 use rustc_hash::{FxHashSet, FxHashMap};
@@ -108,6 +109,46 @@ fn collect_unsafe_blocks<'tcx>(body_hir: &'tcx hir::Body<'tcx>, root_scope_safet
     collector.unsafe_blocks
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct EntryPoint {
+    pub def_id: hir::LocalDefId,
+}
+
+impl EntryPoint {
+    pub fn path_str<'tcx>(&self, tcx: TyCtxt<'tcx>) -> String {
+        res::def_id_path(tcx, self.def_id.to_def_id()).iter()
+            .skip(1) // Skip crate name in entry point path strings.
+            .filter_map(|&segment_def_id| tcx.opt_item_name(segment_def_id).map(|symbol| symbol.as_str().to_owned()))
+            .intersperse("::".to_owned())
+            .collect::<String>()
+    }
+}
+
+impl Eq for EntryPoint {}
+impl PartialEq for EntryPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.def_id == other.def_id
+    }
+}
+
+impl Hash for EntryPoint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.def_id.hash(state);
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum TargetKind {
+    LocalMutable(hir::LocalDefId),
+    ExternEntryPoint(hir::DefId),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum TargetReachability {
+    DirectEntry,
+    NestedCallee { distance: usize },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EntryPointAssociation {
     pub distance: usize,
@@ -115,16 +156,23 @@ pub struct EntryPointAssociation {
 }
 
 #[derive(Debug)]
-pub struct Target<'tst> {
-    pub def_id: hir::LocalDefId,
+pub struct Target {
+    pub kind: TargetKind,
     pub unsafety: Unsafety,
-    pub reachable_from: FxHashMap<&'tst Test, EntryPointAssociation>,
-    pub distance: usize,
+    pub reachability: TargetReachability,
+    pub reachable_from: FxHashMap<EntryPoint, EntryPointAssociation>,
 }
 
-impl<'tst> Target<'tst> {
-    pub fn is_tainted(&self, entry_point: &Test, unsafe_targeting: UnsafeTargeting) -> bool {
-        self.reachable_from.get(entry_point).is_some_and(|entry_point| {
+impl Target {
+    pub fn def_id(&self) -> hir::DefId {
+        match self.kind {
+            TargetKind::LocalMutable(local_def_id) => local_def_id.to_def_id(),
+            TargetKind::ExternEntryPoint(def_id) => def_id,
+        }
+    }
+
+    pub fn is_tainted(&self, entry_point: EntryPoint, unsafe_targeting: UnsafeTargeting) -> bool {
+        self.reachable_from.get(&entry_point).is_some_and(|entry_point| {
             let unsafety = entry_point.unsafe_call_path.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
             unsafety.is_unsafe(unsafe_targeting)
         })
@@ -159,6 +207,39 @@ pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> im
                 // #[mutest::skip] functions
                 && !tool_attr::skip(tcx.hir_attrs(hir_id))
         })
+}
+
+pub fn all_public_interface_fns<'tcx>(tcx: TyCtxt<'tcx>) -> impl Iterator<Item = hir::LocalDefId> {
+    tcx.hir_crate_items(()).definitions()
+        .filter(move |&local_def_id| {
+            let def_id = local_def_id.to_def_id();
+
+            matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
+                // fn;
+                && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
+                // pub(crate) fn;
+                && tcx.visibility(local_def_id).is_public()
+        })
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum EntryPoints<'a> {
+    Tests(&'a [Test]),
+    PublicInterface(&'a [hir::LocalDefId]),
+}
+
+impl<'a> EntryPoints<'a> {
+    pub fn iter(&self) -> Box<dyn Iterator<Item = EntryPoint> + 'a> {
+        match self {
+            EntryPoints::Tests(tests) => {
+                let iter = tests.iter()
+                    .filter(|test| !test.ignore)
+                    .map(|test| EntryPoint { def_id: test.def_id });
+                Box::new(iter)
+            },
+            EntryPoints::PublicInterface(def_ids) => Box::new(def_ids.iter().map(|&def_id| EntryPoint { def_id })),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -334,6 +415,64 @@ impl<'tcx> CallGraph<'tcx> {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum Targeting {
+    LocalMutables,
+    ExternEntryPoints(hir::CrateNum),
+}
+
+impl Targeting {
+    pub fn matches<'tcx>(&self, tcx: TyCtxt<'tcx>, test_def_ids: &FxHashSet<hir::LocalDefId>, def_id: hir::DefId) -> Option<TargetKind> {
+        match *self {
+            Targeting::LocalMutables => {
+                let Some(local_def_id) = def_id.as_local() else { return None; };
+                let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
+
+                let entry_fn = tcx.entry_fn(());
+
+                // TODO: Ignore #[coverage(off)] functions
+                // Functions, excluding closures
+                let targeted = matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
+                    // NOT `fn main() {}`
+                    && !entry_fn.map(|(entry_def_id, _)| def_id == entry_def_id).unwrap_or(false)
+                    // NOT `const fn`
+                    && !tcx.is_const_fn(def_id)
+                    // NOT `fn;`
+                    && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
+                    // NOT `#[test]` functions, or inner functions
+                    && !test_def_ids.contains(&local_def_id)
+                    && !res::parent_iter(tcx, def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                    // NOT `#[cfg(test)]` functions, or functions in `#[cfg(test)]` modules
+                    && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
+                    // NOT `#[mutest::skip]` functions
+                    && !tool_attr::skip(tcx.hir_attrs(hir_id));
+
+                if !targeted { return None; }
+
+                Some(TargetKind::LocalMutable(local_def_id))
+            }
+            Targeting::ExternEntryPoints(cnum) => {
+                // NOTE: This is in the context of the local crate invoking the extern crate, so the following can be assumed:
+                //       * the definition is visible, otherwise the program would be rejected;
+                //       * the definition has a body, as you cannot refer to generic definitions without bodies (e.g. trait assocs)
+                //         through monomorphized calls;
+                //       * the definition is not a `#[test]` function, a #[cfg(test)] function, or a function in a `#[cfg(test)]` module.
+
+                // NOTE: The `#[mutest::skip]` attribute does not apply here, since that only skips the function
+                //       for mutation generation, not for reachability analysis.
+
+                let targeted = def_id.krate == cnum
+                    // Functions, excluding closures
+                    && matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn);
+
+                if !targeted { return None; }
+
+                Some(TargetKind::ExternEntryPoint(def_id))
+            }
+        }
+    }
+}
+
 pub fn instantiate_generic_args<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, generic_args: ty::GenericArgsRef<'tcx>) -> T
 where
     T: ty::TypeFoldable<TyCtxt<'tcx>>,
@@ -341,14 +480,15 @@ where
     ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
 }
 
-pub fn reachable_fns<'ast, 'tcx, 'tst>(
+pub fn reachable_fns<'ast, 'tcx, 'ent>(
     tcx: TyCtxt<'tcx>,
     def_res: &ast_lowering::DefResolutions,
     krate: &'ast ast::Crate,
-    tests: &'tst [Test],
+    entry_points: EntryPoints<'ent>,
+    targeting: Targeting,
     depth_limit: Option<usize>,
     trace_length_limit: Option<usize>,
-) -> (CallGraph<'tcx>, Vec<Target<'tst>>) {
+) -> (CallGraph<'tcx>, Vec<Target>) {
     let mut call_graph = CallGraph {
         virtual_calls_count: 0,
         dynamic_calls_count: 0,
@@ -357,14 +497,37 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
         nested_calls: vec![],
     };
 
-    let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
+    let test_def_ids = match entry_points {
+        EntryPoints::Tests(tests) => tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>(),
+        EntryPoints::PublicInterface(_) => Default::default(),
+    };
+
+    let mut ignored_entry_points: FxHashSet<EntryPoint> = Default::default();
 
     let mut previously_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
-    for test in tests {
-        if test.ignore { continue; }
+    for entry_point in entry_points.iter() {
+        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(entry_point.def_id.to_def_id()));
 
-        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(test.def_id.to_def_id()));
+        // NOTE: We expect entry points to be non-polymorphic (i.e. no type or const generic) functions.
+        //       This is because we cannot build a complete call graph with uninstantiated type and const parameters.
+        if body_mir.is_polymorphic {
+            match entry_points {
+                // Tests cannot be generic functions anyway, so this is a hard crash.
+                EntryPoints::Tests(_) => tcx.dcx().fatal("encountered generic function test definition"),
+                // NOTE: This does unfortunately rule out tracking generic public interface functions
+                //       for cross-crate reachability analysis.
+                EntryPoints::PublicInterface(_) => {
+                    let mut diagnostic = tcx.dcx().struct_warn("encountered generic function in public interface");
+                    diagnostic.span(body_mir.span);
+                    diagnostic.note("ignoring generic function: unable to trace all calls accurately due to uninstantiated type and const parameters");
+                    diagnostic.emit();
+
+                    ignored_entry_points.insert(entry_point);
+                    continue;
+                }
+            }
+        }
 
         let mut calls = mir_callees(tcx, &body_mir, tcx.mk_args(&[])).collect::<Vec<_>>();
         calls.extend(drop_glue_callees(tcx, &body_mir, tcx.mk_args(&[])));
@@ -388,7 +551,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                         let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
                         diagnostic.span(call.span);
                         diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
-                        diagnostic.note(format!("in {}", tcx.def_path_str(test.def_id)));
+                        diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.def_id)));
                         diagnostic.emit();
                     }
 
@@ -407,7 +570,7 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                             let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");
                             diagnostic.span(call.span);
                             diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(instance.def_id(), instance.args)));
-                            diagnostic.note(format!("in {}", tcx.def_path_str(test.def_id)));
+                            diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.def_id)));
                             diagnostic.emit();
                         }
                     }
@@ -421,14 +584,14 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                     let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
                     diagnostic.span(call.span);
                     diagnostic.span_label(call.span, format!("call to {fn_sig}"));
-                    diagnostic.note(format!("in {}", tcx.def_path_str(test.def_id)));
+                    diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.def_id)));
                     diagnostic.emit();
 
                     continue;
                 }
             };
 
-            let test_calls = call_graph.root_calls.entry(test.def_id).or_default();
+            let test_calls = call_graph.root_calls.entry(entry_point.def_id).or_default();
             test_calls.push(InstanceCall { callee, safety: call.safety, span: call.span });
 
             previously_found_callees.insert(callee);
@@ -481,11 +644,10 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
             if alread_recorded_callers.contains(&caller) { continue; }
 
-            // Collect calls of callees, for the next depth iteration.
-
             if !tcx.is_mir_available(caller.def_id) { continue; }
             let body_mir = tcx.instance_mir(ty::InstanceKind::Item(caller.def_id));
 
+            // Collect calls of callees, for the next depth iteration.
             let mut calls = mir_callees(tcx, &body_mir, caller.generic_args).collect::<Vec<_>>();
             calls.extend(drop_glue_callees(tcx, &body_mir, caller.generic_args));
             // HACK: We must sort the calls into a stable order for the corresponding diagnostics to be printed in a stable order.
@@ -604,16 +766,17 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
         }
     }
 
-    fn record_targets<'ast, 'tcx, 'tst>(
+    fn record_nested_targets<'ast, 'tcx>(
         tcx: TyCtxt<'tcx>,
         def_res: &ast_lowering::DefResolutions,
         krate: &'ast ast::Crate,
         test_def_ids: &FxHashSet<hir::LocalDefId>,
         callee_lookup_cache: &CalleeLookupCache<'tcx, '_>,
-        test: &'tst Test,
+        entry_point: EntryPoint,
+        targeting: Targeting,
         unsafety: Option<UnsafeSource>,
         call_trace: &mut CallTrace<'tcx>,
-        targets: &mut FxHashMap<hir::LocalDefId, Target<'tst>>,
+        targets: &mut FxHashMap<hir::DefId, Target>,
         trace_length_limit: Option<usize>,
     ) {
         let &[.., caller] = &call_trace.nested_calls[..] else { return; };
@@ -625,43 +788,41 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
 
         // Record or update target.
         'target: {
-            let Some(local_def_id) = caller.def_id.as_local() else { break 'target; };
-            if !tcx.hir_node_by_def_id(local_def_id).body_id().is_some() { return; }
-
-            let target = match targets.entry(local_def_id) {
+            let target = match targets.entry(caller.def_id) {
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 hash_map::Entry::Vacant(entry) => {
-                    let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
-                    // TODO: Ignore #[coverage(off)] functions
-                    let skip = false
-                        // Non-functions, including closures
-                        || !matches!(tcx.def_kind(caller.def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
-                        // Inner function of #[test] function
-                        || res::parent_iter(tcx, caller.def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
-                        // #[cfg(test)] function, or function in #[cfg(test)] module
-                        || tests::is_marked_or_in_cfg_test(tcx, hir_id)
-                        // #[mutest::skip] function
-                        || tool_attr::skip(tcx.hir_attrs(hir_id));
+                    let Some(target_kind) = targeting.matches(tcx, test_def_ids, caller.def_id) else { break 'target; };
 
-                    if skip { break 'target; }
-
-                    let Some(caller_def_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) else { break 'target; };
+                    let item_unsafety = match caller.def_id.as_local() {
+                        Some(local_def_id) => {
+                            let Some(def_item) = ast_lowering::find_def_in_ast(tcx, def_res, local_def_id, krate) else { break 'target; };
+                            check_item_unsafety(def_item)
+                        }
+                        None => {
+                            match tcx.fn_sig(caller.def_id).skip_binder().safety() {
+                                hir::Safety::Safe => Unsafety::None,
+                                hir::Safety::Unsafe => Unsafety::Unsafe(UnsafeSource::Unsafe),
+                            }
+                        }
+                    };
 
                     entry.insert(Target {
-                        def_id: local_def_id,
-                        unsafety: check_item_unsafety(caller_def_item),
+                        kind: target_kind,
+                        unsafety: item_unsafety,
+                        reachability: TargetReachability::NestedCallee { distance },
                         reachable_from: Default::default(),
-                        distance,
                     })
                 }
             };
 
-            target.distance = Ord::min(distance, target.distance);
+            if let TargetReachability::NestedCallee { distance: target_distance } = &mut target.reachability {
+                *target_distance = Ord::min(distance, *target_distance)
+            }
 
             let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
             target.unsafety = Ord::max(caller_tainting, target.unsafety);
 
-            let entry_point = target.reachable_from.entry(test).or_insert_with(|| {
+            let entry_point = target.reachable_from.entry(entry_point).or_insert_with(|| {
                 EntryPointAssociation {
                     distance,
                     unsafe_call_path: None,
@@ -688,20 +849,43 @@ pub fn reachable_fns<'ast, 'tcx, 'tst>(
                 hir::Safety::Unsafe => Some(UnsafeSource::Unsafe),
             };
 
-            record_targets(tcx, def_res, krate, test_def_ids, callee_lookup_cache, test, unsafety, call_trace, targets, trace_length_limit);
+            record_nested_targets(tcx, def_res, krate, test_def_ids, callee_lookup_cache, entry_point, targeting, unsafety, call_trace, targets, trace_length_limit);
 
             call_trace.nested_calls.pop();
         }
     }
 
     let callee_lookup_cache = CalleeLookupCache::new(&call_graph);
-    let mut targets: FxHashMap<hir::LocalDefId, Target> = Default::default();
+    let mut targets: FxHashMap<hir::DefId, Target> = Default::default();
+    if let EntryPoints::PublicInterface(def_ids) = entry_points {
+        for &def_id in def_ids {
+            if ignored_entry_points.contains(&EntryPoint { def_id }) { continue; }
+
+            let Some(target_kind) = targeting.matches(tcx, &test_def_ids, def_id.to_def_id()) else { continue; };
+
+            let Some(def_item) = ast_lowering::find_def_in_ast(tcx, def_res, def_id, krate) else { continue };
+            let item_unsafety = check_item_unsafety(def_item);
+
+            targets.insert(def_id.to_def_id(), Target {
+                kind: target_kind,
+                unsafety: item_unsafety,
+                reachability: TargetReachability::DirectEntry,
+                reachable_from: Default::default(),
+            });
+        }
+    }
     for (&entry_point, calls) in &call_graph.root_calls {
+        let Some(def_item) = ast_lowering::find_def_in_ast(tcx, def_res, entry_point, krate) else { continue };
+        let unsafety = check_item_unsafety(def_item);
+
         for call in calls {
-            let Some(test) = tests.iter().find(|test| test.def_id == entry_point) else { unreachable!() };
-            let unsafety = None;
+            let unsafety = match unsafety {
+                Unsafety::Unsafe(unsafe_source) => Some(unsafe_source),
+                _ => None,
+            };
             let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![call.callee] };
-            record_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, test, unsafety, &mut call_trace, &mut targets, trace_length_limit);
+            let entry_point = EntryPoint { def_id: entry_point };
+            record_nested_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, entry_point, targeting, unsafety, &mut call_trace, &mut targets, trace_length_limit);
         }
     }
 

@@ -17,6 +17,6 @@ tests -(1)-> [tainted] offset_from at tests/ui/call_graph/unsafety/mark_calls_fr
   (1) [tainted] test
 
 tests -(0)-> [unsafe] reserve_inner at tests/ui/call_graph/unsafety/mark_calls_from_unsafe_fns_as_unsafe.rs:8:1: 8:26 (#0)
-  (0) test
+  (0) [tainted] test
 
 targets: 2 total; 0 safe; 2 unsafe (1 tainted)

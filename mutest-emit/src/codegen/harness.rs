@@ -1,17 +1,28 @@
 use std::iter;
 
 use rustc_middle::ty::TyCtxt;
-use rustc_session::Session;
 use thin_vec::{ThinVec, thin_vec};
 
-use crate::analysis::call_graph::Unsafety;
+use crate::analysis::call_graph::{EntryPoint, EntryPoints, EntryPointAssociation, Target, TargetReachability, Unsafety};
 use crate::analysis::diagnostic;
+use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::mutation::{Mut, MutationBatch, MutationParallelism, SubstLoc, UnsafeTargeting};
-use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
+use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, kw, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
+
+/// Generate an opaque identifier representing a crate definintion
+/// that is stable across crate (and compilation session) boundaries.
+/// This means that the generated code can rely on equivalence between
+/// two opaque stable def ids to determine references to the same crate definition.
+/// The identifier is returned in the form of a [`Symbol`] for embedding into generated code.
+///
+/// The identifier is based on the definition's [`DefPathHash`][hir::DefPathHash].
+fn opaque_stable_def_id_for_embedding<'tcx>(tcx: TyCtxt<'tcx>, prefix: &str, def_id: hir::DefId) -> Symbol {
+    Symbol::intern(&format!("{prefix}{}", tcx.def_path_hash(def_id).0.to_hex()))
+}
 
 fn mk_static_map<I>(sp: Span, entries: I) -> P<ast::Expr>
 where
@@ -35,7 +46,30 @@ where
     })))
 }
 
-pub fn bake_mutation(sp: Span, sess: &Session, mutation: &Mut, unsafe_targeting: UnsafeTargeting) -> P<ast::Expr> {
+fn mk_static_map_ts<I>(sp: Span, entries: I) -> ast::tokenstream::TokenStream
+where
+    I: IntoIterator<Item = (ast::tokenstream::TokenTree, ast::tokenstream::TokenTree)>,
+{
+    let args_token_trees = entries.into_iter()
+        .flat_map(|(key_token, value_token)| {
+            let arrow_token = ast::mk::tt_token_alone(sp, ast::TokenKind::FatArrow);
+            let comma_token = ast::mk::tt_token_alone(sp, ast::TokenKind::Comma);
+            [key_token, arrow_token, value_token, comma_token]
+        })
+        .collect::<Vec<_>>();
+
+    let mut static_map_bang_path = path::static_map(sp);
+    let Some(last_path_segment) = static_map_bang_path.segments.last_mut() else { unreachable!() };
+    last_path_segment.ident.name = Symbol::intern(&format!("{}!", last_path_segment.ident.name.as_str()));
+
+    let mut token_trees = vec![];
+    token_trees.extend(ast::mk::ts_path(sp, ast::mk::path_local(static_map_bang_path)));
+    token_trees.push(ast::mk::tt_delimited(sp, ast::token::Delimiter::Brace, ast::mk::token_stream(args_token_trees)));
+
+    ast::mk::token_stream(token_trees)
+}
+
+pub fn bake_mutation<'tcx, 'ent>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, mutation: &Mut, unsafe_targeting: UnsafeTargeting) -> P<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutationMeta(sp)), thin_vec![
         ast::mk::expr_struct_field(sp, Ident::new(*sym::id, sp), {
             ast::mk::expr_u32(sp, mutation.id.index())
@@ -56,29 +90,53 @@ pub fn bake_mutation(sp: Span, sess: &Session, mutation: &Mut, unsafe_targeting:
             ast::mk::expr_str(sp, &mutation.display_name())
         }),
         ast::mk::expr_struct_field(sp, Ident::new(*sym::display_location, sp), {
-            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.display_location(sess)))
+            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.display_location(tcx.sess)))
         }),
 
         ast::mk::expr_struct_field(sp, Ident::new(*sym::reachable_from, sp), {
-            mk_static_map(sp, mutation.target.reachable_from.iter().map(|(&test, entry_point)| {
-                let key_lit = ast::TokenKind::lit(ast::token::LitKind::Str, Symbol::intern(&test.path_str()), None);
+            let direct_entry = match mutation.target.reachability {
+                TargetReachability::DirectEntry => {
+                    let entry_point = EntryPoint { def_id: mutation.target.def_id().expect_local() };
+                    Some((entry_point, EntryPointAssociation {
+                        // FIXME: Distinguish between the entry point entry and call entries.
+                        distance: 0,
+                        unsafe_call_path: None,
+                    }))
+                },
+                TargetReachability::NestedCallee { .. } => None,
+            };
+
+            let entries = direct_entry.iter().map(|(a, b)| (a, b))
+                .chain(mutation.target.reachable_from.iter());
+
+            let map = mk_static_map(sp, entries.map(|(&entry_point, entry_point_assoc)| {
+                let def_path_str_sym = match entry_points {
+                    EntryPoints::Tests(_) => Symbol::intern(&entry_point.path_str(tcx)),
+                    EntryPoints::PublicInterface(_) => opaque_stable_def_id_for_embedding(tcx, "public_interface_", entry_point.def_id.to_def_id()),
+                };
+                let key_lit = ast::TokenKind::lit(ast::token::LitKind::Str, def_path_str_sym, None);
                 let key_token = ast::mk::tt_token_alone(sp, key_lit);
 
-                let value_lit = ast::TokenKind::lit(ast::token::LitKind::Integer, Symbol::intern(&entry_point.distance.to_string()), None);
+                let value_lit = ast::TokenKind::lit(ast::token::LitKind::Integer, Symbol::intern(&entry_point_assoc.distance.to_string()), None);
                 let value_token = ast::mk::tt_token_alone(sp, value_lit);
 
                 (key_token, value_token)
-            }))
+            }));
+
+            match entry_points {
+                EntryPoints::Tests(_) => ast::mk::expr_call_path(sp, ast::mk::path_local(path::CrateEntryPointsInternalTests(sp)), thin_vec![map]),
+                EntryPoints::PublicInterface(_) => ast::mk::expr_call_path(sp, ast::mk::path_local(path::CrateEntryPointsPublicInterface(sp)), thin_vec![map]),
+            }
         }),
 
         ast::mk::expr_struct_field(sp, Ident::new(*sym::undetected_diagnostic, sp), {
-            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.undetected_diagnostic(sess)))
+            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.undetected_diagnostic(tcx.sess)))
         }),
     ])
 }
 
-fn mk_mutations_mod<'trg, 'm>(sp: Span, sess: &Session, mutations: &'m [Mut<'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
-    let g = &sess.psess.attr_id_generator;
+fn mk_mutations_mod<'tcx, 'ent, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, mutations: &'m [Mut<'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
+    let g = &tcx.sess.psess.attr_id_generator;
 
     let items = iter::once(ast::mk::item_extern_crate(sp, *sym::mutest_runtime, None))
         .chain(mutations.iter().map(|mutation| {
@@ -86,7 +144,7 @@ fn mk_mutations_mod<'trg, 'm>(sp: Span, sess: &Session, mutations: &'m [Mut<'trg
             let vis = ast::mk::vis_pub(sp);
             let ident = Ident::new(mutation.id.into_symbol(), sp);
             let ty = ast::mk::ty_path(None, ast::mk::path_local(path::MutationMeta(sp)));
-            let expr = bake_mutation(sp, sess, mutation, unsafe_targeting);
+            let expr = bake_mutation(sp, tcx, entry_points, mutation, unsafe_targeting);
             ast::mk::item_const(sp, vis, ident, ty, expr)
         }))
         .collect::<ThinVec<_>>();
@@ -308,34 +366,100 @@ fn mk_meta_mutant_struct_static<'trg, 'm>(sp: Span, mutations: &'m [Mut<'trg, 'm
     ast::mk::item_static(sp, vis, mutbl, ident, ty, meta_mutant_struct_expr)
 }
 
-fn mk_harness_fn(sp: Span) -> P<ast::Item> {
+fn mk_external_tests_extra_const<'tcx, 'trg>(sp: Span, tcx: TyCtxt<'tcx>, targets: &'trg [Target]) -> P<ast::Item> {
+    // mutest_runtime::ExternalTestsExtra { .. }
+    let external_tests_extra_struct_expr = ast::mk::expr_struct(sp, ast::mk::path_local(path::ExternalTestsExtra(sp)), thin_vec![
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::test_crate_name, sp), {
+            ast::mk::expr_str(sp, tcx.crate_name(hir::LOCAL_CRATE).as_str())
+        }),
+        ast::mk::expr_struct_field(sp, Ident::new(*sym::public_interface_callers, sp), {
+            mk_static_map(sp, targets.iter().map(|target| {
+                let def_path_str_sym = opaque_stable_def_id_for_embedding(tcx, "public_interface_", target.def_id());
+                let key_lit = ast::TokenKind::lit(ast::token::LitKind::Str, def_path_str_sym, None);
+                let key_token = ast::mk::tt_token_alone(sp, key_lit);
+
+                let value_ts = mk_static_map_ts(sp, target.reachable_from.iter().map(|(&entry_point, entry_point_assoc)| {
+                    let key_lit = ast::TokenKind::lit(ast::token::LitKind::Str, Symbol::intern(&entry_point.path_str(tcx)), None);
+                    let key_token = ast::mk::tt_token_alone(sp, key_lit);
+
+                    let value_lit = ast::TokenKind::lit(ast::token::LitKind::Integer, Symbol::intern(&entry_point_assoc.distance.to_string()), None);
+                    let value_token = ast::mk::tt_token_alone(sp, value_lit);
+
+                    (key_token, value_token)
+                }));
+                let value_token = ast::mk::tt_delimited(sp, ast::token::Delimiter::Invisible(ast::token::InvisibleOrigin::ProcMacro), value_ts);
+
+                (key_token, value_token)
+            }))
+        }),
+    ]);
+
+    // const EXTERNAL_TESTS_EXTRA: mutest_runtime::ExternalTestsExtra = mutest_runtime::ExternalTestsExtra { .. };
+    let vis = ast::mk::vis_default(sp);
+    let ident = Ident::new(*sym::EXTERNAL_TESTS_EXTRA, sp);
+    let ty = ast::mk::ty_path(None, ast::mk::path_local(path::ExternalTestsExtra(sp)));
+    let expr = external_tests_extra_struct_expr;
+    ast::mk::item_const(sp, vis, ident, ty, expr)
+}
+
+fn mk_harness_fn<'tst>(sp: Span, external_meta_mutant: Option<Symbol>) -> P<ast::Item> {
+    let meta_mutant_path_expr = match external_meta_mutant {
+        None => ast::mk::expr_path(path::META_MUTANT(sp)),
+        Some(crate_name) => ast::mk::expr_path(ast::mk::path_global(sp, vec![Ident::new(crate_name, sp), Ident::new(*sym::mutest_generated, sp), Ident::new(*sym::META_MUTANT, sp)])),
+    };
+
+    let external_tests_extra_expr = match external_meta_mutant {
+        Some(_) => {
+            let external_tests_extra_path_expr = ast::mk::expr_path(ast::mk::path_local(path::EXTERNAL_TESTS_EXTRA(sp)));
+            ast::mk::expr_call_path(sp, path::Some(sp), thin_vec![ast::mk::expr_ref(sp, external_tests_extra_path_expr)])
+        }
+        None => ast::mk::expr_path(path::None(sp)),
+    };
+
     // mutest_runtime::mutest_main_static(...);
     let test_runner = ast::mk::expr_path(ast::mk::path_local(path::mutest_main_static(sp)));
     let call_test_main = ast::mk::stmt_expr(ast::mk::expr_call(sp, test_runner, thin_vec![
-        ast::mk::expr_ident(sp, Ident::new(*sym::tests, sp)),
-        ast::mk::expr_ref(sp, ast::mk::expr_path(path::META_MUTANT(sp))),
+        ast::mk::expr_call_path(sp, ast::mk::path_local(path::TestSuiteTests(sp)), thin_vec![
+            ast::mk::expr_ident(sp, Ident::new(*sym::tests, sp)),
+            external_tests_extra_expr,
+        ]),
+        ast::mk::expr_ref(sp, meta_mutant_path_expr),
     ]));
 
     let body = ast::mk::block(sp, thin_vec![call_test_main]);
 
-    // pub(crate) fn harness(tests: &[&test::TestDescAndFn]) { ... }
+    // pub(crate) fn harness(tests: &'static [&'static test::TestDescAndFn]) { ... }
     let vis = ast::mk::vis_pub_crate(sp);
     let ident = Ident::new(*sym::harness, sp);
     let inputs = thin_vec![ast::mk::param_ident(sp, Ident::new(*sym::tests, sp), {
-        // &[&test::TestDescAndFn]
-        let element_ty = ast::mk::ty_ref(sp, ast::mk::ty_path(None, ast::mk::path_local(path::TestDescAndFn(sp))), None);
-        ast::mk::ty_ref(sp, ast::mk::ty_slice(sp, element_ty), None)
+        let static_lifetime = ast::mk::lifetime(sp, Ident::new(kw::StaticLifetime, sp));
+
+        // &'static [&'static test::TestDescAndFn]
+        let element_ty = ast::mk::ty_ref(sp, ast::mk::ty_path(None, ast::mk::path_local(path::TestDescAndFn(sp))), Some(static_lifetime));
+        ast::mk::ty_ref(sp, ast::mk::ty_slice(sp, element_ty), Some(static_lifetime))
     })];
     ast::mk::item_fn(sp, vis, ident, None, None, inputs, None, Some(body))
 }
 
-pub fn generate_harness<'tcx, 'trg, 'm>(
+#[derive(Copy, Clone)]
+pub enum MetaMutant<'trg, 'm> {
+    Internal {
+        mutations: &'m [Mut<'trg, 'm>],
+        subst_locs: &'m [SubstLoc],
+        mutation_parallelism: Option<MutationParallelism<'trg, 'm>>,
+        unsafe_targeting: UnsafeTargeting,
+    },
+    External {
+        crate_name: Symbol,
+        targets: &'trg [Target],
+    },
+}
+
+pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
-    mutations: &'m [Mut<'trg, 'm>],
-    subst_locs: &'m [SubstLoc],
-    mutation_parallelism: Option<MutationParallelism<'trg, 'm>>,
+    entry_points: EntryPoints<'ent>,
+    meta_mutant: MetaMutant<'trg, 'm>,
     krate: &mut ast::Crate,
-    unsafe_targeting: UnsafeTargeting,
 ) {
     let expn_id = tcx.expansion_for_ast_pass(
         AstPass::TestHarness,
@@ -364,7 +488,7 @@ pub fn generate_harness<'tcx, 'trg, 'm>(
     let test_runner_mutest_harness_attr = ast::mk::attr_inner(g, def_site,
         Ident::new(sym::test_runner, def_site),
         ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(
-            ast::mk::ts_path(def_site, ast::mk::path_local(path::harness(def_site))),
+            ast::mk::ts_path(def_site, path::harness(def_site)),
         )),
     );
 
@@ -377,21 +501,47 @@ pub fn generate_harness<'tcx, 'trg, 'm>(
     // extern crate mutest_runtime;
     let extern_crate_mutest_runtime = ast::mk::item_extern_crate(def_site, *sym::mutest_runtime, None);
 
+    let mut mutest_generated_mod_items = thin_vec![
+        extern_crate_test,
+        extern_crate_mutest_runtime,
+    ];
+
+    match meta_mutant {
+        MetaMutant::Internal { mutations, subst_locs, mutation_parallelism, unsafe_targeting } => {
+            mutest_generated_mod_items.extend([
+                mk_subst_map_ty_alias(def_site, subst_locs),
+                mk_active_mutant_handle_static(def_site),
+                mk_mutations_mod(def_site, tcx, entry_points, mutations, unsafe_targeting),
+                mk_mutants_slice_const(def_site, mutations, mutation_parallelism, subst_locs),
+                mk_meta_mutant_struct_static(def_site, mutations, mutation_parallelism),
+                mk_harness_fn(def_site, None),
+            ]);
+        }
+        MetaMutant::External { crate_name, targets } => {
+            mutest_generated_mod_items.extend([
+                mk_external_tests_extra_const(def_site, tcx, targets),
+                mk_harness_fn(def_site, Some(crate_name)),
+            ]);
+        }
+    }
+
     // pub mod mutest_generated { ... }
     let mutest_generated_mod = ast::mk::item_mod(def_site,
         ast::mk::vis_pub(def_site),
         Ident::new(*sym::mutest_generated, def_site),
-        thin_vec![
-            extern_crate_test,
-            extern_crate_mutest_runtime,
-            mk_subst_map_ty_alias(def_site, subst_locs),
-            mk_active_mutant_handle_static(def_site),
-            mk_mutations_mod(def_site, tcx.sess, mutations, unsafe_targeting),
-            mk_mutants_slice_const(def_site, mutations, mutation_parallelism, subst_locs),
-            mk_meta_mutant_struct_static(def_site, mutations, mutation_parallelism),
-            mk_harness_fn(def_site),
-        ],
+        mutest_generated_mod_items,
     );
 
     krate.items.push(mutest_generated_mod);
+}
+
+pub fn find_harness_in_extern_crate<'tcx>(tcx: TyCtxt<'tcx>, cnum: hir::CrateNum) -> Option<hir::DefId> {
+    let crate_root_def_id = cnum.as_def_id();
+    let crate_root = tcx.module_children(crate_root_def_id);
+
+    crate_root.iter().find_map(|mod_child| {
+        if mod_child.ident.name != *sym::mutest_generated { return None; }
+        if !mod_child.vis.is_public() { return None; }
+        mod_child.res.mod_def_id()
+    })
 }

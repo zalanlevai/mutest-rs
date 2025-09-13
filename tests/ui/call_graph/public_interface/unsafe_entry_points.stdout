@@ -1,0 +1,37 @@
+
+@@@ call graph @@@
+
+entry points:
+
+public public_nested_tainted_fn
+public public_tainted_fn
+  -> public_nested_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:13:1: 13:34 (#0)
+public unsafe_entry
+  -> private_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:9:1: 9:24 (#0)
+  -> public_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:15:1: 15:27 (#0)
+
+nested calls at distance 1:
+
+private_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:9:1: 9:24 (#0)
+  -> private_nested_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:7:1: 7:31 (#0)
+public_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:15:1: 15:27 (#0)
+  -> public_nested_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:13:1: 13:34 (#0)
+
+@@@ targets @@@
+
+public interface -(1)-> [tainted] private_nested_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:7:1: 7:31 (#0)
+  (1) [tainted] unsafe_entry
+
+public interface -(0)-> [tainted] private_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:9:1: 9:24 (#0)
+  (0) [tainted] unsafe_entry
+
+public interface [tainted] public_nested_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:13:1: 13:34 (#0)
+  (0) public_tainted_fn
+  (1) [tainted] unsafe_entry
+
+public interface [tainted] public_tainted_fn at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:15:1: 15:27 (#0)
+  (0) [tainted] unsafe_entry
+
+public interface [unsafe] unsafe_entry at tests/ui/call_graph/public_interface/unsafe_entry_points.rs:19:1: 19:29 (#0)
+
+targets: 5 total; 0 safe; 5 unsafe (4 tainted)

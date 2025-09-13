@@ -255,7 +255,7 @@ pub mod mk {
     pub fn path_local(mut path: ast::Path) -> ast::Path {
         let Some(first_segment) = path.segments.first_mut() else { return path; };
 
-        let is_global = !first_segment.ident.is_path_segment_keyword();
+        let is_global = first_segment.ident.name == Symbol::intern("");
         if is_global { path.segments.remove(0); }
 
         path
@@ -922,7 +922,7 @@ pub mod mk {
         let path_sep_token = |sp: Span| self::tt_token_joint(sp, ast::token::TokenKind::PathSep);
         let segment_token = |sp: Span, segment: ast::PathSegment| self::tt_token_joint_hidden(sp, ast::token::TokenKind::Ident(segment.ident.name, ast::token::IdentIsRaw::No));
 
-        let is_global = !path.segments[0].ident.is_path_segment_keyword();
+        let is_global = path.segments[0].ident.name == Symbol::intern("");
         let mut tokens = Vec::with_capacity(2 * path.segments.len() - 1 + is_global as usize);
 
         let first_segment = path.segments.remove(0);

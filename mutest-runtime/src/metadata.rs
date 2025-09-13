@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::harness::ActiveMutantHandle;
 
 pub macro static_map($($input:tt)*) {
@@ -10,6 +12,72 @@ pub macro static_map($($input:tt)*) {
 }
 
 pub type TestPath = &'static str;
+
+// FIXME: This should be an opauqe wrapper type around the underlying data,
+//        once we either switch away from using it in phf keys or we store it in a different map type.
+pub type OpaqueDefId = &'static str;
+
+#[derive(Debug)]
+pub struct ExternalTestsExtra {
+    pub test_crate_name: &'static str,
+    pub public_interface_callers: phf::Map<OpaqueDefId, phf::Map<TestPath, usize>>,
+}
+
+#[derive(Debug)]
+pub enum TestSuite {
+    Tests(&'static [&'static ::test::TestDescAndFn], Option<&'static ExternalTestsExtra>),
+}
+
+pub fn reachable_tests(mutation: &MutationMeta, external_tests_extra: Option<&ExternalTestsExtra>) -> HashSet<TestPath> {
+    match (&mutation.reachable_from, external_tests_extra) {
+        (CrateEntryPoints::InternalTests(reachable_from), None) => reachable_from.keys().copied().collect(),
+        (CrateEntryPoints::InternalTests(_), _) => panic!("encountered meta-mutant compiled for internal tests being run against external tests"),
+
+        (CrateEntryPoints::PublicInterface(reachable_from), Some(external_tests_extra)) => {
+            reachable_from.entries()
+                .filter_map(|(opaque_def_id, _)| {
+                    let Some(external_tests_reaching_def) = external_tests_extra.public_interface_callers.get(opaque_def_id) else { return None; };
+                    Some(external_tests_reaching_def.keys())
+                })
+                .flatten()
+                .copied()
+                .collect()
+        }
+        (CrateEntryPoints::PublicInterface(_), _) => panic!("encounteref meta-mutant compiled for external tests being run without external test metadata"),
+    }
+}
+
+pub fn reachable_tests_count(mutation: &MutationMeta, external_tests_extra: Option<&ExternalTestsExtra>) -> usize {
+    match (&mutation.reachable_from, external_tests_extra) {
+        (CrateEntryPoints::InternalTests(reachable_from), None) => reachable_from.len(),
+        (CrateEntryPoints::InternalTests(_), _) => panic!("encountered meta-mutant compiled for internal tests being run against external tests"),
+
+        (CrateEntryPoints::PublicInterface(reachable_from), Some(external_tests_extra)) => {
+            reachable_from.entries()
+                .map(|(opaque_def_id, _)| {
+                    let Some(external_tests_reaching_def) = external_tests_extra.public_interface_callers.get(opaque_def_id) else { return 0; };
+                    external_tests_reaching_def.len()
+                })
+                .sum()
+        }
+        (CrateEntryPoints::PublicInterface(_), _) => panic!("encounteref meta-mutant compiled for external tests being run without external test metadata"),
+    }
+}
+
+pub fn test_reachability(mutation: &MutationMeta, test_path: &str, external_tests_extra: Option<&ExternalTestsExtra>) -> Option<usize> {
+    match (&mutation.reachable_from, external_tests_extra) {
+        (CrateEntryPoints::InternalTests(reachable_from), None) => reachable_from.get(test_path).copied(),
+        (CrateEntryPoints::InternalTests(_), _) => panic!("encountered meta-mutant compiled for internal tests being run against external tests"),
+
+        (CrateEntryPoints::PublicInterface(reachable_from), Some(external_tests_extra)) => {
+            reachable_from.entries().find_map(|(opaque_def_id, distance_within_crate)| {
+                let Some(external_tests_reaching_def) = external_tests_extra.public_interface_callers.get(opaque_def_id) else { return None; };
+                external_tests_reaching_def.get(test_path).map(|distance_within_test_crate| distance_within_crate + distance_within_test_crate)
+            })
+        }
+        (CrateEntryPoints::PublicInterface(_), _) => panic!("encounteref meta-mutant compiled for external tests being run without external test metadata"),
+    }
+}
 
 pub type SubstLocIdx = usize;
 
@@ -67,13 +135,19 @@ pub enum MutationSafety {
 }
 
 #[derive(Debug)]
+pub enum CrateEntryPoints {
+    InternalTests(phf::Map<TestPath, usize>),
+    PublicInterface(phf::Map<OpaqueDefId, usize>),
+}
+
+#[derive(Debug)]
 pub struct MutationMeta {
     pub id: u32,
     pub safety: MutationSafety,
     pub op_name: &'static str,
     pub display_name: &'static str,
     pub display_location: &'static str,
-    pub reachable_from: phf::Map<TestPath, usize>,
+    pub reachable_from: CrateEntryPoints,
     pub undetected_diagnostic: &'static str,
 }
 

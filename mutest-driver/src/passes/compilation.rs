@@ -25,7 +25,7 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     };
 
     // The generated crate code relies on the rustc test harness using a custom test runner.
-    compiler_config.opts.test = true;
+    compiler_config.opts.test = config.opts.crate_kind.provides_tests();
     // The generated crate code uses many unstable and internal features, most of which are emitted by rustc itself.
     compiler_config.opts.unstable_features = UnstableFeatures::Allow;
     // Disable lints on generated crate code.

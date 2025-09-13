@@ -3,6 +3,45 @@ use std::path::PathBuf;
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_interface::Config as CompilerConfig;
 
+/// Kinds of crates that may either be mutated, or used as a test suite (or both).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum CrateKind {
+    /// Crate mutated against its own internal unit tests.
+    MutantWithInternalTests,
+    /// Crate mutated against its public interface, driven by an external test suite.
+    /// Integration tests link against this version of the mutant.
+    MutantForExternalTests,
+    /// External integration test crate that links against a generic mutated crate
+    /// (see [MutantForExternalTests]).
+    IntegrationTest,
+}
+
+impl CrateKind {
+    pub fn produces_mutations(&self) -> bool {
+        match self {
+            CrateKind::MutantWithInternalTests => true,
+            CrateKind::MutantForExternalTests => true,
+            CrateKind::IntegrationTest => false,
+        }
+    }
+
+    pub fn provides_tests(&self) -> bool {
+        match self {
+            CrateKind::MutantWithInternalTests => true,
+            CrateKind::MutantForExternalTests => false,
+            CrateKind::IntegrationTest => true,
+        }
+    }
+
+    pub fn requires_tests(&self) -> bool {
+        match self {
+            CrateKind::MutantWithInternalTests => false,
+            CrateKind::MutantForExternalTests => true,
+            CrateKind::IntegrationTest => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum GraphFormat {
     Simple,
@@ -17,7 +56,7 @@ pub enum CallGraphNonLocalCallView {
 
 pub struct CallGraphOptions {
     pub format: GraphFormat,
-    pub test_filters: Vec<String>,
+    pub entry_point_filters: Vec<String>,
     pub non_local_call_view: CallGraphNonLocalCallView,
 }
 
@@ -98,6 +137,8 @@ pub struct VerifyOptions {
 }
 
 pub struct Options<'op, 'm> {
+    pub crate_kind: CrateKind,
+
     pub mode: Mode,
     pub verbosity: u8,
     pub report_timings: bool,

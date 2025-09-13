@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use crate::config::{self, Options};
 use crate::detections::{MutationDetectionMatrix, print_mutation_detection_matrix};
 use crate::flakiness::{MutationFlakinessMatrix, print_mutation_flakiness_epilogue, print_mutation_flakiness_matrix};
-use crate::metadata::{MetaMutant, Mutant, MutationMeta, MutationParallelism, MutationSafety, StandaloneMutantMeta, SubstLocIdx, SubstMap, SubstMeta};
+use crate::metadata::{self, ExternalTestsExtra, MetaMutant, Mutant, MutationMeta, MutationParallelism, MutationSafety, StandaloneMutantMeta, SubstLocIdx, SubstMap, SubstMeta, TestSuite};
 use crate::subsumption::{MutationSubsumptionMatrix, print_mutation_subsumption_matrix};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
@@ -125,8 +125,8 @@ fn clone_tests<'a>(tests: impl IntoIterator<Item = &'a test_runner::Test>) -> Ve
         .collect()
 }
 
-fn is_reachable_test(mutation: &'static MutationMeta, test_desc: &test::TestDesc) -> bool {
-    mutation.reachable_from.contains_key(test_desc.name.as_slice())
+fn is_reachable_test(mutation: &'static MutationMeta, test_desc: &test::TestDesc, external_tests_extra: Option<&ExternalTestsExtra>) -> bool {
+    metadata::test_reachability(mutation, test_desc.name.as_slice(), external_tests_extra).is_some()
 }
 
 struct ProfiledTest {
@@ -184,13 +184,13 @@ fn sort_profiled_tests_by_exec_time(profiled_tests: &mut Vec<ProfiledTest>) {
     });
 }
 
-fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, mutations: &[&'static MutationMeta]) {
+fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, external_tests_extra: Option<&ExternalTestsExtra>, mutations: &[&'static MutationMeta]) {
     tests.sort_by(|a, b| {
-        let distance_a = mutations.iter().filter_map(|&m| m.reachable_from.get(a.desc.name.as_slice())).reduce(Ord::min);
-        let distance_b = mutations.iter().filter_map(|&m| m.reachable_from.get(b.desc.name.as_slice())).reduce(Ord::min);
+        let distance_a = mutations.iter().filter_map(|&m| metadata::test_reachability(m, a.desc.name.as_slice(), external_tests_extra)).reduce(Ord::min);
+        let distance_b = mutations.iter().filter_map(|&m| metadata::test_reachability(m, b.desc.name.as_slice(), external_tests_extra)).reduce(Ord::min);
 
         match (distance_a, distance_b) {
-            (Some(distance_a), Some(distance_b)) => Ord::cmp(distance_a, distance_b),
+            (Some(distance_a), Some(distance_b)) => Ord::cmp(&distance_a, &distance_b),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
@@ -198,13 +198,13 @@ fn prioritize_tests_by_distance(tests: &mut Vec<test_runner::Test>, mutations: &
     });
 }
 
-fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, mutations: &[&'static MutationMeta]) {
+fn maximize_mutation_parallelism(tests: &mut Vec<test_runner::Test>, external_tests_extra: Option<&ExternalTestsExtra>, mutations: &[&'static MutationMeta]) {
     let mut parallelized_tests = Vec::<test_runner::Test>::with_capacity(tests.len());
 
     while !tests.is_empty() {
         for mutation in mutations {
             if let Some(test) = tests.iter()
-                .position(|t| mutation.reachable_from.contains_key(t.desc.name.as_slice()))
+                .position(|t| is_reachable_test(mutation, &t.desc, external_tests_extra))
                 .map(|i| tests.remove(i))
             {
                 parallelized_tests.push(test);
@@ -314,6 +314,7 @@ pub struct MutationTestResults {
 
 fn run_tests(
     tests: Vec<test_runner::Test>,
+    external_tests_extra: Option<&ExternalTestsExtra>,
     mutant: Mutant<impl SubstMap>,
     exhaustive: bool,
     mutation_isolation: config::MutationIsolation,
@@ -331,7 +332,7 @@ fn run_tests(
     for &mutation in mutations {
         results.insert(mutation.id, MutationTestResults {
             result: MutationTestResult::Undetected,
-            results_per_test: HashMap::with_capacity(mutation.reachable_from.len()),
+            results_per_test: HashMap::with_capacity(metadata::reachable_tests_count(mutation, external_tests_extra)),
         });
     }
 
@@ -345,7 +346,7 @@ fn run_tests(
                     let mutation = match mutant {
                         Mutant::Mutation(mutant) => mutant.mutation,
                         Mutant::Batch(mutant) => {
-                            mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test_desc))
+                            mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test_desc, external_tests_extra))
                                 .expect("only tests which reach mutations should have been run: no mutation is reachable from this test")
                         }
                     };
@@ -359,7 +360,7 @@ fn run_tests(
                 let mutation = match mutant {
                     Mutant::Mutation(mutant) => mutant.mutation,
                     Mutant::Batch(mutant) => {
-                        mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test.desc))
+                        mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test.desc, external_tests_extra))
                             .expect("only tests which reach mutations should have been run: no mutation is reachable from this test")
                     }
                 };
@@ -404,7 +405,7 @@ fn run_tests(
                 // test evaluation is stopped early if all mutations are detected.
                 if !exhaustive {
                     // Remove any remaining tests from the queue that are for the just detected mutation.
-                    remaining_tests.retain(|(_, test)| !mutation.reachable_from.contains_key(test.desc.name.as_slice()));
+                    remaining_tests.retain(|(_, test)| !is_reachable_test(mutation, &test.desc, external_tests_extra));
 
                     // If all mutations have been detected, stop test evaluation early.
                     if results.iter().all(|(_, mutation_results)| !matches!(mutation_results.result, MutationTestResult::Undetected)) {
@@ -444,7 +445,7 @@ fn run_tests(
             let mutation = match mutant {
                 Mutant::Mutation(mutant) => mutant.mutation,
                 Mutant::Batch(mutant) => {
-                    mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test.desc))
+                    mutant.mutations.iter().find(|mutation| is_reachable_test(mutation, &test.desc, external_tests_extra))
                         .expect("only tests which reach mutations should have been run: no mutation is reachable from this test")
                 }
             };
@@ -545,6 +546,7 @@ impl MutationAnalysisResults {
 fn run_mutation_analysis<S: SubstMap>(
     opts: &Options,
     tests: &[test_runner::Test],
+    external_tests_extra: Option<&'static ExternalTestsExtra>,
     meta_mutant: &'static MetaMutant<S>,
     thread_pool: Option<ThreadPool>,
     lingering_test_monitoring_thread: Arc<LingeringTestMonitoringThread>,
@@ -594,12 +596,12 @@ fn run_mutation_analysis<S: SubstMap>(
                 );
                 println!();
 
-                let mut tests = clone_tests(tests.iter().filter(|test| is_reachable_test(mutant.mutation, &test.desc)));
+                let mut tests = clone_tests(tests.iter().filter(|test| is_reachable_test(mutant.mutation, &test.desc, external_tests_extra)));
                 if let config::TestOrdering::MutationDistance = opts.test_ordering {
-                    prioritize_tests_by_distance(&mut tests, &[mutant.mutation]);
+                    prioritize_tests_by_distance(&mut tests, external_tests_extra, &[mutant.mutation]);
                 }
 
-                let (mut run_results, lingering_tests) = run_tests(tests, Mutant::Mutation(mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
+                let (mut run_results, lingering_tests) = run_tests(tests, external_tests_extra, Mutant::Mutation(mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
                 lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
 
                 let Some(mutation_result) = run_results.remove(&mutant.mutation.id) else { unreachable!() };
@@ -643,13 +645,13 @@ fn run_mutation_analysis<S: SubstMap>(
                 }
                 println!();
 
-                let mut tests = clone_tests(tests.iter().filter(|test| batched_mutant.mutations.iter().any(|mutation| is_reachable_test(mutation, &test.desc))));
+                let mut tests = clone_tests(tests.iter().filter(|test| batched_mutant.mutations.iter().any(|mutation| is_reachable_test(mutation, &test.desc, external_tests_extra))));
                 if let config::TestOrdering::MutationDistance = opts.test_ordering {
-                    prioritize_tests_by_distance(&mut tests, batched_mutant.mutations);
+                    prioritize_tests_by_distance(&mut tests, external_tests_extra, batched_mutant.mutations);
                 }
-                maximize_mutation_parallelism(&mut tests, batched_mutant.mutations);
+                maximize_mutation_parallelism(&mut tests, external_tests_extra, batched_mutant.mutations);
 
-                let (mut run_results, lingering_tests) = run_tests(tests, Mutant::Batch(batched_mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
+                let (mut run_results, lingering_tests) = run_tests(tests, external_tests_extra, Mutant::Batch(batched_mutant), opts.exhaustive, opts.mutation_isolation, thread_pool.clone(), eval_stream_writer.clone(), opts.verbosity);
                 lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
 
                 for mutation in batched_mutant.mutations {
@@ -729,7 +731,7 @@ fn print_mutation_analysis_epilogue(results: &MutationAnalysisResults, verbosity
     );
 }
 
-pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, meta_mutant: &'static MetaMutant<impl SubstMap>) {
+pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, external_tests_extra: Option<&'static ExternalTestsExtra>, meta_mutant: &'static MetaMutant<impl SubstMap>) {
     let mode = match () {
         _ if let Some(flakes_arg) = args.iter().flat_map(|arg| arg.strip_prefix("--flakes=")).next() => {
             let Some(iterations_count) = flakes_arg.parse::<usize>().ok() else {
@@ -870,7 +872,7 @@ pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, meta_mutant: 
 
     match opts.mode {
         config::Mode::Evaluate => {
-            let results = run_mutation_analysis(&opts, &tests, meta_mutant, thread_pool, lingering_test_monitoring_thread.clone(), eval_stream_writer);
+            let results = run_mutation_analysis(&opts, &tests, external_tests_extra, meta_mutant, thread_pool, lingering_test_monitoring_thread.clone(), eval_stream_writer);
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
@@ -914,7 +916,7 @@ pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, meta_mutant: 
                 println!("running iteration {iteration} out of {iterations_count}");
                 println!();
 
-                let iteration_results = run_mutation_analysis(&opts, &tests, meta_mutant, thread_pool.clone(), lingering_test_monitoring_thread.clone(), eval_stream_writer.clone());
+                let iteration_results = run_mutation_analysis(&opts, &tests, external_tests_extra, meta_mutant, thread_pool.clone(), lingering_test_monitoring_thread.clone(), eval_stream_writer.clone());
 
                 if let Some(()) = &opts.print_opts.detection_matrix {
                     print_mutation_detection_matrix(&iteration_results.mutation_detection_matrix, &tests, !opts.exhaustive);
@@ -1080,20 +1082,29 @@ fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAnd
     }
 }
 
-pub fn mutest_main_static(tests: &[&test::TestDescAndFn], meta_mutant: &'static MetaMutant<impl SubstMap>) {
+pub fn mutest_main_static(test_suite: TestSuite, meta_mutant: &'static MetaMutant<impl SubstMap>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
         // SAFETY: No other thread is running.
         unsafe { env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION) };
 
-        let test = tests.iter().find(|test| test.desc.name.as_slice() == test_name)
-            .expect(&format!("cannot find test with name `{test_name}`"));
-        let test = make_owned_test_def(test);
+        let test = match test_suite {
+            TestSuite::Tests(tests, _external_tests_extra) => {
+                let test = tests.iter().find(|test| test.desc.name.as_slice() == test_name)
+                    .expect(&format!("cannot find test with name `{test_name}`"));
+                make_owned_test_def(test)
+            }
+        };
 
-        mutest_isolated_worker(test, meta_mutant);
+        mutest_isolated_worker(test, meta_mutant)
     }
 
     let args = env::args().collect::<Vec<_>>();
     let args = args.iter().map(String::as_ref).collect::<Vec<&str>>();
+
+    let (tests, external_tests_extra) = match test_suite {
+        TestSuite::Tests(tests, external_tests_extra) => (tests, external_tests_extra),
+    };
+
     let owned_tests = tests.iter().map(|test| make_owned_test_def(test)).collect::<Vec<_>>();
 
     if let Some(mutation_id_str) = args.iter().flat_map(|arg| arg.strip_prefix("--simulate=")).next() {
@@ -1113,5 +1124,5 @@ pub fn mutest_main_static(tests: &[&test::TestDescAndFn], meta_mutant: &'static 
         return mutest_simulate_main(&args, owned_tests, mutant, meta_mutant.active_mutant_handle);
     }
 
-    mutest_main(&args, owned_tests, meta_mutant)
+    mutest_main(&args, owned_tests, external_tests_extra, meta_mutant)
 }

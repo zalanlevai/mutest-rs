@@ -146,6 +146,20 @@ impl Idx for TargetId {
     }
 }
 
+/// The way in which a mutation target is reachable from entry points.
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind")]
+pub enum TargetReachability {
+    /// The target is also an entry point.
+    DirectEntryPoint,
+    /// The target is reachable through an entry point.
+    NestedCallee {
+        /// Distance in calls between the target and the closest entry point.
+        distance: usize,
+    },
+}
+
 /// Data associated with a mutation target's association with an entry point.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct EntryPointAssociation {
@@ -164,12 +178,12 @@ pub struct Target {
 
     /// The corresponding definition in the call graph.
     pub def_id: DefId,
-    /// Distance in calls between the target and the closest entry point.
-    pub distance: usize,
     /// Mutation safety property of the target, denoting
     /// whether mutations contained in this definition may cause undefined behavior.
     pub safety: MutationSafety,
-    /// Entry points from which this target is reachable from, and
+    /// The way in which the target is reachable from entry points.
+    pub reachability: TargetReachability,
+    /// Entry points (other than self) from which the target is reachable from, and
     /// data associated with each entry point.
     pub reachable_from: HashMap<String, EntryPointAssociation>,
 }

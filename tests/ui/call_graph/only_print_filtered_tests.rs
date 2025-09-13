@@ -1,7 +1,7 @@
 //@ print-call-graph
 //@ stdout
 //@ stderr: empty
-//@ mutest-flags: --call-graph-filter-tests=test1
+//@ mutest-flags: --call-graph-filter-entry-points=test1
 
 fn nested_common() {}
 
