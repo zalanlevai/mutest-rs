@@ -86,17 +86,11 @@ fn main() {
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
-        // Cargo
-        .next_help_heading("Cargo options")
-        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
-        .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts."))
+        // Cargo options.
+        .next_help_heading("Package Selection")
         .arg(clap::arg!(--workspace "Test all packages in the workspace."))
         .arg(clap::arg!(-p --package [PACKAGE] "Package with the target to analyze."))
-        .arg(clap::arg!(-F --features [FEATURES]... "Space or comma separated list of features to activate."))
-        .arg(clap::arg!(--"all-features" "Activate all available features."))
-        .arg(clap::arg!(--"no-default-features" "Do not activate the `default` feature."))
-        .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
-        .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
+        .next_help_heading("Target Selection")
         .arg(clap::arg!(--lib "Test only this package's library unit tests."))
         .arg(clap::arg!(--bin [BINARY] "Test only the specified binary. This flag may be specified multiple times.").action(clap::ArgAction::Append))
         .arg(clap::arg!(--bins "Test all binaries."))
@@ -105,6 +99,16 @@ fn main() {
         .arg(clap::arg!(--test [TEST] "Test only the specified integration test. This flag may be specified multiple times.").action(clap::ArgAction::Append))
         .arg(clap::arg!(--tests "Test all targets that have the `test = true` manifest flag set."))
         .arg(clap::arg!(--"all-targets" "Test all targets."))
+        .next_help_heading("Feature Selection")
+        .arg(clap::arg!(-F --features [FEATURES]... "Space or comma separated list of features to activate."))
+        .arg(clap::arg!(--"all-features" "Activate all available features."))
+        .arg(clap::arg!(--"no-default-features" "Do not activate the `default` feature."))
+        .next_help_heading("Compilation Options")
+        .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
+        .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
+        .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts."))
+        .next_help_heading("Manifest Options")
+        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
         .arg(clap::arg!(--offline "Run without accessing the network."))
         .get_matches_from(&args);
 
@@ -162,16 +166,18 @@ fn main() {
         cmd.args(["--manifest-path", manifest_path]);
         strip_arg(&mut mutest_args, true, None, Some("manifest-path"));
     }
+
+    // Package selection.
     if matches.get_flag("workspace") {
         cmd.arg("--workspace");
         strip_arg(&mut mutest_args, false, None, Some("workspace"));
     }
-
     if let Some(package) = matches.get_one::<String>("package") {
         cmd.args(["--package", package]);
         strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
     }
 
+    // Feature selection.
     if let Some(features) = matches.get_many::<String>("features") {
         metadata_cmd.features(cargo_metadata::CargoOpt::SomeFeatures(features.clone().map(ToOwned::to_owned).collect()));
         for feature in features { cmd.args(["--features", feature]); }
