@@ -98,8 +98,12 @@ fn main() {
         .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
         .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
         .arg(clap::arg!(--lib "Test only this package's library unit tests."))
-        .arg(clap::arg!(--bin [BINARY] "Test only the specified binary."))
+        .arg(clap::arg!(--bin [BINARY] "Test only the specified binary. This flag may be specified multiple times.").action(clap::ArgAction::Append))
         .arg(clap::arg!(--bins "Test all binaries."))
+        .arg(clap::arg!(--example [EXAMPLE] "Test only the specified example. This flag may be specified multiple times.").action(clap::ArgAction::Append))
+        .arg(clap::arg!(--examples "Test all examples."))
+        .arg(clap::arg!(--test [TEST] "Test only the specified integration test. This flag may be specified multiple times.").action(clap::ArgAction::Append))
+        .arg(clap::arg!(--tests "Test all targets that have the `test = true` manifest flag set."))
         .arg(clap::arg!(--"all-targets" "Test all targets."))
         .arg(clap::arg!(--offline "Run without accessing the network."))
         .get_matches_from(&args);
@@ -200,21 +204,63 @@ fn main() {
         strip_arg(&mut mutest_args, true, None, Some("profile"));
     }
 
+    // Target selection.
+    let mut any_specific_targets_selected = false;
     if matches.get_flag("lib") {
+        any_specific_targets_selected = true;
         cmd.arg("--lib");
         strip_arg(&mut mutest_args, false, None, Some("lib"));
     }
-    if let Some(bin) = matches.get_one::<String>("bin") {
-        cmd.args(["--bin", bin]);
+    if let Some(bins) = matches.get_many::<String>("bin") {
+        any_specific_targets_selected = true;
+        for bin in bins {
+            cmd.args(["--bin", bin]);
+        }
         strip_arg(&mut mutest_args, true, None, Some("bin"));
     }
     if matches.get_flag("bins") {
+        any_specific_targets_selected = true;
         cmd.arg("--bins");
         strip_arg(&mut mutest_args, false, None, Some("bins"));
     }
+    if let Some(examples) = matches.get_many::<String>("example") {
+        any_specific_targets_selected = true;
+        for example in examples {
+            cmd.args(["--example", example]);
+        }
+        strip_arg(&mut mutest_args, true, None, Some("example"));
+    }
+    if matches.get_flag("examples") {
+        any_specific_targets_selected = true;
+        cmd.arg("--examples");
+        strip_arg(&mut mutest_args, false, None, Some("examples"));
+    }
+    if let Some(tests) = matches.get_many::<String>("test") {
+        any_specific_targets_selected = true;
+        for test in tests {
+            cmd.args(["--test", test]);
+        }
+        strip_arg(&mut mutest_args, true, None, Some("test"));
+    }
+    if matches.get_flag("tests") {
+        any_specific_targets_selected = true;
+        cmd.arg("--tests");
+        strip_arg(&mut mutest_args, false, None, Some("tests"));
+    }
     if matches.get_flag("all-targets") {
+        any_specific_targets_selected = true;
         cmd.arg("--all-targets");
         strip_arg(&mut mutest_args, false, None, Some("all-targets"));
+    }
+    if !any_specific_targets_selected {
+        // NOTE: We specifically do not target the following:
+        //       * `--bench`/`--benches`: Benchmarks, for two reasons.
+        //         First, the `#[bench]` attribute is currently a nigthly-only feature.
+        //         Second, the semantics of running benchmarks under mutation testing
+        //         are not fully clear.
+        //       * `--doc`: Documentation tests, as they require a completely different
+        //         compilation and evaluation strategy that we do not currently support.
+        cmd.args(["--lib", "--bins", "--examples", "--tests"]);
     }
 
     if matches.get_flag("offline") {
