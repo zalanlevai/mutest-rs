@@ -18,6 +18,7 @@ mutest-operators = { path = "../mutest-operators" }
 
 cargo_metadata = "0.21"
 clap = { version = "4", features = ["cargo"] }
+color-print = "0.3"
 
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }

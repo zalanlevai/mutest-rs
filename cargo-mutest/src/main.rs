@@ -110,6 +110,8 @@ fn main() {
         .next_help_heading("Manifest Options")
         .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
         .arg(clap::arg!(--offline "Run without accessing the network."))
+        .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest run -h</>` to display additional options that can be specified for the running test harness."))
+        .after_long_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest help run</>` to display additional options that can be specified for the running test harness."))
         .get_matches_from(&args);
 
     let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args): (_, &[&str], _, _) = match matches.subcommand() {
