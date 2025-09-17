@@ -18,7 +18,7 @@ pub fn register(sess: &Session, krate: &mut ast::Crate) {
     let register_tool_mutest_attr = ast::mk::attr_inner(g, DUMMY_SP,
         Ident::new(sym::register_tool, DUMMY_SP),
         ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-            ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(*sym::mutest, ast::token::IdentIsRaw::No)),
+            ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(sym::mutest, ast::token::IdentIsRaw::No)),
         ])),
     );
 
@@ -30,12 +30,12 @@ pub fn ignore<'tcx, I>(attrs: I) -> bool
 where
     I: IntoIterator<Item = &'tcx hir::Attribute>,
 {
-    attrs.into_iter().any(|attr| hir::attr::is_word_attr(attr, Some(*sym::mutest), sym::ignore))
+    attrs.into_iter().any(|attr| hir::attr::is_word_attr(attr, Some(sym::mutest), sym::ignore))
 }
 
 pub fn skip<'tcx, I>(attrs: I) -> bool
 where
     I: IntoIterator<Item = &'tcx hir::Attribute>,
 {
-    attrs.into_iter().any(|attr| hir::attr::is_word_attr(attr, Some(*sym::mutest), sym::skip))
+    attrs.into_iter().any(|attr| hir::attr::is_word_attr(attr, Some(sym::mutest), sym::skip))
 }

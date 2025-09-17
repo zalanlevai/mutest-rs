@@ -15,7 +15,7 @@ use crate::analysis::hir;
 use crate::analysis::tests::Test;
 use crate::codegen::ast::{self, P};
 use crate::codegen::ast::mut_visit::MutVisitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, Symbol, sym};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, Symbol, kw, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 pub trait TcxExpansionExt {
@@ -351,7 +351,7 @@ fn remove_macro_attrs(attrs: &mut ThinVec<ast::Attribute>) {
         // Derives are removed, since they have already been expanded.
         sym::derive,
         // Some derive macros for `core`/`std` have additional marker attributes to influence their behaviour.
-        *sym::default,
+        kw::Default,
         // Some external derive macros have additional marker attributes to influence their behaviour.
         Symbol::intern("serde"),
     ]));

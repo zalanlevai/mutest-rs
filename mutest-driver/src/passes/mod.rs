@@ -134,6 +134,8 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
         track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
     }));
 
+    compiler_config.extra_symbols = mutest_emit::codegen::symbols::sym::EXTRA_SYMBOLS.to_vec();
+
     // Register #[cfg(test)] as a valid cfg.
     // See the rustc change https://github.com/rust-lang/rust/pull/131729, and
     // the Cargo change https://github.com/rust-lang/cargo/pull/14963

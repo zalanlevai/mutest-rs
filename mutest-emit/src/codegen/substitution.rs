@@ -49,8 +49,8 @@ fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, def
             let subst_ident = Ident::new(Symbol::intern("subst"), sp);
             let pat_some_subst = ast::mk::pat_tuple_struct(sp, path::Some(sp), thin_vec![ast::mk::pat_ident(sp, subst_ident)]);
             let guard = ast::mk::expr_binary(sp, ast::BinOpKind::Eq,
-                ast::mk::expr_field_deep(sp, ast::mk::expr_ident(sp, subst_ident), vec![Ident::new(*sym::mutation, sp), Ident::new(*sym::id, sp)]),
-                ast::mk::expr_field(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)])), Ident::new(*sym::id, sp)),
+                ast::mk::expr_field_deep(sp, ast::mk::expr_ident(sp, subst_ident), vec![Ident::new(sym::mutation, sp), Ident::new(sym::id, sp)]),
+                ast::mk::expr_field(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)])), Ident::new(sym::id, sp)),
             );
             ast::mk::arm(sp, pat_some_subst, Some(guard), Some(subst))
         })
@@ -72,7 +72,7 @@ fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, def
 
     // unsafe { crate::mutest_generated::ACTIVE_MUTANT_HANDLE.subst_at_unchecked($subst_loc_idx) }
     let subst_lookup_expr = ast::mk::expr_block(ast::mk::block_unsafe(sp, ast::UnsafeSource::CompilerGenerated, thin_vec![
-        ast::mk::stmt_expr(ast::mk::expr_method_call_path_ident(sp, path::ACTIVE_MUTANT_HANDLE(sp), Ident::new(*sym::subst_at_unchecked, sp), thin_vec![
+        ast::mk::stmt_expr(ast::mk::expr_method_call_path_ident(sp, path::ACTIVE_MUTANT_HANDLE(sp), Ident::new(sym::subst_at_unchecked, sp), thin_vec![
             ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&subst_loc_idx.to_string()), None),
         ])),
     ]));
@@ -146,7 +146,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
         let allow_unused_parens_attr = ast::mk::attr_inner(g, self.def_site,
             Ident::new(sym::allow, self.def_site),
             ast::mk::attr_args_delimited(self.def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(self.def_site, ast::TokenKind::Ident(*sym::unused_parens, ast::token::IdentIsRaw::No)),
+                ast::mk::tt_token_joint(self.def_site, ast::TokenKind::Ident(sym::unused_parens, ast::token::IdentIsRaw::No)),
             ])),
         );
 

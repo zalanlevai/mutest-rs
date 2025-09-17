@@ -21,32 +21,33 @@ pub fn span_diagnostic_ord(a: Span, b: Span) -> Ordering {
         .then(Ord::cmp(&a_ctxt_idx, &b_ctxt_idx))
 }
 
-macro symbols($($sym:ident),* $(,)?) {
-    use lazy_static::lazy_static;
-    use rustc_span::Symbol;
+macro_rules! symbols {
+    (@VAL $name:ident) => { stringify!($name) };
+    (@VAL $name:ident : $value:literal) => { $value };
 
-    lazy_static! {
+    ($($name:ident $(: $value:literal)? ,)*) => {
+        /// To be supplied to `rustc_interface::Config::extra_symbols`.
+        pub const EXTRA_SYMBOLS: &[&str] = &[
+            $(
+                symbols!(@VAL $name $(: $value)?),
+            )*
+        ];
+
         $(
-            pub static ref $sym: Symbol = Symbol::intern(stringify!($sym));
+            pub const $name: rustc_span::Symbol = rustc_span::Symbol::new(rustc_span::symbol::PREDEFINED_SYMBOLS_COUNT + ${index()});
         )*
-    }
+    };
 }
 
 #[allow(non_upper_case_globals)]
 pub mod sym {
     pub use rustc_span::sym::*;
 
-    super::symbols! {
-        and_then,
-        as_ref,
-        borrow,
-        default,
+    symbols! {
         non_upper_case_globals,
-        println,
         unused_parens,
 
         ACTIVE_MUTANT_HANDLE,
-        ActiveMutantHandle,
         active_mutant_handle,
         batch_id,
         display_location,
@@ -55,24 +56,18 @@ pub mod sym {
         harness,
         id,
         META_MUTANT,
-        Mutant,
-        mutant,
         MUTANTS,
         mutation,
         mutations,
         mutation_parallelism,
-        MutationMeta,
         mutest,
         mutest_generated,
-        mutest_main_static,
         mutest_runtime,
         op_name,
         public_interface_callers,
         reachable_from,
         substitutions,
         SubstMap,
-        SubstMeta,
-        subst_at,
         subst_at_unchecked,
         test_crate_name,
         tests,

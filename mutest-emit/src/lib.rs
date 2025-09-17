@@ -8,6 +8,7 @@
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
 #![feature(let_chains)]
+#![feature(macro_metavar_expr)]
 #![feature(never_type)]
 
 #![feature(rustc_private)]
