@@ -101,8 +101,16 @@ pub mod verify {
     }
 }
 
+pub const fn rustc_version_str() -> &'static str {
+    env!("RUSTC_VERSION_STR")
+}
+
+const VERSION_STR: &str = concat!(env!("CARGO_PKG_VERSION"), " (rustc ", env!("RUSTC_VERSION_STR"), ")");
+
 pub fn command() -> clap::Command {
-    let cmd = clap::command!("cargo mutest")
+    let cmd = clap::command!()
+        .name("mutest-rs")
+        .version(VERSION_STR)
         .propagate_version(true)
         .subcommand_required(true)
         .arg_required_else_help(true)
