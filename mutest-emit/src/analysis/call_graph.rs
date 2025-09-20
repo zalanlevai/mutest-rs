@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 
 use rustc_hash::{FxHashSet, FxHashMap};
+use rustc_middle::bug;
 use rustc_middle::mir;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use smallvec::{SmallVec, smallvec};
@@ -16,7 +17,7 @@ use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::mutation::UnsafeTargeting;
-use crate::codegen::symbols::{DUMMY_SP, Span, span_diagnostic_ord, sym};
+use crate::codegen::symbols::{DUMMY_SP, Span, Symbol, span_diagnostic_ord, sym};
 use crate::codegen::tool_attr;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -110,37 +111,9 @@ fn collect_unsafe_blocks<'tcx>(body_hir: &'tcx hir::Body<'tcx>, root_scope_safet
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct EntryPoint {
-    pub def_id: hir::LocalDefId,
-}
-
-impl EntryPoint {
-    pub fn path_str<'tcx>(&self, tcx: TyCtxt<'tcx>) -> String {
-        res::def_id_path(tcx, self.def_id.to_def_id()).iter()
-            .skip(1) // Skip crate name in entry point path strings.
-            .filter_map(|&segment_def_id| tcx.opt_item_name(segment_def_id).map(|symbol| symbol.as_str().to_owned()))
-            .intersperse("::".to_owned())
-            .collect::<String>()
-    }
-}
-
-impl Eq for EntryPoint {}
-impl PartialEq for EntryPoint {
-    fn eq(&self, other: &Self) -> bool {
-        self.def_id == other.def_id
-    }
-}
-
-impl Hash for EntryPoint {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.def_id.hash(state);
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
 pub enum TargetKind {
     LocalMutable(hir::LocalDefId),
-    ExternEntryPoint(hir::DefId),
+    ExternMutable(hir::DefId),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -150,9 +123,103 @@ pub enum TargetReachability {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EntryPointAssociation {
+pub struct EntryPointAssoc {
     pub distance: usize,
     pub unsafe_call_path: Option<UnsafeSource>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct LocalEntryPoint {
+    pub local_def_id: hir::LocalDefId,
+}
+
+impl LocalEntryPoint {
+    pub fn path_str<'tcx>(&self, tcx: TyCtxt<'tcx>) -> String {
+        res::def_id_path(tcx, self.local_def_id.to_def_id()).iter()
+            .skip(1) // Skip crate name in entry point path strings.
+            .filter_map(|&segment_def_id| tcx.opt_item_name(segment_def_id).map(|symbol| symbol.as_str().to_owned()))
+            .intersperse("::".to_owned())
+            .collect::<String>()
+    }
+}
+
+impl Eq for LocalEntryPoint {}
+impl PartialEq for LocalEntryPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.local_def_id == other.local_def_id
+    }
+}
+
+impl Hash for LocalEntryPoint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.local_def_id.hash(state);
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ExternEntryPoint {
+    pub def_path_hash: hir::DefPathHash,
+    pub path_str: Symbol,
+}
+
+impl Eq for ExternEntryPoint {}
+impl PartialEq for ExternEntryPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.def_path_hash == other.def_path_hash
+    }
+}
+
+impl Hash for ExternEntryPoint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.def_path_hash.hash(state);
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum EntryPoint {
+    Local(LocalEntryPoint),
+    Extern(ExternEntryPoint),
+}
+
+impl EntryPoint {
+    pub fn path_str<'tcx>(&self, tcx: TyCtxt<'tcx>) -> String {
+        match self {
+            EntryPoint::Local(local_entry_point) => local_entry_point.path_str(tcx),
+            EntryPoint::Extern(extern_entry_point) => extern_entry_point.path_str.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum EntryPointAssocs {
+    Local(FxHashMap<LocalEntryPoint, EntryPointAssoc>),
+    Extern(FxHashMap<ExternEntryPoint, EntryPointAssoc>),
+}
+
+impl EntryPointAssocs {
+    pub fn get(&self, entry_point: EntryPoint) -> Option<EntryPointAssoc> {
+        match (&self, entry_point) {
+            (EntryPointAssocs::Local(reachable_from), EntryPoint::Local(local_entry_point)) => reachable_from.get(&local_entry_point).copied(),
+            (EntryPointAssocs::Local(_), _) => None,
+            (EntryPointAssocs::Extern(reachable_from), EntryPoint::Extern(extern_entry_point)) => reachable_from.get(&extern_entry_point).copied(),
+            (EntryPointAssocs::Extern(_), _) => None,
+        }
+    }
+
+    pub fn iter(&self) -> Box<dyn Iterator<Item = (EntryPoint, EntryPointAssoc)> + '_> {
+        match self {
+            EntryPointAssocs::Local(reachable_from) => {
+                let iter = reachable_from.iter()
+                    .map(|(&local_entry_point, &entry_point_assoc)| (EntryPoint::Local(local_entry_point), entry_point_assoc));
+                Box::new(iter)
+            }
+            EntryPointAssocs::Extern(reachable_from) => {
+                let iter = reachable_from.iter()
+                    .map(|(&extern_entry_point, &entry_point_assoc)| (EntryPoint::Extern(extern_entry_point), entry_point_assoc));
+                Box::new(iter)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -160,84 +227,129 @@ pub struct Target {
     pub kind: TargetKind,
     pub unsafety: Unsafety,
     pub reachability: TargetReachability,
-    pub reachable_from: FxHashMap<EntryPoint, EntryPointAssociation>,
+    pub reachable_from: EntryPointAssocs,
 }
 
 impl Target {
     pub fn def_id(&self) -> hir::DefId {
         match self.kind {
             TargetKind::LocalMutable(local_def_id) => local_def_id.to_def_id(),
-            TargetKind::ExternEntryPoint(def_id) => def_id,
+            TargetKind::ExternMutable(def_id) => def_id,
         }
     }
 
     pub fn is_tainted(&self, entry_point: EntryPoint, unsafe_targeting: UnsafeTargeting) -> bool {
-        self.reachable_from.get(&entry_point).is_some_and(|entry_point| {
-            let unsafety = entry_point.unsafe_call_path.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
+        self.reachable_from.get(entry_point).is_some_and(|entry_point_assoc| {
+            let unsafety = entry_point_assoc.unsafe_call_path.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
             unsafety.is_unsafe(unsafe_targeting)
         })
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Targeting {
+    LocalMutables,
+    ExternMutables(hir::CrateNum),
+}
+
+impl Targeting {
+    pub fn matches<'tcx>(&self, tcx: TyCtxt<'tcx>, test_def_ids: &FxHashSet<hir::LocalDefId>, def_id: hir::DefId) -> Option<TargetKind> {
+        match *self {
+            Targeting::LocalMutables => {
+                let Some(local_def_id) = def_id.as_local() else { return None; };
+                let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
+
+                let entry_fn = tcx.entry_fn(());
+
+                // TODO: Ignore #[coverage(off)] functions
+                // Functions, excluding closures
+                let targeted = matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
+                    // NOT `fn main() {}`
+                    && !entry_fn.map(|(entry_def_id, _)| def_id == entry_def_id).unwrap_or(false)
+                    // NOT `const fn`
+                    && !tcx.is_const_fn(def_id)
+                    // NOT `fn;`
+                    && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
+                    // NOT `#[test]` functions, or inner functions
+                    && !test_def_ids.contains(&local_def_id)
+                    && !res::parent_iter(tcx, def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
+                    // NOT `#[cfg(test)]` functions, or functions in `#[cfg(test)]` modules
+                    && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
+                    // NOT `#[mutest::skip]` functions
+                    && !tool_attr::skip(tcx.hir_attrs(hir_id));
+
+                if !targeted { return None; }
+
+                Some(TargetKind::LocalMutable(local_def_id))
+            }
+            Targeting::ExternMutables(cnum) => {
+                // NOTE: This is in the context of the local crate invoking a non-test extern crate,
+                //       so we can assume that
+                //       the definition is not a `#[test]` function, a #[cfg(test)] function, or
+                //       a function in a `#[cfg(test)]` module.
+
+                let targeted = def_id.krate == cnum
+                    // Functions, excluding closures
+                    && matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
+                    // NOT `const fn`
+                    && !tcx.is_const_fn(def_id)
+                    // NOT `fn;`
+                    && tcx.is_mir_available(def_id)
+                    // NOT `#[mutest::skip]` functions
+                    && !tool_attr::skip(tcx.get_all_attrs(def_id));
+
+                if !targeted { return None; }
+
+                Some(TargetKind::ExternMutable(def_id))
+            }
+        }
     }
 }
 
 /// All functions we can introduce mutations in.
 /// Does not include closures, as they are (currently) considered part of their containing function, rather than
 /// standalone functions. This might change in the future.
-pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, tests: &'tst [Test]) -> impl Iterator<Item = hir::LocalDefId> + 'tcx {
-    let entry_fn = tcx.entry_fn(());
-    let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
+pub fn all_mutable_fns<'tcx, 'tst>(tcx: TyCtxt<'tcx>, cnum: Option<hir::CrateNum>, tests: &'tst [Test]) -> Box<dyn Iterator<Item = hir::DefId> + 'tcx> {
+    match cnum {
+        None => {
+            let test_def_ids = tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>();
 
-    tcx.hir_crate_items(()).definitions()
-        .filter(move |&local_def_id| {
-            let def_id = local_def_id.to_def_id();
-            let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
+            let iter = tcx.hir_crate_items(()).definitions().filter(move |&local_def_id| {
+                Targeting::LocalMutables.matches(tcx, &test_def_ids, local_def_id.to_def_id()).is_some()
+            });
 
-            // TODO: Ignore #[coverage(off)] functions
-            matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
-                // fn main() {}
-                && !entry_fn.map(|(entry_def_id, _)| def_id == entry_def_id).unwrap_or(false)
-                // const fn
-                && !tcx.is_const_fn(def_id)
-                // fn;
-                && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
-                // #[test] functions, or inner functions
-                && !test_def_ids.contains(&local_def_id)
-                && !res::parent_iter(tcx, def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
-                // #[cfg(test)] functions, or functions in #[cfg(test)] module
-                && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
-                // #[mutest::skip] functions
-                && !tool_attr::skip(tcx.hir_attrs(hir_id))
-        })
-}
+            Box::new(iter.map(|local_def_id| local_def_id.to_def_id()))
+        }
+        Some(cnum) => {
+            const BASE_DEF_IDX: usize = hir::CRATE_DEF_INDEX.as_usize();
+            let max_def_idx = tcx.num_extern_def_ids(cnum);
+            let crate_def_ids = (BASE_DEF_IDX..max_def_idx).map(move |def_idx| hir::DefId { krate: cnum, index: hir::DefIndex::from_usize(def_idx) });
 
-pub fn all_public_interface_fns<'tcx>(tcx: TyCtxt<'tcx>) -> impl Iterator<Item = hir::LocalDefId> {
-    tcx.hir_crate_items(()).definitions()
-        .filter(move |&local_def_id| {
-            let def_id = local_def_id.to_def_id();
+            let iter = crate_def_ids.filter(move |&def_id| {
+                Targeting::ExternMutables(cnum).matches(tcx, &Default::default(), def_id).is_some()
+            });
 
-            matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
-                // fn;
-                && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
-                // pub(crate) fn;
-                && tcx.visibility(local_def_id).is_public()
-        })
+            Box::new(iter)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum EntryPoints<'a> {
     Tests(&'a [Test]),
-    PublicInterface(&'a [hir::LocalDefId]),
+    External,
 }
 
 impl<'a> EntryPoints<'a> {
-    pub fn iter(&self) -> Box<dyn Iterator<Item = EntryPoint> + 'a> {
+    pub fn iter(&self) -> Box<dyn Iterator<Item = LocalEntryPoint> + 'a> {
         match self {
             EntryPoints::Tests(tests) => {
                 let iter = tests.iter()
                     .filter(|test| !test.ignore)
-                    .map(|test| EntryPoint { def_id: test.def_id });
+                    .map(|test| LocalEntryPoint { local_def_id: test.def_id });
                 Box::new(iter)
             },
-            EntryPoints::PublicInterface(def_ids) => Box::new(def_ids.iter().map(|&def_id| EntryPoint { def_id })),
+            EntryPoints::External => Box::new(iter::empty()),
         }
     }
 }
@@ -415,64 +527,6 @@ impl<'tcx> CallGraph<'tcx> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Targeting {
-    LocalMutables,
-    ExternEntryPoints(hir::CrateNum),
-}
-
-impl Targeting {
-    pub fn matches<'tcx>(&self, tcx: TyCtxt<'tcx>, test_def_ids: &FxHashSet<hir::LocalDefId>, def_id: hir::DefId) -> Option<TargetKind> {
-        match *self {
-            Targeting::LocalMutables => {
-                let Some(local_def_id) = def_id.as_local() else { return None; };
-                let hir_id = tcx.local_def_id_to_hir_id(local_def_id);
-
-                let entry_fn = tcx.entry_fn(());
-
-                // TODO: Ignore #[coverage(off)] functions
-                // Functions, excluding closures
-                let targeted = matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn)
-                    // NOT `fn main() {}`
-                    && !entry_fn.map(|(entry_def_id, _)| def_id == entry_def_id).unwrap_or(false)
-                    // NOT `const fn`
-                    && !tcx.is_const_fn(def_id)
-                    // NOT `fn;`
-                    && !tcx.hir_node_by_def_id(local_def_id).body_id().is_none()
-                    // NOT `#[test]` functions, or inner functions
-                    && !test_def_ids.contains(&local_def_id)
-                    && !res::parent_iter(tcx, def_id).any(|parent_id| parent_id.as_local().is_some_and(|local_parent_id| test_def_ids.contains(&local_parent_id)))
-                    // NOT `#[cfg(test)]` functions, or functions in `#[cfg(test)]` modules
-                    && !tests::is_marked_or_in_cfg_test(tcx, hir_id)
-                    // NOT `#[mutest::skip]` functions
-                    && !tool_attr::skip(tcx.hir_attrs(hir_id));
-
-                if !targeted { return None; }
-
-                Some(TargetKind::LocalMutable(local_def_id))
-            }
-            Targeting::ExternEntryPoints(cnum) => {
-                // NOTE: This is in the context of the local crate invoking the extern crate, so the following can be assumed:
-                //       * the definition is visible, otherwise the program would be rejected;
-                //       * the definition has a body, as you cannot refer to generic definitions without bodies (e.g. trait assocs)
-                //         through monomorphized calls;
-                //       * the definition is not a `#[test]` function, a #[cfg(test)] function, or a function in a `#[cfg(test)]` module.
-
-                // NOTE: The `#[mutest::skip]` attribute does not apply here, since that only skips the function
-                //       for mutation generation, not for reachability analysis.
-
-                let targeted = def_id.krate == cnum
-                    // Functions, excluding closures
-                    && matches!(tcx.def_kind(def_id), hir::DefKind::Fn | hir::DefKind::AssocFn);
-
-                if !targeted { return None; }
-
-                Some(TargetKind::ExternEntryPoint(def_id))
-            }
-        }
-    }
-}
-
 pub fn instantiate_generic_args<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, generic_args: ty::GenericArgsRef<'tcx>) -> T
 where
     T: ty::TypeFoldable<TyCtxt<'tcx>>,
@@ -499,15 +553,13 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
 
     let test_def_ids = match entry_points {
         EntryPoints::Tests(tests) => tests.iter().map(|test| test.def_id).collect::<FxHashSet<_>>(),
-        EntryPoints::PublicInterface(_) => Default::default(),
+        EntryPoints::External => bug!("cannot generate call graph from external entry points"),
     };
-
-    let mut ignored_entry_points: FxHashSet<EntryPoint> = Default::default();
 
     let mut previously_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
     for entry_point in entry_points.iter() {
-        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(entry_point.def_id.to_def_id()));
+        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(entry_point.local_def_id.to_def_id()));
 
         // NOTE: We expect entry points to be non-polymorphic (i.e. no type or const generic) functions.
         //       This is because we cannot build a complete call graph with uninstantiated type and const parameters.
@@ -515,17 +567,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
             match entry_points {
                 // Tests cannot be generic functions anyway, so this is a hard crash.
                 EntryPoints::Tests(_) => tcx.dcx().fatal("encountered generic function test definition"),
-                // NOTE: This does unfortunately rule out tracking generic public interface functions
-                //       for cross-crate reachability analysis.
-                EntryPoints::PublicInterface(_) => {
-                    let mut diagnostic = tcx.dcx().struct_warn("encountered generic function in public interface");
-                    diagnostic.span(body_mir.span);
-                    diagnostic.note("ignoring generic function: unable to trace all calls accurately due to uninstantiated type and const parameters");
-                    diagnostic.emit();
-
-                    ignored_entry_points.insert(entry_point);
-                    continue;
-                }
+                EntryPoints::External => unreachable!(),
             }
         }
 
@@ -551,7 +593,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
                         let mut diagnostic = tcx.dcx().struct_warn("encountered virtual call during call graph construction");
                         diagnostic.span(call.span);
                         diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(def_id, instance.args)));
-                        diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.def_id)));
+                        diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.local_def_id)));
                         diagnostic.emit();
                     }
 
@@ -570,7 +612,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
                             let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");
                             diagnostic.span(call.span);
                             diagnostic.span_label(call.span, format!("call to {}", tcx.def_path_str_with_args(instance.def_id(), instance.args)));
-                            diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.def_id)));
+                            diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.local_def_id)));
                             diagnostic.emit();
                         }
                     }
@@ -584,14 +626,14 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
                     let mut diagnostic = tcx.dcx().struct_warn("encountered dynamic call during call graph construction");
                     diagnostic.span(call.span);
                     diagnostic.span_label(call.span, format!("call to {fn_sig}"));
-                    diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.def_id)));
+                    diagnostic.note(format!("in {}", tcx.def_path_str(entry_point.local_def_id)));
                     diagnostic.emit();
 
                     continue;
                 }
             };
 
-            let test_calls = call_graph.root_calls.entry(entry_point.def_id).or_default();
+            let test_calls = call_graph.root_calls.entry(entry_point.local_def_id).or_default();
             test_calls.push(InstanceCall { callee, safety: call.safety, span: call.span });
 
             previously_found_callees.insert(callee);
@@ -772,7 +814,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
         krate: &'ast ast::Crate,
         test_def_ids: &FxHashSet<hir::LocalDefId>,
         callee_lookup_cache: &CalleeLookupCache<'tcx, '_>,
-        entry_point: EntryPoint,
+        entry_point: LocalEntryPoint,
         targeting: Targeting,
         unsafety: Option<UnsafeSource>,
         call_trace: &mut CallTrace<'tcx>,
@@ -810,7 +852,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
                         kind: target_kind,
                         unsafety: item_unsafety,
                         reachability: TargetReachability::NestedCallee { distance },
-                        reachable_from: Default::default(),
+                        reachable_from: EntryPointAssocs::Local(Default::default()),
                     })
                 }
             };
@@ -822,8 +864,9 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
             let caller_tainting = unsafety.map(Unsafety::Tainted).unwrap_or(Unsafety::None);
             target.unsafety = Ord::max(caller_tainting, target.unsafety);
 
-            let entry_point = target.reachable_from.entry(entry_point).or_insert_with(|| {
-                EntryPointAssociation {
+            let EntryPointAssocs::Local(reachable_from) = &mut target.reachable_from else { unreachable!() };
+            let entry_point = reachable_from.entry(entry_point).or_insert_with(|| {
+                EntryPointAssoc {
                     distance,
                     unsafe_call_path: None,
                 }
@@ -857,23 +900,6 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
 
     let callee_lookup_cache = CalleeLookupCache::new(&call_graph);
     let mut targets: FxHashMap<hir::DefId, Target> = Default::default();
-    if let EntryPoints::PublicInterface(def_ids) = entry_points {
-        for &def_id in def_ids {
-            if ignored_entry_points.contains(&EntryPoint { def_id }) { continue; }
-
-            let Some(target_kind) = targeting.matches(tcx, &test_def_ids, def_id.to_def_id()) else { continue; };
-
-            let Some(def_item) = ast_lowering::find_def_in_ast(tcx, def_res, def_id, krate) else { continue };
-            let item_unsafety = check_item_unsafety(def_item);
-
-            targets.insert(def_id.to_def_id(), Target {
-                kind: target_kind,
-                unsafety: item_unsafety,
-                reachability: TargetReachability::DirectEntry,
-                reachable_from: Default::default(),
-            });
-        }
-    }
     for (&entry_point, calls) in &call_graph.root_calls {
         let Some(def_item) = ast_lowering::find_def_in_ast(tcx, def_res, entry_point, krate) else { continue };
         let unsafety = check_item_unsafety(def_item);
@@ -884,7 +910,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
                 _ => None,
             };
             let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![call.callee] };
-            let entry_point = EntryPoint { def_id: entry_point };
+            let entry_point = LocalEntryPoint { local_def_id: entry_point };
             record_nested_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, entry_point, targeting, unsafety, &mut call_trace, &mut targets, trace_length_limit);
         }
     }

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 use mutest_driver::config::{self, Config};
+use mutest_driver::passes::external_mutant::RustcInvocation;
 use mutest_emit::analysis::hir::Safety;
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_hash::FxHashSet;
@@ -33,7 +34,7 @@ impl rustc_driver::Callbacks for RustcCallbacks {
     fn config(&mut self, config: &mut CompilerConfig) {
         let args = self.mutest_args.take();
         config.psess_created = Some(Box::new(move |parse_sess| {
-            mutest_driver::passes::track_invocation_fingerprint(parse_sess, &args);
+            mutest_driver::passes::track_invocation_fingerprint(parse_sess, args.as_deref());
         }));
     }
 }
@@ -98,8 +99,8 @@ mod crate_kind {
     mutest_driver_cli::exclusive_opts! { pub(crate) possible_values where
         INFER = "infer"; ["Infer crate kind based on the Cargo rustc invocation."]
         MUTANT_WITH_INTERNAL_TESTS = "mutant-with-internal-tests"; ["Crate mutated against its own internal test suite."]
-        MUTANT_FOR_EXTERNAL_TESTS = "mutant-for-external-tests"; ["Crate mutated against its public interface, driven by an external test suite."]
-        INTEGRATION_TESTS = "integration-tests"; ["External integration test crate that links against a generic mutated crate."]
+        MUTABLE_DEP_FOR_EXTERNAL_TESTS = "mutable-dep-for-external-tests"; ["Crate that is used to create specialize mutants driven by an external test suite."]
+        INTEGRATION_TESTS = "integration-tests"; ["External integration test crate that links against a specialized, mutated crate."]
     }
 }
 
@@ -155,6 +156,25 @@ pub fn main() {
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let compiler_config = mutest_driver::passes::parse_compiler_args(&args).expect("no compiler configuration was generated");
 
+        let crate_kind_arg = mutest_arg_matches.get_one::<String>("crate-kind").map(String::as_str);
+        if !test_target || crate_kind_arg == Some(crate_kind::MUTABLE_DEP_FOR_EXTERNAL_TESTS) {
+            let report_timings = mutest_arg_matches.get_flag("timings");
+
+            let rustc_invocation = RustcInvocation {
+                args: args.iter().cloned().collect::<Vec<_>>(),
+                env_vars: env::vars().collect::<Vec<_>>(),
+            };
+
+            let compilation_pass = mutest_driver::passes::external_mutant::recompilable_dep_crate::compile_recompilable_dep_crate(&compiler_config, &rustc_invocation).unwrap();
+
+            if report_timings {
+                println!("compilation took {compilation:.2?}",
+                    compilation = compilation_pass.duration,
+                );
+            }
+            return;
+        }
+
         let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 
         let mutest_target_dir_root = env::var("MUTEST_TARGET_DIR_ROOT").ok().map(PathBuf::from);
@@ -163,15 +183,14 @@ pub fn main() {
         let crate_kind = {
             use crate::crate_kind as opts;
 
-            match mutest_arg_matches.get_one::<String>("crate-kind").map(String::as_str) {
+            match crate_kind_arg {
                 Some(opts::MUTANT_WITH_INTERNAL_TESTS) => config::CrateKind::MutantWithInternalTests,
-                Some(opts::MUTANT_FOR_EXTERNAL_TESTS) => config::CrateKind::MutantForExternalTests,
+                Some(opts::MUTABLE_DEP_FOR_EXTERNAL_TESTS) => unreachable!(),
                 Some(opts::INTEGRATION_TESTS) => config::CrateKind::IntegrationTest,
 
-                None | Some(opts::INFER) => match (test_target, guess_test_type(&compiler_config.input)) {
-                    (false, _) => config::CrateKind::MutantForExternalTests,
-                    (true, TestType::UnitTest | TestType::Unknown) => config::CrateKind::MutantWithInternalTests,
-                    (true, TestType::IntegrationTest) => config::CrateKind::IntegrationTest,
+                None | Some(opts::INFER) => match guess_test_type(&compiler_config.input) {
+                    TestType::UnitTest | TestType::Unknown => config::CrateKind::MutantWithInternalTests,
+                    TestType::IntegrationTest => config::CrateKind::IntegrationTest,
                 },
 
                 _ => unreachable!(),

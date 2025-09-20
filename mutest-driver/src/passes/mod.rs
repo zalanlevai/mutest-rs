@@ -119,19 +119,18 @@ pub fn parse_compiler_args(args: &[String]) -> Option<CompilerConfig> {
     callbacks.config
 }
 
-pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_fingerprint: &Option<String>) {
+pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_fingerprint: Option<&str>) {
     parse_sess.env_depinfo.get_mut().insert((
         Symbol::intern("MUTEST_FINGERPRINT"),
-        invocation_fingerprint.as_deref().map(Symbol::intern),
+        invocation_fingerprint.map(Symbol::intern),
     ));
 }
 
-pub fn base_compiler_config(config: &Config) -> CompilerConfig {
-    let mut compiler_config = copy_compiler_settings(&config.compiler_config);
+pub fn base_compiler_config_from_parts(compiler_config: &CompilerConfig, invocation_fingerprint: Option<String>) -> CompilerConfig {
+    let mut compiler_config = copy_compiler_settings(compiler_config);
 
-    let invocation_fingerprint = config.invocation_fingerprint.clone();
     compiler_config.psess_created = Some(Box::new(move |parse_sess| {
-        track_invocation_fingerprint(parse_sess, &invocation_fingerprint);
+        track_invocation_fingerprint(parse_sess, invocation_fingerprint.as_deref());
     }));
 
     compiler_config.extra_symbols = mutest_emit::codegen::symbols::sym::EXTRA_SYMBOLS.to_vec();
@@ -164,5 +163,10 @@ pub fn base_compiler_config(config: &Config) -> CompilerConfig {
     compiler_config
 }
 
+pub fn base_compiler_config(config: &Config) -> CompilerConfig {
+    base_compiler_config_from_parts(&config.compiler_config, config.invocation_fingerprint.clone())
+}
+
 pub mod analysis;
 pub mod compilation;
+pub mod external_mutant;

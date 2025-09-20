@@ -9,12 +9,14 @@ use mutest_emit::analysis::hir;
 use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::mutation::{Mut, MutationConflictGraph, MutationParallelism, Subst, SubstLoc, UnsafeTargeting};
 use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
-use rustc_span::def_id::{DefId, LocalDefId};
+use rustc_span::def_id::{DefPathHash, LocalDefId};
 
 use crate::config::WriteOptions;
 use crate::passes::analysis::AnalysisPassResult;
 use crate::passes::compilation::CompilationPassResult;
+use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationResult;
 
 fn write_metadata<T: serde::Serialize>(write_opts: &WriteOptions, file_name: &str, data: &T) {
     let file = fs::File::create(write_opts.out_dir.join(file_name)).expect("cannot create metadata file");
@@ -43,15 +45,27 @@ pub fn write_tests<'tcx>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, tests: &[
     });
 }
 
-pub fn write_call_graph<'tcx, 'ent>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, all_mutable_fns_count: usize, entry_points: EntryPoints<'ent>, call_graph: &CallGraph<'tcx>, reachable_fns: &[Target], duration: Duration) -> FxHashMap<DefId, mutest_json::DefId> {
+pub fn write_call_graph<'tcx, 'ent>(
+    write_opts: &WriteOptions,
+    tcx: TyCtxt<'tcx>,
+    all_mutable_fns_count: usize,
+    entry_points: EntryPoints<'ent>,
+    call_graph: &CallGraph<'tcx>,
+    reachable_fns: &[Target],
+    duration: Duration,
+) -> FxHashMap<DefPathHash, mutest_json::DefId> {
+    if let EntryPoints::External = entry_points {
+        bug!("cannot print call graph for external entry points");
+    }
+
     let mut definitions = mutest_json::IdxVec::new();
-    let mut unique_definitions: FxHashMap<DefId, mutest_json::DefId> = Default::default();
+    let mut unique_definitions: FxHashMap<DefPathHash, mutest_json::DefId> = Default::default();
 
     macro register_def($def_id:expr) {
         {
             let def_id = $def_id;
 
-            *unique_definitions.entry(def_id).or_insert_with(|| {
+            *unique_definitions.entry(tcx.def_path_hash(def_id)).or_insert_with(|| {
                 let json_def_id = definitions.next_index();
                 definitions.push(mutest_json::Definition {
                     def_id: json_def_id,
@@ -93,18 +107,18 @@ pub fn write_call_graph<'tcx, 'ent>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>
 
     let mut json_entry_points = mutest_json::IdxVec::new();
     for entry_point in entry_points.iter() {
-        let _ = register_def!(entry_point.def_id.to_def_id());
+        let _ = register_def!(entry_point.local_def_id.to_def_id());
 
         let json_entry_point_id = json_entry_points.next_index();
         let mut json_entry_point = mutest_json::call_graph::EntryPoint {
             entry_point_id: json_entry_point_id,
-            name: tcx.opt_item_name(entry_point.def_id.to_def_id()).map(|symbol| symbol.as_str().to_owned()).unwrap_or_default(),
-            path: tcx.def_path_str(entry_point.def_id.to_def_id()),
-            span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(entry_point.def_id.to_def_id())),
+            name: tcx.opt_item_name(entry_point.local_def_id.to_def_id()).map(|symbol| symbol.as_str().to_owned()).unwrap_or_default(),
+            path: tcx.def_path_str(entry_point.local_def_id.to_def_id()),
+            span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(entry_point.local_def_id.to_def_id())),
             calls: Default::default(),
         };
 
-        for call in call_graph.root_calls.get(&entry_point.def_id).into_iter().flatten() {
+        for call in call_graph.root_calls.get(&entry_point.local_def_id).into_iter().flatten() {
             let json_callee_id = register_callee!(call.callee);
 
             let call_instances = json_entry_point.calls.entry(json_callee_id).or_default();
@@ -159,7 +173,7 @@ pub fn write_call_graph<'tcx, 'ent>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>
         call_graph: mutest_json::call_graph::CallGraph {
             entry_points_kind: match entry_points {
                 EntryPoints::Tests(_) => mutest_json::call_graph::EntryPointsKind::Tests,
-                EntryPoints::PublicInterface(_) => mutest_json::call_graph::EntryPointsKind::PublicInterface,
+                EntryPoints::External => unreachable!(),
             },
             entry_points: json_entry_points,
             callees: callees.take(),
@@ -175,8 +189,8 @@ pub fn write_mutations<'tcx, 'trg>(
     write_opts: &WriteOptions,
     tcx: TyCtxt<'tcx>,
     all_mutable_fns_count: usize,
-    json_definitions: &FxHashMap<DefId, mutest_json::DefId>,
-    targets: impl Iterator<Item = &'trg Target>,
+    json_definitions: &FxHashMap<DefPathHash, mutest_json::DefId>,
+    targets: &'trg [Target],
     mutations: &[Mut],
     unsafe_targeting: UnsafeTargeting,
     mutation_conflict_graph: &MutationConflictGraph,
@@ -189,13 +203,13 @@ pub fn write_mutations<'tcx, 'trg>(
     let mut target_id_allocation: FxHashMap<LocalDefId, mutest_json::mutations::TargetId> = Default::default();
     for target in targets {
         let TargetKind::LocalMutable(local_def_id) = target.kind else {
-            tcx.dcx().fatal("encountered non-mutation target while writing mutations");
+            bug!("encountered mutation with non-local mutation target while writing mutations");
         };
 
         let json_target_id = json_targets.next_index();
         json_targets.push(mutest_json::mutations::Target {
             target_id: json_target_id,
-            def_id: *json_definitions.get(&target.def_id()).expect("json definitions missing target def id"),
+            def_id: *json_definitions.get(&tcx.def_path_hash(target.def_id())).expect("json definitions missing target def id"),
             safety: match target.unsafety {
                 Unsafety::Unsafe(_) => mutest_json::mutations::MutationSafety::Unsafe,
                 Unsafety::Tainted(_) => mutest_json::mutations::MutationSafety::Tainted,
@@ -206,7 +220,7 @@ pub fn write_mutations<'tcx, 'trg>(
                 TargetReachability::NestedCallee { distance } => mutest_json::mutations::TargetReachability::NestedCallee { distance },
             },
             reachable_from: target.reachable_from.iter()
-                .map(|(&entry_point, entry_point_assoc)| {
+                .map(|(entry_point, entry_point_assoc)| {
                     (entry_point.path_str(tcx), mutest_json::mutations::EntryPointAssociation {
                         distance: entry_point_assoc.distance,
                         tainted_call_path: target.is_tainted(entry_point, unsafe_targeting),
@@ -221,7 +235,7 @@ pub fn write_mutations<'tcx, 'trg>(
     let mut json_mutations = mutest_json::IdxVec::with_capacity(total_mutations_count);
     for mutation in mutations {
         let TargetKind::LocalMutable(local_def_id) = mutation.target.kind else {
-            tcx.dcx().fatal("encountered mutation with non-mutation target while writing mutations");
+            bug!("encountered mutation with non-local mutation target while writing mutations");
         };
 
         let mutation_id = json_mutations.next_index();
@@ -375,18 +389,79 @@ pub fn write_mutations<'tcx, 'trg>(
     });
 }
 
-pub fn write_timings(write_opts: &WriteOptions, total_duration: Duration, analysis_pass: &AnalysisPassResult, compilation_pass: Option<&CompilationPassResult>) {
+pub fn write_timings(
+    write_opts: &WriteOptions,
+    total_duration: Duration,
+    analysis_pass: &AnalysisPassResult,
+    specialized_external_mutant_pass: Option<&SpecializedMutantCrateCompilationResult>,
+    compilation_pass: Option<&CompilationPassResult>,
+) {
+    let mut analysis_duration = analysis_pass.duration;
+    if let Some(p) = specialized_external_mutant_pass && let Some(p) = &p.nested_run_result.analysis_pass {
+        analysis_duration += p.duration;
+    }
+
+    let mut sanitize_macro_expns_duration = analysis_pass.sanitize_macro_expns_duration;
+    if let Some(p) = specialized_external_mutant_pass && let Some(p) = &p.nested_run_result.analysis_pass {
+        sanitize_macro_expns_duration += p.sanitize_macro_expns_duration;
+    }
+
+    let mutation_generation_duration = match specialized_external_mutant_pass {
+        Some(p) if let Some(p) = &p.nested_run_result.analysis_pass => p.mutation_generation_duration,
+        _ => analysis_pass.mutation_generation_duration,
+    };
+
+    let mutation_conflict_resolution_duration = match specialized_external_mutant_pass {
+        Some(p) if let Some(p) = &p.nested_run_result.analysis_pass => p.mutation_conflict_resolution_duration,
+        _ => analysis_pass.mutation_conflict_resolution_duration,
+    };
+
+    let mutation_batching_duration = match specialized_external_mutant_pass {
+        Some(p) if let Some(p) = &p.nested_run_result.analysis_pass => p.mutation_batching_duration,
+        _ => analysis_pass.mutation_batching_duration,
+    };
+
+    let mut codegen_duration = analysis_pass.codegen_duration;
+    if let Some(p) = specialized_external_mutant_pass && let Some(p) = &p.nested_run_result.analysis_pass {
+        codegen_duration += p.codegen_duration;
+    }
+
+    let mut write_duration = analysis_pass.write_duration;
+    if let Some(p) = specialized_external_mutant_pass && let Some(p) = &p.nested_run_result.analysis_pass {
+        write_duration += p.write_duration;
+    }
+
+    let external_tests_compilation_duration = match specialized_external_mutant_pass {
+        Some(_) => compilation_pass.map(|p| p.duration),
+        _ => None,
+    };
+
+    let mutant_compilation_duration = match specialized_external_mutant_pass {
+        Some(p) => p.nested_run_result.compilation_pass.as_ref().map(|p| p.duration),
+        _ => compilation_pass.map(|p| p.duration),
+    };
+
+    let total_compilation_duration = compilation_pass.map(|p| {
+        let mut total_compilation_duration = p.duration;
+        if let Some(p) = specialized_external_mutant_pass && let Some(p) = &p.nested_run_result.compilation_pass {
+            total_compilation_duration += p.duration;
+        }
+        total_compilation_duration
+    });
+
     write_metadata(write_opts, "timings.json", &mutest_json::timings::TimingsInfo {
         total_duration,
-        analysis_duration: analysis_pass.duration,
+        analysis_duration,
         test_discovery_duration: analysis_pass.test_discovery_duration,
         target_analysis_duration: analysis_pass.target_analysis_duration,
-        sanitize_macro_expns_duration: analysis_pass.sanitize_macro_expns_duration,
-        mutation_generation_duration: analysis_pass.mutation_generation_duration,
-        mutation_conflict_resolution_duration: analysis_pass.mutation_conflict_resolution_duration,
-        mutation_batching_duration: analysis_pass.mutation_batching_duration,
-        codegen_duration: analysis_pass.codegen_duration,
-        write_duration: analysis_pass.write_duration,
-        compilation_duration: compilation_pass.map(|compilation_pass| compilation_pass.duration),
+        sanitize_macro_expns_duration,
+        mutation_generation_duration,
+        mutation_conflict_resolution_duration,
+        mutation_batching_duration,
+        codegen_duration,
+        write_duration,
+        external_tests_compilation_duration,
+        mutant_compilation_duration,
+        total_compilation_duration,
     });
 }

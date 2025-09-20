@@ -1,10 +1,11 @@
 use std::iter;
 
-use mutest_emit::analysis::call_graph::{CallGraph, Callee, EntryPoint, EntryPoints, Target, TargetReachability, Unsafety};
+use mutest_emit::analysis::call_graph::{CallGraph, Callee, EntryPoints, LocalEntryPoint, Target, TargetReachability, Unsafety};
 use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::symbols::span_diagnostic_ord;
 use mutest_emit::codegen::mutation::{Mut, MutId, MutationBatch, MutationConflictGraph, UnsafeTargeting};
 use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::DefId;
 use smallvec::{SmallVec, smallvec};
@@ -40,12 +41,16 @@ pub fn print_tests(tests: &[Test]) {
     );
 }
 
-pub fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, crate_kind: config::CrateKind, targets: impl Iterator<Item = &'trg Target>, unsafe_targeting: UnsafeTargeting) {
+pub fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, crate_kind: &config::CrateKind, targets: &'trg [Target], unsafe_targeting: UnsafeTargeting) {
+    if let config::CrateKind::MutantForExternalTests(_) = crate_kind {
+        bug!("cannot print mutation targets for external entry points");
+    }
+
     let mut unsafe_targets_count = 0;
     let mut tainted_targets_count = 0;
 
     // Targets are printed in source span order.
-    let mut targets_in_print_order = targets
+    let mut targets_in_print_order = targets.iter()
         .map(|target| (tcx.def_span(target.def_id()), target))
         .collect::<Vec<_>>();
     targets_in_print_order.sort_unstable_by(|(target_a_span, _), (target_b_span, _)| span_diagnostic_ord(*target_a_span, *target_b_span));
@@ -70,7 +75,7 @@ pub fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, crate_kind: config::CrateKin
         println!("{entry_points}{reachability} {unsafe_marker}{def_path} at {span:#?}",
             entry_points = match crate_kind {
                 config::CrateKind::MutantWithInternalTests => "tests",
-                config::CrateKind::MutantForExternalTests => "public interface",
+                config::CrateKind::MutantForExternalTests(_) => unreachable!(),
                 config::CrateKind::IntegrationTest => "tests",
             },
             reachability = match target.reachability {
@@ -83,7 +88,7 @@ pub fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, crate_kind: config::CrateKin
 
         // Entry points are printed in order of distance first, within that by lexical order of their definition path.
         let mut entry_points_in_print_order = target.reachable_from.iter()
-            .map(|(&entry_point, entry_point_assoc)| (entry_point.path_str(tcx), entry_point, entry_point_assoc))
+            .map(|(entry_point, entry_point_assoc)| (entry_point.path_str(tcx), entry_point, entry_point_assoc))
             .collect::<Vec<_>>();
         entry_points_in_print_order.sort_unstable_by(|(entry_point_a_path_str, _, entry_point_a), (entry_point_b_path_str, _, entry_point_b)| {
             Ord::cmp(&entry_point_a.distance, &entry_point_b.distance).then(Ord::cmp(entry_point_a_path_str, entry_point_b_path_str))
@@ -112,6 +117,10 @@ pub fn print_targets<'tcx, 'trg>(tcx: TyCtxt<'tcx>, crate_kind: config::CrateKin
 }
 
 pub fn print_call_graph<'tcx, 'ent, 'trg>(tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, call_graph: &CallGraph<'tcx>, targets: &[Target], format: config::GraphFormat, entry_point_filters: &[String], non_local_call_view: config::CallGraphNonLocalCallView) {
+    if let EntryPoints::External = entry_points {
+        bug!("cannot print call graph for external entry points");
+    }
+
     let mut filtered_nodes: FxHashSet<Callee> = Default::default();
 
     match format {
@@ -126,18 +135,18 @@ pub fn print_call_graph<'tcx, 'ent, 'trg>(tcx: TyCtxt<'tcx>, entry_points: Entry
             for (entry_point_path_str, entry_point) in entry_points_in_print_order {
                 if !entry_point_filters.is_empty() {
                     if !entry_point_filters.iter().any(|entry_point_filter| entry_point_path_str.contains(entry_point_filter)) { continue; }
-                    filtered_nodes.insert(Callee::new(entry_point.def_id.to_def_id(), tcx.mk_args(&[])));
+                    filtered_nodes.insert(Callee::new(entry_point.local_def_id.to_def_id(), tcx.mk_args(&[])));
                 }
 
                 println!("{descr} {path}",
                     descr = match entry_points {
                         EntryPoints::Tests(_) => "test",
-                        EntryPoints::PublicInterface(_) => "public",
+                        EntryPoints::External => unreachable!(),
                     },
                     path = entry_point_path_str,
                 );
 
-                let mut callees_in_print_order = call_graph.root_calls.get(&entry_point.def_id).map(|v| &**v).unwrap_or_default().into_iter()
+                let mut callees_in_print_order = call_graph.root_calls.get(&entry_point.local_def_id).map(|v| &**v).unwrap_or_default().into_iter()
                     // HACK: Deduplicate multiple calls to the same callee.
                     .map(|call| call.callee).collect::<FxHashSet<_>>().into_iter()
                     .map(|callee| (callee.display_str(tcx), tcx.def_span(callee.def_id), callee))
@@ -220,7 +229,7 @@ pub fn print_call_graph<'tcx, 'ent, 'trg>(tcx: TyCtxt<'tcx>, entry_points: Entry
             println!("  subgraph cluster_tests {{");
             println!("    label=\"{}\";", match entry_points {
                 EntryPoints::Tests(_) => "tests (entry points)",
-                EntryPoints::PublicInterface(_) => "public interface (entry points)",
+                EntryPoints::External => unreachable!(),
             });
             println!("    rank=same");
             println!("    style=filled;");
@@ -232,11 +241,11 @@ pub fn print_call_graph<'tcx, 'ent, 'trg>(tcx: TyCtxt<'tcx>, entry_points: Entry
 
                 if !entry_point_filters.is_empty() {
                     if !entry_point_filters.iter().any(|entry_point_filter| entry_point_path_str.contains(entry_point_filter)) { continue; }
-                    filtered_nodes.insert(Callee::new(entry_point.def_id.to_def_id(), tcx.mk_args(&[])));
+                    filtered_nodes.insert(Callee::new(entry_point.local_def_id.to_def_id(), tcx.mk_args(&[])));
                 }
 
                 // TODO: Use different styling for ignored test, or use strikethrough.
-                println!("    {} [label=\"{}\"];", def_node_id(entry_point.def_id.to_def_id()), entry_point_path_str);
+                println!("    {} [label=\"{}\"];", def_node_id(entry_point.local_def_id.to_def_id()), entry_point_path_str);
             }
 
             println!("  }}");
@@ -454,7 +463,7 @@ pub fn print_mutations<'tcx>(tcx: TyCtxt<'tcx>, mutations: &[Mut], mutation_batc
         );
 
         if let TargetReachability::DirectEntry = mutation.target.reachability {
-            let entry_point = EntryPoint { def_id: mutation.target.def_id().expect_local() };
+            let entry_point = LocalEntryPoint { local_def_id: mutation.target.def_id().expect_local() };
 
             if nested { print!("  "); }
             println!("  <- {entry_point} (direct entry point)",
@@ -464,7 +473,7 @@ pub fn print_mutations<'tcx>(tcx: TyCtxt<'tcx>, mutations: &[Mut], mutation_batc
 
         // Entry points are printed in order of distance first, within that by lexical order of their definition path.
         let mut entry_points_in_print_order = mutation.target.reachable_from.iter()
-            .map(|(&entry_point, entry_point_assoc)| (entry_point.path_str(tcx), entry_point, entry_point_assoc))
+            .map(|(entry_point, entry_point_assoc)| (entry_point.path_str(tcx), entry_point, entry_point_assoc))
             .collect::<Vec<_>>();
         entry_points_in_print_order.sort_unstable_by(|(entry_point_a_path_str, _, entry_point_a), (entry_point_b_path_str, _, entry_point_b)| {
             Ord::cmp(&entry_point_a.distance, &entry_point_b.distance).then(Ord::cmp(entry_point_a_path_str, entry_point_b_path_str))

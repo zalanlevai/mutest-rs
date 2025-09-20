@@ -25,6 +25,10 @@ pub struct TimingsInfo {
     pub codegen_duration: Duration,
     /// Total time it took to write out auxiliary JSON data files.
     pub write_duration: Duration,
-    /// Time to took to compile the binary.
-    pub compilation_duration: Option<Duration>,
+    /// Time it took to compile the crate containing external tests, if applicable.
+    pub external_tests_compilation_duration: Option<Duration>,
+    /// Time it took to compile the mutant crate.
+    pub mutant_compilation_duration: Option<Duration>,
+    /// Total time it took to compile the binary, including the external tests crate, if applicable.
+    pub total_compilation_duration: Option<Duration>,
 }

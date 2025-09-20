@@ -11,13 +11,14 @@ use crate::config::Config;
 use crate::inject::inject_runtime_crate_and_deps;
 use crate::passes::base_compiler_config;
 use crate::passes::analysis::AnalysisPassResult;
+use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationResult;
 
 pub struct CompilationPassResult {
     pub duration: Duration,
     pub outputs: Arc<OutputFilenames>,
 }
 
-pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResult<CompilationPassResult> {
+pub fn run(config: &Config, analysis_pass: &AnalysisPassResult, specialized_external_mutant_crate: Option<&(String, SpecializedMutantCrateCompilationResult)>) -> CompilerResult<CompilationPassResult> {
     let mut compiler_config = base_compiler_config(config);
     compiler_config.input = Input::Str {
         name: compiler_config.input.source_name(),
@@ -32,7 +33,7 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult) -> CompilerResul
     compiler_config.opts.lint_cap = Some(LintLevel::Allow);
 
     // The generated crate code relies on the `mutest_runtime` crate (and its dependencies), which must be loaded.
-    inject_runtime_crate_and_deps(config, &mut compiler_config);
+    inject_runtime_crate_and_deps(config, &mut compiler_config, specialized_external_mutant_crate);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<CompilationPassResult> {
         let t_start = Instant::now();

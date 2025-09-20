@@ -37,8 +37,6 @@ pub struct CallGraphStats {
 pub enum EntryPointsKind {
     /// Collection of test function definitions.
     Tests,
-    /// Collection of public, reachable functions.
-    PublicInterface,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]

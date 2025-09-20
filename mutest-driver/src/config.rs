@@ -3,16 +3,18 @@ use std::path::PathBuf;
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
 use rustc_interface::Config as CompilerConfig;
 
+use crate::passes::external_mutant::ExternalTargets;
+
 /// Kinds of crates that may either be mutated, or used as a test suite (or both).
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Debug)]
 pub enum CrateKind {
     /// Crate mutated against its own internal unit tests.
     MutantWithInternalTests,
-    /// Crate mutated against its public interface, driven by an external test suite.
+    /// Crate mutated against, and driven by an external test suite.
     /// Integration tests link against this version of the mutant.
-    MutantForExternalTests,
+    MutantForExternalTests(ExternalTargets),
     /// External integration test crate that links against a generic mutated crate
-    /// (see [MutantForExternalTests]).
+    /// (see [`MutantForExternalTests`]).
     IntegrationTest,
 }
 
@@ -20,7 +22,7 @@ impl CrateKind {
     pub fn produces_mutations(&self) -> bool {
         match self {
             CrateKind::MutantWithInternalTests => true,
-            CrateKind::MutantForExternalTests => true,
+            CrateKind::MutantForExternalTests(_) => true,
             CrateKind::IntegrationTest => false,
         }
     }
@@ -28,7 +30,7 @@ impl CrateKind {
     pub fn provides_tests(&self) -> bool {
         match self {
             CrateKind::MutantWithInternalTests => true,
-            CrateKind::MutantForExternalTests => false,
+            CrateKind::MutantForExternalTests(_) => false,
             CrateKind::IntegrationTest => true,
         }
     }
@@ -36,36 +38,39 @@ impl CrateKind {
     pub fn requires_tests(&self) -> bool {
         match self {
             CrateKind::MutantWithInternalTests => false,
-            CrateKind::MutantForExternalTests => true,
+            CrateKind::MutantForExternalTests(_) => true,
             CrateKind::IntegrationTest => false,
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Copy, Clone, Debug)]
 pub enum GraphFormat {
     Simple,
     Graphviz,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Copy, Clone, Debug)]
 pub enum CallGraphNonLocalCallView {
     Collapse,
     Expand,
 }
 
+#[derive(Clone, Debug)]
 pub struct CallGraphOptions {
     pub format: GraphFormat,
     pub entry_point_filters: Vec<String>,
     pub non_local_call_view: CallGraphNonLocalCallView,
 }
 
+#[derive(Clone, Debug)]
 pub struct ConflictGraphOptions {
     pub compatibility_graph: bool,
     pub exclude_unsafe: bool,
     pub format: GraphFormat,
 }
 
+#[derive(Clone, Debug)]
 pub struct PrintOptions {
     pub print_headers: bool,
     pub tests: Option<()>,
@@ -88,6 +93,7 @@ impl PrintOptions {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct WriteOptions {
     pub out_dir: PathBuf,
 }
@@ -99,6 +105,7 @@ pub enum Mode {
 
 pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
 
+#[derive(Clone, Debug)]
 pub enum MutationBatchingAlgorithm {
     Random,
     Greedy { ordering_heuristic: Option<GreedyMutationBatchingOrderingHeuristic>, epsilon: Option<f64> },
@@ -107,6 +114,7 @@ pub enum MutationBatchingAlgorithm {
 
 pub type RandomSeed = [u8; 32];
 
+#[derive(Clone, Debug)]
 pub struct MutationBatchingRandomness {
     pub seed: Option<RandomSeed>,
 }
@@ -122,16 +130,19 @@ impl MutationBatchingRandomness {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MutationBatchingOptions {
     pub algorithm: MutationBatchingAlgorithm,
     pub randomness: MutationBatchingRandomness,
     pub batch_max_mutations_count: usize,
 }
 
+#[derive(Clone, Debug)]
 pub enum MutationParallelism {
     Batching(MutationBatchingOptions),
 }
 
+#[derive(Clone, Debug)]
 pub struct VerifyOptions {
     pub ast_lowering: bool,
 }

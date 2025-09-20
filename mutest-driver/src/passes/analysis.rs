@@ -1,15 +1,17 @@
 use std::env;
 use std::time::{Duration, Instant};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
+use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::OptLevel;
 use rustc_span::ErrorGuaranteed;
 use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
-use mutest_emit::analysis::call_graph::{EntryPoints, Targeting, TargetReachability};
+use mutest_emit::analysis::call_graph::{EntryPointAssocs, EntryPoints, Targeting, TargetReachability};
+use mutest_emit::analysis::hir;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::harness::MetaMutant;
 use mutest_emit::codegen::symbols::{Symbol, span_diagnostic_ord};
@@ -17,6 +19,9 @@ use mutest_emit::codegen::symbols::{Symbol, span_diagnostic_ord};
 use crate::config::{self, Config};
 use crate::inject::inject_runtime_crate_and_deps;
 use crate::passes::{Flow, base_compiler_config};
+use crate::passes::external_mutant::{ExternalTargets, StableTarget};
+use crate::passes::external_mutant::crate_const_storage;
+use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationRequest;
 use crate::print::{print_call_graph, print_mutations, print_mutation_graph, print_targets, print_tests};
 use crate::write::{write_call_graph, write_mutations, write_tests, write_timings};
 
@@ -31,6 +36,7 @@ pub struct AnalysisPassResult {
     pub codegen_duration: Duration,
     pub write_duration: Duration,
     pub generated_crate_code: String,
+    pub specialized_external_mutant_crate: Option<(String, SpecializedMutantCrateCompilationRequest)>,
 }
 
 fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
@@ -91,7 +97,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     //       for test crates that link against external meta-mutants because
     //       the meta-mutant crate references the `mutest_runtime` crate.
     if !config.opts.crate_kind.produces_mutations() {
-        inject_runtime_crate_and_deps(config, &mut compiler_config);
+        inject_runtime_crate_and_deps(config, &mut compiler_config, None);
     }
 
     // NOTE: We must turn off `format_args` optimizations to be able to match up
@@ -128,6 +134,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             codegen_duration: Duration::ZERO,
             write_duration: Duration::ZERO,
             generated_crate_code: String::new(),
+            specialized_external_mutant_crate: None,
         };
 
         let sess = &compiler.sess;
@@ -161,13 +168,6 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 .then(|| mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res))
                 .unwrap_or_default();
             pass_result.test_discovery_duration = t_test_discovery_start.elapsed();
-            let public_interface_fns = opts.crate_kind.requires_tests().then(|| {
-                mutest_emit::analysis::call_graph::all_public_interface_fns(tcx).collect::<Vec<_>>()
-            });
-            let entry_points = match &public_interface_fns {
-                Some(public_interface_fns) => EntryPoints::PublicInterface(public_interface_fns),
-                None => EntryPoints::Tests(&tests),
-            };
 
             if let Some(write_opts) = &opts.write_opts && opts.crate_kind.provides_tests() {
                 let t_write_start = Instant::now();
@@ -181,7 +181,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                     if let Some(write_opts) = &opts.write_opts {
                         pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
                     }
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (write {write:.2?})",
@@ -231,114 +231,129 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
             });
 
-            let targeting = match external_meta_mutant_crate {
-                None => Targeting::LocalMutables,
-                Some(cnum) => Targeting::ExternEntryPoints(cnum),
-            };
+            let all_mutable_fns_count = mutest_emit::analysis::call_graph::all_mutable_fns(tcx, external_meta_mutant_crate, &tests).count();
 
-            let all_mutable_fns_count = match opts.crate_kind.produces_mutations() {
-                true => mutest_emit::analysis::call_graph::all_mutable_fns(tcx, &tests).count(),
-                false => 0,
-            };
+            let (entry_points, targets, json_definitions) = match &opts.crate_kind {
+                config::CrateKind::MutantForExternalTests(external_targets) => {
+                    let entry_points = EntryPoints::External;
 
-            let call_graph_depth_limit = opts.call_graph_depth_limit;
-            if let Some(v) = call_graph_depth_limit && v < opts.mutation_depth {
-                tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit argument");
-            }
+                    let targets = external_targets.stable_targets.iter()
+                        .map(|stable_target| stable_target.into_target_session(tcx, &external_targets.path_strs))
+                        .collect::<Vec<_>>();
 
-            let call_graph_trace_length_limit = opts.call_graph_trace_length_limit;
-            if let Some(v) = call_graph_trace_length_limit && v < opts.mutation_depth {
-                tcx.dcx().fatal("mutation depth exceeds explicit call graph trace length limit argument");
-            }
-
-            let t_target_analysis_start = Instant::now();
-
-            let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, entry_points, targeting, call_graph_depth_limit, call_graph_trace_length_limit);
-            let mut json_definitions = Default::default();
-            if let Some(write_opts) = &opts.write_opts {
-                let t_write_start = Instant::now();
-                json_definitions = write_call_graph(write_opts, tcx, all_mutable_fns_count, entry_points, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
-                pass_result.write_duration += t_write_start.elapsed();
-            }
-            if opts.verbosity >= 1 {
-                println!("built call graph with depth of {depth}",
-                    depth = call_graph.depth(),
-                );
-
-                println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
-                    reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
-                    reached = reachable_fns.len(),
-                    total = all_mutable_fns_count,
-                );
-
-                if call_graph.virtual_calls_count >= 1 || call_graph.dynamic_calls_count >= 1 {
-                    let total_calls_count = call_graph.total_calls_count();
-                    println!("could not resolve {unresolved_pct:.2}% of function calls ({virtual} virtual, {dynamic} dynamic, {foreign} foreign out of {total} function calls)",
-                        unresolved_pct = (call_graph.virtual_calls_count + call_graph.dynamic_calls_count + call_graph.foreign_calls_count) as f64 / total_calls_count as f64 * 100_f64,
-                        virtual = call_graph.virtual_calls_count,
-                        dynamic = call_graph.dynamic_calls_count,
-                        foreign = call_graph.foreign_calls_count,
-                        total = total_calls_count,
-                    );
+                    (entry_points, targets, external_targets.json_definitions.clone())
                 }
-            }
+                _ => {
+                    let entry_points = EntryPoints::Tests(&tests);
 
-            // HACK: Ensure that targets are in a deterministic, stable order, otherwise
-            //       mutation IDs will not match between repeated invocations.
-            reachable_fns.sort_unstable_by(|target_a, target_b| {
-                let target_a_span = tcx.def_span(target_a.def_id());
-                let target_b_span = tcx.def_span(target_b.def_id());
-                span_diagnostic_ord(target_a_span, target_b_span)
-            });
+                    let targeting = match external_meta_mutant_crate {
+                        None => Targeting::LocalMutables,
+                        Some(cnum) => Targeting::ExternMutables(cnum),
+                    };
 
-            if let Some(config::CallGraphOptions { format, entry_point_filters, non_local_call_view }) = opts.print_opts.call_graph.take() {
-                if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
-                print_call_graph(tcx, entry_points, &call_graph, &reachable_fns, format, &entry_point_filters, non_local_call_view);
-                if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                    let call_graph_depth_limit = opts.call_graph_depth_limit;
+                    if let Some(v) = call_graph_depth_limit && v < opts.mutation_depth {
+                        tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit argument");
+                    }
+
+                    let call_graph_trace_length_limit = opts.call_graph_trace_length_limit;
+                    if let Some(v) = call_graph_trace_length_limit && v < opts.mutation_depth {
+                        tcx.dcx().fatal("mutation depth exceeds explicit call graph trace length limit argument");
+                    }
+
+                    let t_target_analysis_start = Instant::now();
+
+                    let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, entry_points, targeting, call_graph_depth_limit, call_graph_trace_length_limit);
+                    let mut json_definitions = Default::default();
                     if let Some(write_opts) = &opts.write_opts {
-                        pass_result.duration = t_start.elapsed();
-                        pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        let t_write_start = Instant::now();
+                        json_definitions = write_call_graph(write_opts, tcx, all_mutable_fns_count, entry_points, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
+                        pass_result.write_duration += t_write_start.elapsed();
                     }
-                    if opts.report_timings {
-                        println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
-                            total = t_start.elapsed(),
-                            targets = pass_result.test_discovery_duration + t_target_analysis_start.elapsed(),
-                            write = pass_result.write_duration,
+                    if opts.verbosity >= 1 {
+                        println!("built call graph with depth of {depth}",
+                            depth = call_graph.depth(),
                         );
-                    }
-                    return Flow::Break;
-                }
-                if opts.verbosity >= 1 { println!(); }
-            }
 
-            let targets = reachable_fns.iter().filter(|f| match (targeting, f.reachability) {
-                (Targeting::ExternEntryPoints(_), _) => true,
-                (_, TargetReachability::DirectEntry) => true,
-                (_, TargetReachability::NestedCallee { distance }) => distance < opts.mutation_depth,
-            });
-
-            pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
-
-            if let Some(_) = opts.print_opts.mutation_targets.take() {
-                if opts.print_opts.print_headers { println!("\n@@@ targets @@@\n"); }
-                print_targets(tcx, opts.crate_kind, targets.clone(), opts.unsafe_targeting);
-                if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
-                    if let Some(write_opts) = &opts.write_opts {
-                        pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None);
-                    }
-                    if opts.report_timings {
-                        println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
-                            total = t_start.elapsed(),
-                            targets = pass_result.test_discovery_duration + pass_result.target_analysis_duration,
-                            write = pass_result.write_duration,
+                        println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
+                            reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
+                            reached = reachable_fns.len(),
+                            total = all_mutable_fns_count,
                         );
+
+                        if call_graph.virtual_calls_count >= 1 || call_graph.dynamic_calls_count >= 1 {
+                            let total_calls_count = call_graph.total_calls_count();
+                            println!("could not resolve {unresolved_pct:.2}% of function calls ({virtual} virtual, {dynamic} dynamic, {foreign} foreign out of {total} function calls)",
+                                unresolved_pct = (call_graph.virtual_calls_count + call_graph.dynamic_calls_count + call_graph.foreign_calls_count) as f64 / total_calls_count as f64 * 100_f64,
+                                virtual = call_graph.virtual_calls_count,
+                                dynamic = call_graph.dynamic_calls_count,
+                                foreign = call_graph.foreign_calls_count,
+                                total = total_calls_count,
+                            );
+                        }
                     }
-                    return Flow::Break;
+
+                    // HACK: Ensure that targets are in a deterministic, stable order, otherwise
+                    //       mutation IDs will not match between repeated invocations.
+                    reachable_fns.sort_unstable_by(|target_a, target_b| {
+                        let target_a_span = tcx.def_span(target_a.def_id());
+                        let target_b_span = tcx.def_span(target_b.def_id());
+                        span_diagnostic_ord(target_a_span, target_b_span)
+                    });
+
+                    if let Some(config::CallGraphOptions { format, entry_point_filters, non_local_call_view }) = opts.print_opts.call_graph.take() {
+                        if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
+                        print_call_graph(tcx, entry_points, &call_graph, &reachable_fns, format, &entry_point_filters, non_local_call_view);
+                        if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                            if let Some(write_opts) = &opts.write_opts {
+                                pass_result.duration = t_start.elapsed();
+                                pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
+                                write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
+                            }
+                            if opts.report_timings {
+                                println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
+                                    total = t_start.elapsed(),
+                                    targets = pass_result.test_discovery_duration + t_target_analysis_start.elapsed(),
+                                    write = pass_result.write_duration,
+                                );
+                            }
+                            return Flow::Break;
+                        }
+                        if opts.verbosity >= 1 { println!(); }
+                    }
+
+                    let targets = reachable_fns.into_iter()
+                        .filter(|f| match f.reachability {
+                            TargetReachability::DirectEntry => true,
+                            TargetReachability::NestedCallee { distance } => distance < opts.mutation_depth,
+                        })
+                        .collect::<Vec<_>>();
+
+                    pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
+
+                    if let Some(_) = opts.print_opts.mutation_targets.take() {
+                        if opts.print_opts.print_headers { println!("\n@@@ targets @@@\n"); }
+                        print_targets(tcx, &opts.crate_kind, &targets, opts.unsafe_targeting);
+                        if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
+                            if let Some(write_opts) = &opts.write_opts {
+                                pass_result.duration = t_start.elapsed();
+                                write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
+                            }
+                            if opts.report_timings {
+                                println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
+                                    total = t_start.elapsed(),
+                                    targets = pass_result.test_discovery_duration + pass_result.target_analysis_duration,
+                                    write = pass_result.write_duration,
+                                );
+                            }
+                            return Flow::Break;
+                        }
+                        if opts.verbosity >= 1 { println!(); }
+                    }
+
+                    (entry_points, targets, json_definitions)
                 }
-                if opts.verbosity >= 1 { println!(); }
-            }
+            };
 
             if opts.crate_kind.provides_tests() {
                 mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
@@ -356,11 +371,38 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             }
 
             if let Some(external_meta_mutant_crate) = external_meta_mutant_crate {
+                let Some(rustc_invocation) = crate_const_storage::extract_rustc_invocation(tcx, external_meta_mutant_crate) else {
+                    tcx.dcx().fatal("missing rustc invocation metadata in recompilable dependency crate");
+                };
+
+                let path_strs = targets.iter()
+                    .flat_map(|target| {
+                        let EntryPointAssocs::Local(reachable_from) = &target.reachable_from else {
+                            bug!("test compiler session generated targets with non-local entry points");
+                        };
+                        reachable_from.keys().map(|local_entry_point| {
+                            let def_path_hash = tcx.def_path_hash(local_entry_point.local_def_id.to_def_id());
+                            (def_path_hash, local_entry_point.path_str(tcx))
+                        })
+                    })
+                    .collect::<FxHashMap<_, _>>();
+
+                let crate_name = crate_res.visible_crate_name(external_meta_mutant_crate).as_str().to_owned();
+                pass_result.specialized_external_mutant_crate = Some((crate_name, SpecializedMutantCrateCompilationRequest {
+                    rustc_invocation,
+                    specialized_extra_filename: format!("-for-{}{}", tcx.crate_name(hir::LOCAL_CRATE), sess.opts.cg.extra_filename),
+                    external_targets: ExternalTargets {
+                        stable_targets: targets.iter().map(|target| StableTarget::from_test_session(tcx, target)).collect::<Vec<_>>(),
+                        path_strs,
+                        json_definitions,
+                    },
+                }));
+
                 let t_codegen_start = Instant::now();
 
                 let external_meta_mutant_crate_name = crate_res.visible_crate_name(external_meta_mutant_crate);
 
-                let meta_mutant = MetaMutant::External { crate_name: external_meta_mutant_crate_name, targets: &reachable_fns };
+                let meta_mutant = MetaMutant::External { crate_name: external_meta_mutant_crate_name };
                 perform_codegen(tcx, opts, &mut pass_result, &mut generated_crate_ast, &mut crate_ast, entry_points, meta_mutant);
 
                 pass_result.codegen_duration = t_codegen_start.elapsed();
@@ -370,7 +412,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             }
 
             let t_mutation_generation_start = Instant::now();
-            let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, targets.clone(), &opts.operators, opts.unsafe_targeting, &sess_opts);
+            let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
             if opts.verbosity >= 1 {
                 let mutated_fns = mutations.iter().map(|m| m.target.def_id()).collect::<FxHashSet<_>>();
                 let mutated_fns_count = mutated_fns.len();
@@ -430,7 +472,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                     if let Some(write_opts) = &opts.write_opts {
                         pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
                     }
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?}; write {write:.2?})",
@@ -514,7 +556,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             if let Some(write_opts) = &opts.write_opts {
                 let t_write_start = Instant::now();
-                write_mutations(write_opts, tcx, all_mutable_fns_count, &json_definitions, targets.clone(), &mutations, opts.unsafe_targeting, &mutation_conflict_graph, mutation_parallelism, t_mutation_generation_start.elapsed());
+                write_mutations(write_opts, tcx, all_mutable_fns_count, &json_definitions, &targets, &mutations, opts.unsafe_targeting, &mutation_conflict_graph, mutation_parallelism, t_mutation_generation_start.elapsed());
                 pass_result.write_duration += t_write_start.elapsed();
             }
 
@@ -524,7 +566,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
                     if let Some(write_opts) = &opts.write_opts {
                         pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None);
+                        write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
                     }
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; write {write:.2?})",

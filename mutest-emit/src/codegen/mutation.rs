@@ -589,7 +589,7 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
     def_res: &ast_lowering::DefResolutions,
     body_res: &ast_lowering::BodyResolutions<'tcx>,
     krate: &'ast ast::Crate,
-    targets: impl Iterator<Item = &'trg Target>,
+    targets: &'trg [Target],
     ops: Operators<'_, 'm>,
     unsafe_targeting: UnsafeTargeting,
     opts: &Options,
@@ -664,8 +664,8 @@ pub enum MutationParallelism<'trg, 'm> {
 }
 
 pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
-    let reachable_from_a = a.reachable_from.iter().map(|(entry_point_def_id, _)| entry_point_def_id).collect();
-    let reachable_from_b = b.reachable_from.iter().map(|(entry_point_def_id, _)| entry_point_def_id).collect();
+    let reachable_from_a = a.reachable_from.iter().map(|(entry_point, _)| entry_point).collect();
+    let reachable_from_b = b.reachable_from.iter().map(|(entry_point, _)| entry_point).collect();
     !FxHashSet::is_disjoint(&reachable_from_a, &reachable_from_b)
 }
 
@@ -863,7 +863,7 @@ fn choose_random_mutation_batch<'trg, 'm, 'a>(
     possible_mutation_batches.choose_stable(rng)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Copy, Clone, Debug)]
 pub enum GreedyMutationBatchingOrderingHeuristic {
     ConflictsAsc,
     ConflictsDesc,
