@@ -195,7 +195,9 @@ impl<'a, T: Operator<'a>> OperatorBoxed<'a> for T {
     }
 }
 
-pub type Operators<'op, 'm> = &'op [&'op dyn OperatorBoxed<'m, Mutation = dyn Mutation + 'm>];
+pub type OperatorRef<'op, 'm> = &'op dyn OperatorBoxed<'m, Mutation = dyn Mutation + 'm>;
+pub type Operators<'op, 'm> = &'op [OperatorRef<'op, 'm>];
+
 pub type BoxedMutation<'m> = Box<dyn Mutation + 'm>;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

@@ -4,10 +4,10 @@
 [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/failing_run.rs:7:23: 7:29
   <-(0)- non_asserting_test
 
-[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
+[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
   <-(0)- non_asserting_test
 
-[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
+[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/failing_run.rs:8:5: 8:10
   <-(0)- non_asserting_test
 
 4 mutations; 4 safe; 0 unsafe (0 tainted)
@@ -43,11 +43,6 @@ warning: [arg_default_shadow] mutation was not detected
   = note: local `b` inserted: `let b: u32 = ::core::default::Default::default();`
 
 applying mutation:
-- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/failing_run.rs:8:5: 8:10
-
-ran 1 out of 1 test
-
-applying mutation:
 - [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/failing_run.rs:8:5: 8:10
 
 ran 1 out of 1 test
@@ -59,6 +54,11 @@ warning: [math_op_add_mul_swap] mutation was not detected
   |     ^^^^^ swap operator for `*`
   |
   = note: expression replaced with: `a * b`
+
+applying mutation:
+- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/failing_run.rs:8:5: 8:10
+
+ran 1 out of 1 test
 
 mutations: 25.00%. 1 detected (0 timed out; 0 crashed); 3 undetected; 4 total
      safe: 25.00%. 1 detected (0 timed out; 0 crashed); 3 undetected; 4 total

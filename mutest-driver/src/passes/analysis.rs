@@ -253,12 +253,12 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
                     let call_graph_depth_limit = opts.call_graph_depth_limit;
                     if let Some(v) = call_graph_depth_limit && v < opts.mutation_depth {
-                        tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit argument");
+                        tcx.dcx().fatal("mutation depth exceeds explicit call graph depth limit option");
                     }
 
                     let call_graph_trace_length_limit = opts.call_graph_trace_length_limit;
                     if let Some(v) = call_graph_trace_length_limit && v < opts.mutation_depth {
-                        tcx.dcx().fatal("mutation depth exceeds explicit call graph trace length limit argument");
+                        tcx.dcx().fatal("mutation depth exceeds explicit call graph trace length limit option");
                     }
 
                     let t_target_analysis_start = Instant::now();

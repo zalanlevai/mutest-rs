@@ -4,10 +4,10 @@
 [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/basic_run.rs:7:23: 7:29
   <-(0)- test
 
-[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/basic_run.rs:8:5: 8:10
   <-(0)- test
 
-[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/basic_run.rs:8:5: 8:10
   <-(0)- test
 
 4 mutations; 4 safe; 0 unsafe (0 tainted)
@@ -27,12 +27,12 @@ applying mutation:
 ran 1 out of 1 test
 
 applying mutation:
-- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
 
 ran 1 out of 1 test
 
 applying mutation:
-- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
+- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/basic_run.rs:8:5: 8:10
 
 ran 1 out of 1 test
 

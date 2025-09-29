@@ -25,6 +25,7 @@ extern crate itertools;
 extern crate smallvec;
 extern crate thin_vec;
 
+pub mod cargo_package_config;
 pub mod config;
 pub mod inject;
 pub mod passes;

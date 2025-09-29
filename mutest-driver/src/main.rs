@@ -1,4 +1,5 @@
 #![feature(decl_macro)]
+#![feature(if_let_guard)]
 #![feature(let_chains)]
 
 #![feature(rustc_private)]
@@ -12,10 +13,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
+use mutest_driver::cargo_package_config;
 use mutest_driver::config::{self, Config};
 use mutest_driver::passes::external_mutant::RustcInvocation;
 use mutest_emit::analysis::hir::Safety;
-use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
+use mutest_emit::codegen::mutation::{OperatorRef, UnsafeTargeting};
 use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
 use rustc_session::EarlyDiagCtxt;
@@ -156,6 +158,10 @@ pub fn main() {
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let compiler_config = mutest_driver::passes::parse_compiler_args(&args).expect("no compiler configuration was generated");
 
+        let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
+
+        let mut package_config = cargo_package_config::fetch_merged_cargo_package_config(&early_dcx);
+
         let crate_kind_arg = mutest_arg_matches.get_one::<String>("crate-kind").map(String::as_str);
         if !test_target || crate_kind_arg == Some(crate_kind::MUTABLE_DEP_FOR_EXTERNAL_TESTS) {
             let report_timings = mutest_arg_matches.get_flag("timings");
@@ -174,8 +180,6 @@ pub fn main() {
             }
             return;
         }
-
-        let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 
         let mutest_target_dir_root = env::var("MUTEST_TARGET_DIR_ROOT").ok().map(PathBuf::from);
         let mutest_search_path = env::var("MUTEST_SEARCH_PATH").ok().map(PathBuf::from);
@@ -270,15 +274,26 @@ pub fn main() {
             _ => UnsafeTargeting::None,
         };
 
-        let mutation_operators = {
+        let mutation_operators = 'mutation_operators: {
             use mutest_driver_cli::mutation_operators as opts;
 
-            let mut op_names = mutest_arg_matches.get_many::<String>("mutation-operators").unwrap().map(String::as_str).collect::<FxHashSet<_>>();
-            if op_names.contains("all") { op_names = FxHashSet::from_iter(opts::ALL.into_iter().map(|s| *s)); }
+            if let None | Some(clap::parser::ValueSource::DefaultValue) = mutest_arg_matches.value_source("mutation-operators") {
+                if let Some(c) = &mut package_config && let Some(mutation_operators) = c.mutation_operators.take() {
+                    break 'mutation_operators mutation_operators;
+                }
+            }
+
+            let mut op_names = mutest_arg_matches.get_many::<String>("mutation-operators").unwrap().map(String::as_str).collect::<Vec<_>>();
+            if op_names.contains(&"all") { op_names = opts::ALL.into_iter().map(|s| *s).collect::<Vec<_>>(); }
+            // NOTE: Mutation operators must be sorted into a deterministic order,
+            //       because that determines application order, and thus mutation order.
+            //       We use an alphabetical order for this based on operator names.
+            op_names.sort();
+            op_names.dedup();
 
             op_names.into_iter()
                 .map(|op_name| {
-                    macro const_op_ref($m:expr) { { const OP: Operators<'_, '_> = &[&$m]; OP[0] } }
+                    macro const_op_ref($m:expr) { { const OP: OperatorRef<'_, '_> = &$m; OP } }
 
                     match op_name {
                         opts::ARG_DEFAULT_SHADOW => const_op_ref!(mutest_operators::ArgDefaultShadow),
@@ -305,12 +320,21 @@ pub fn main() {
                 .collect::<Vec<_>>()
         };
 
-        let mut call_graph_depth_limit = mutest_arg_matches.get_one::<usize>("call-graph-depth-limit").copied();
-        let mut call_graph_trace_length_limit = mutest_arg_matches.get_one::<usize>("call-graph-trace-length-limit").copied();
-        let mutation_depth = *mutest_arg_matches.get_one::<usize>("depth").unwrap();
+        let mut call_graph_depth_limit = match mutest_arg_matches.value_source("call-graph-depth-limit") {
+            None | Some(clap::parser::ValueSource::DefaultValue) if let Some(c) = &package_config && let Some(v) = c.call_graph_depth_limit => Some(v),
+            _ => mutest_arg_matches.get_one::<usize>("call-graph-depth-limit").copied(),
+        };
+        let mut call_graph_trace_length_limit = match mutest_arg_matches.value_source("call-graph-trace-length-limit") {
+            None | Some(clap::parser::ValueSource::DefaultValue) if let Some(c) = &package_config && let Some(v) = c.call_graph_trace_length_limit => Some(v),
+            _ => mutest_arg_matches.get_one::<usize>("call-graph-trace-length-limit").copied(),
+        };
+        let mutation_depth = match mutest_arg_matches.value_source("depth") {
+            None | Some(clap::parser::ValueSource::DefaultValue) if let Some(c) = &package_config && let Some(v) = c.mutation_depth => v,
+            _ => *mutest_arg_matches.get_one::<usize>("depth").unwrap(),
+        };
 
         if let Some(call_graph_depth_limit_value) = call_graph_depth_limit && call_graph_depth_limit_value < mutation_depth {
-            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph depth limit argument ignored as mutation depth exceeds it");
+            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph depth limit option ignored as mutation depth exceeds it");
             diagnostic.note(format!("mutation depth is set to {mutation_depth}"));
             diagnostic.note(format!("call graph depth limit was explicitly set to {call_graph_depth_limit_value}, but will be ignored"));
             diagnostic.emit();
@@ -319,7 +343,7 @@ pub fn main() {
         }
 
         if let Some(call_graph_trace_length_limit_value) = call_graph_trace_length_limit && call_graph_trace_length_limit_value < mutation_depth {
-            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph trace length limit argument ignored as mutation depth exceeds it");
+            let mut diagnostic = early_dcx.early_struct_warn("explicit call graph trace length limit option ignored as mutation depth exceeds it");
             diagnostic.note(format!("mutation depth is set to {mutation_depth}"));
             diagnostic.note(format!("call graph trace length limit was explicitly set to {call_graph_trace_length_limit_value}, but will be ignored"));
             diagnostic.emit();
@@ -328,53 +352,102 @@ pub fn main() {
         }
 
         let mutation_parallelism = 'mutation_parallelism: {
+            let mutation_parallelism_config = package_config.as_ref().and_then(|c| c.mutation_parallelism.as_ref());
+
             use mutest_driver_cli::mutant_batch_algorithm as opts;
-            let mutation_batching_algorithm = mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str);
+            let batching_algorithm_arg = mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str);
 
-            if let None | Some(opts::NONE) = mutation_batching_algorithm {
-                break 'mutation_parallelism None;
-            }
-
-            let mutation_batching_algorithm = match mutation_batching_algorithm {
-                Some(opts::RANDOM) => config::MutationBatchingAlgorithm::Random,
-
-                Some(opts::GREEDY) => {
-                    let ordering_heuristic = {
-                        use mutest_driver_cli::mutant_batch_greedy_ordering_heuristic as opts;
-
-                        match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
-                            None | Some(opts::NONE) => None,
-                            Some(opts::RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
-                            Some(opts::CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
-                            Some(opts::REVERSE_CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
-                            _ => unreachable!(),
-                        }
-                    };
-
-                    let epsilon = mutest_arg_matches.get_one::<f64>("mutant-batch-greedy-epsilon").copied();
-
-                    config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon }
+            match (batching_algorithm_arg, mutest_arg_matches.value_source("mutant-batch-algorithm"), mutation_parallelism_config) {
+                // Mutation batching is overriden through Cargo package config.
+                (_, None | Some(clap::parser::ValueSource::DefaultValue), Some(mutation_parallelism_config)) => {
+                    match mutation_parallelism_config {
+                        // Mutation batching is explicitly disabled through Cargo package config.
+                        cargo_package_config::MutationParallelism::None => break 'mutation_parallelism None,
+                        // Mutation batching is explicitly enabled through Cargo package config.
+                        cargo_package_config::MutationParallelism::Batching { .. } => {}
+                    }
                 }
 
-                Some(opts::SIMULATED_ANNEALING) => config::MutationBatchingAlgorithm::SimulatedAnnealing,
+                // Mutation batching algorith is disabled through the CLI, either explicitly or through the defaults.
+                (None | Some(opts::NONE), _, _) => break 'mutation_parallelism None,
+                // Some mutation batching algorithm is enabled through the CLI.
+                _ => {}
+            }
 
-                _ => unreachable!(),
+            let batching_algorithm = {
+                let batching_algorithm_config = match mutation_parallelism_config {
+                    Some(cargo_package_config::MutationParallelism::Batching { batching_algorithm: Some(v), .. }) => Some(v),
+                    _ => None,
+                };
+
+                match (batching_algorithm_arg, batching_algorithm_config) {
+                    (Some(opts::RANDOM), _) | (_, Some(cargo_package_config::MutationBatchingAlgorithm::Random))
+                    => config::MutationBatchingAlgorithm::Random,
+
+                    (Some(opts::GREEDY), _) | (_, Some(cargo_package_config::MutationBatchingAlgorithm::Greedy { .. })) => {
+                        let ordering_heuristic = 'ordering_heuristic: {
+                            use mutest_driver_cli::mutant_batch_greedy_ordering_heuristic as opts;
+
+                            let ordering_heuristic_config = match batching_algorithm_config {
+                                Some(cargo_package_config::MutationBatchingAlgorithm::Greedy { greedy_batching_ordering_heuristic: v, .. }) => v.as_ref(),
+                                _ => None,
+                            };
+
+                            if let None | Some(clap::parser::ValueSource::DefaultValue) = mutest_arg_matches.value_source("mutant-batch-greedy-ordering-heuristic") {
+                                if let Some(ordering_heuristic_config) = ordering_heuristic_config {
+                                    break 'ordering_heuristic match ordering_heuristic_config {
+                                        cargo_package_config::GreedyMutationBatchingOrderingHeuristic::None => None,
+                                        cargo_package_config::GreedyMutationBatchingOrderingHeuristic::Random => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
+                                        cargo_package_config::GreedyMutationBatchingOrderingHeuristic::Conflicts => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
+                                        cargo_package_config::GreedyMutationBatchingOrderingHeuristic::ReverseConflicts => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
+                                    };
+                                }
+                            }
+
+                            match mutest_arg_matches.get_one::<String>("mutant-batch-greedy-ordering-heuristic").map(String::as_str) {
+                                None | Some(opts::NONE) => None,
+                                Some(opts::RANDOM) => Some(config::GreedyMutationBatchingOrderingHeuristic::Random),
+                                Some(opts::CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsAsc),
+                                Some(opts::REVERSE_CONFLICTS) => Some(config::GreedyMutationBatchingOrderingHeuristic::ConflictsDesc),
+                                _ => unreachable!(),
+                            }
+                        };
+
+                        let epsilon = match mutest_arg_matches.value_source("mutant-batch-greedy-epsilon") {
+                            None | Some(clap::parser::ValueSource::DefaultValue) if let Some(cargo_package_config::MutationBatchingAlgorithm::Greedy { greedy_batching_epsilon: Some(v), .. }) = batching_algorithm_config => Some(*v),
+                            _ => mutest_arg_matches.get_one::<f64>("mutant-batch-greedy-epsilon").copied(),
+                        };
+
+                        config::MutationBatchingAlgorithm::Greedy { ordering_heuristic, epsilon }
+                    }
+
+                    (Some(opts::SIMULATED_ANNEALING), _)
+                    => config::MutationBatchingAlgorithm::SimulatedAnnealing,
+
+                    _ => unreachable!(),
+                }
             };
 
-            let mutation_batching_randomness = {
+            let batching_randomness = {
                 use rand_seeder::Seeder;
 
-                let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed");
+                let seed_text = mutest_arg_matches.get_one::<String>("mutant-batch-seed").or_else(|| match mutation_parallelism_config {
+                    Some(cargo_package_config::MutationParallelism::Batching { batching_seed: Some(v), .. }) => Some(v),
+                    _ => None,
+                });
                 let seed = seed_text.map(|seed_text| Seeder::from(seed_text).make_seed::<config::RandomSeed>());
 
                 config::MutationBatchingRandomness { seed }
             };
 
-            let batch_max_mutations_count = *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap();
+            let batch_max_mutations_count = match mutest_arg_matches.value_source("mutant-batch-size") {
+                None | Some(clap::parser::ValueSource::DefaultValue) if let Some(cargo_package_config::MutationParallelism::Batching { batch_size: Some(v), .. }) = mutation_parallelism_config => *v,
+                _ => *mutest_arg_matches.get_one::<usize>("mutant-batch-size").unwrap(),
+            };
 
             Some(config::MutationParallelism::Batching(config::MutationBatchingOptions {
-                algorithm: mutation_batching_algorithm,
-                randomness: mutation_batching_randomness,
+                algorithm: batching_algorithm,
+                randomness: batching_randomness,
                 batch_max_mutations_count,
             }))
         };

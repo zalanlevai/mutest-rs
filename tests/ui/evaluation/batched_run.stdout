@@ -15,19 +15,19 @@ batch of 3 mutations
     <-(0)- test_coupled_mutable_fns
 
 batch of 3 mutations
-  - [math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/batched_run.rs:9:5: 9:10
-    <-(0)- test_mutable_fn
-  - [math_op_mul_div_swap] swap operator `*` for `/` in other_mutable_fn at tests/ui/evaluation/batched_run.rs:18:5: 18:10
-    <-(0)- test_other_mutable_fn
-  - [math_op_add_sub_swap] swap operator `+` for `-` in coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:27:5: 27:10
-    <-(0)- test_coupled_mutable_fns
-
-batch of 3 mutations
   - [math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/batched_run.rs:9:5: 9:10
     <-(0)- test_mutable_fn
   - [math_op_add_mul_swap] swap operator `*` for `+` in other_mutable_fn at tests/ui/evaluation/batched_run.rs:18:5: 18:10
     <-(0)- test_other_mutable_fn
   - [math_op_add_mul_swap] swap operator `+` for `*` in coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:27:5: 27:10
+    <-(0)- test_coupled_mutable_fns
+
+batch of 3 mutations
+  - [math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/batched_run.rs:9:5: 9:10
+    <-(0)- test_mutable_fn
+  - [math_op_mul_div_swap] swap operator `*` for `/` in other_mutable_fn at tests/ui/evaluation/batched_run.rs:18:5: 18:10
+    <-(0)- test_other_mutable_fn
+  - [math_op_add_sub_swap] swap operator `+` for `-` in coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:27:5: 27:10
     <-(0)- test_coupled_mutable_fns
 
 batch of 1 mutation
@@ -39,11 +39,11 @@ batch of 1 mutation
     <-(0)- test_coupled_mutable_fns
 
 batch of 1 mutation
-  - [math_op_mul_div_swap] swap operator `*` for `/` in other_coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:31:5: 31:10
+  - [math_op_add_mul_swap] swap operator `*` for `+` in other_coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:31:5: 31:10
     <-(0)- test_coupled_mutable_fns
 
 batch of 1 mutation
-  - [math_op_add_mul_swap] swap operator `*` for `+` in other_coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:31:5: 31:10
+  - [math_op_mul_div_swap] swap operator `*` for `/` in other_coupled_mutable_fn at tests/ui/evaluation/batched_run.rs:31:5: 31:10
     <-(0)- test_coupled_mutable_fns
 
 16 mutations; 16 safe; 0 unsafe (0 tainted)
@@ -68,16 +68,16 @@ applying batch of 3 mutations:
 ran 3 out of 3 tests
 
 applying batch of 3 mutations:
-- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/batched_run.rs:9:5: 9:10
-- [math_op_mul_div_swap] swap operator `*` for `/` at tests/ui/evaluation/batched_run.rs:18:5: 18:10
-- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/batched_run.rs:27:5: 27:10
+- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/batched_run.rs:9:5: 9:10
+- [math_op_add_mul_swap] swap operator `*` for `+` at tests/ui/evaluation/batched_run.rs:18:5: 18:10
+- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/batched_run.rs:27:5: 27:10
 
 ran 3 out of 3 tests
 
 applying batch of 3 mutations:
-- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/batched_run.rs:9:5: 9:10
-- [math_op_add_mul_swap] swap operator `*` for `+` at tests/ui/evaluation/batched_run.rs:18:5: 18:10
-- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/batched_run.rs:27:5: 27:10
+- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/batched_run.rs:9:5: 9:10
+- [math_op_mul_div_swap] swap operator `*` for `/` at tests/ui/evaluation/batched_run.rs:18:5: 18:10
+- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/batched_run.rs:27:5: 27:10
 
 ran 3 out of 3 tests
 
@@ -92,12 +92,12 @@ applying batch of 1 mutation:
 ran 1 out of 1 test
 
 applying batch of 1 mutation:
-- [math_op_mul_div_swap] swap operator `*` for `/` at tests/ui/evaluation/batched_run.rs:31:5: 31:10
+- [math_op_add_mul_swap] swap operator `*` for `+` at tests/ui/evaluation/batched_run.rs:31:5: 31:10
 
 ran 1 out of 1 test
 
 applying batch of 1 mutation:
-- [math_op_add_mul_swap] swap operator `*` for `+` at tests/ui/evaluation/batched_run.rs:31:5: 31:10
+- [math_op_mul_div_swap] swap operator `*` for `/` at tests/ui/evaluation/batched_run.rs:31:5: 31:10
 
 ran 1 out of 1 test
 
