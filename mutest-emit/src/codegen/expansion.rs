@@ -58,13 +58,13 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         $(
             let kind = Symbol::intern(stringify!($kind));
             if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::$meta, kind)) {
-                let feature_more_qualified_paths_attr = ast::mk::attr_inner(g, DUMMY_SP,
+                let attr = ast::mk::attr_inner(g, DUMMY_SP,
                     Ident::new(sym::$meta, DUMMY_SP),
                     ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
                         ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(kind, ast::token::IdentIsRaw::No)),
                     ])),
                 );
-                krate.attrs.push(feature_more_qualified_paths_attr);
+                krate.attrs.push(attr);
             }
         )+
     }

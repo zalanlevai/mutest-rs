@@ -1,0 +1,6 @@
+error: mutest-injected module conflicts with existing item `mutest_generated`
+  |
+  = note: mutest injects a module into the crate root with the reserved name `mutest_generated`
+
+error: aborting due to 1 previous error
+

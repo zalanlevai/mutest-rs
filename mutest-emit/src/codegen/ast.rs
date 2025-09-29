@@ -1140,6 +1140,14 @@ pub mod inspect {
         match_attr_name(attr, tool, name) && lit.kind == *value
     }
 
+    pub fn is_list_attr_with_some(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
+        let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
+        match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {
+            let Some(ast::MetaItem { path: _meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item.meta_item() else { return false };
+            true
+        })
+    }
+
     pub fn is_list_attr_with_path(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, path: &ast::Path) -> bool {
         let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
         match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {

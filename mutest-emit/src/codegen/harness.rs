@@ -423,30 +423,40 @@ pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
     let g = &tcx.sess.psess.attr_id_generator;
 
     // #![feature(test)]
-    let feature_test_attr = ast::mk::attr_inner(g, def_site,
-        Ident::new(sym::feature, def_site),
-        ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-            ast::mk::tt_token_joint(def_site, ast::TokenKind::Ident(sym::test, ast::token::IdentIsRaw::No)),
-        ])),
-    );
+    if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, sym::test)) {
+        let feature_test_attr = ast::mk::attr_inner(g, def_site,
+            Ident::new(sym::feature, def_site),
+            ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                ast::mk::tt_token_joint(def_site, ast::TokenKind::Ident(sym::test, ast::token::IdentIsRaw::No)),
+            ])),
+        );
+        krate.attrs.push(feature_test_attr);
+    }
     // #![feature(custom_test_frameworks)]
-    let feature_custom_test_frameworks_attr = ast::mk::attr_inner(g, def_site,
-        Ident::new(sym::feature, def_site),
-        ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-            ast::mk::tt_token_joint(def_site, ast::TokenKind::Ident(sym::custom_test_frameworks, ast::token::IdentIsRaw::No)),
-        ])),
-    );
+    if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, sym::custom_test_frameworks)) {
+        let feature_custom_test_frameworks_attr = ast::mk::attr_inner(g, def_site,
+            Ident::new(sym::feature, def_site),
+            ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                ast::mk::tt_token_joint(def_site, ast::TokenKind::Ident(sym::custom_test_frameworks, ast::token::IdentIsRaw::No)),
+            ])),
+        );
+        krate.attrs.push(feature_custom_test_frameworks_attr);
+    }
     // #![test_runner(mutest_generated::harness)]
+    krate.attrs.retain(|attr| !ast::inspect::is_list_attr_with_some(attr, None, sym::test_runner));
     let test_runner_mutest_harness_attr = ast::mk::attr_inner(g, def_site,
         Ident::new(sym::test_runner, def_site),
         ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(
             ast::mk::ts_path(def_site, path::harness(def_site)),
         )),
     );
-
-    krate.attrs.push(feature_test_attr);
-    krate.attrs.push(feature_custom_test_frameworks_attr);
     krate.attrs.push(test_runner_mutest_harness_attr);
+
+    if let Some(existing_item) = tcx.module_children_local(hir::CRATE_DEF_ID).iter().find(|mod_child| mod_child.ident.name == sym::mutest_generated && mod_child.res.ns() == Some(hir::Namespace::TypeNS)) {
+        let mut diagnostic = tcx.dcx().struct_fatal(format!("mutest-injected module conflicts with existing item `{}`", tcx.def_path_str(existing_item.res.def_id())));
+        diagnostic.note(format!("mutest injects a module into the crate root with the reserved name `{}`", sym::mutest_generated));
+        diagnostic.emit();
+    }
 
     // extern crate test;
     let extern_crate_test = ast::mk::item_extern_crate(def_site, sym::test, None);
