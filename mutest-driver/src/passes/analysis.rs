@@ -13,7 +13,7 @@ use rustc_span::fatal_error::FatalError;
 use mutest_emit::analysis::call_graph::{EntryPointAssocs, EntryPoints, Targeting, TargetReachability};
 use mutest_emit::analysis::hir;
 use mutest_emit::codegen::ast;
-use mutest_emit::codegen::harness::MetaMutant;
+use mutest_emit::codegen::harness::{CargoMetadata, CargoTargetKind, MetaMutant};
 use mutest_emit::codegen::symbols::{Symbol, span_diagnostic_ord};
 
 use crate::config::{self, Config};
@@ -65,7 +65,24 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
 
     mutest_emit::codegen::substitution::resolve_syntax_ambiguities(tcx, generated_crate_ast);
 
-    mutest_emit::codegen::harness::generate_harness(tcx, entry_points, meta_mutant, generated_crate_ast);
+    let cargo_metadata = match (env::var("CARGO_PKG_NAME").ok(), opts.cargo_target_kind) {
+        (Some(cargo_package_name), Some(cargo_target_kind)) => {
+            let target_kind = match cargo_target_kind {
+                config::CargoTargetKind::Lib => CargoTargetKind::Lib,
+                config::CargoTargetKind::MainBin => CargoTargetKind::MainBin,
+                config::CargoTargetKind::Bin => CargoTargetKind::Bin,
+                config::CargoTargetKind::Example => CargoTargetKind::Example,
+                config::CargoTargetKind::Test => CargoTargetKind::Test,
+            };
+
+            Some(CargoMetadata {
+                package_name: cargo_package_name,
+                target_kind,
+            })
+        }
+        _ => None,
+    };
+    mutest_emit::codegen::harness::generate_harness(tcx, cargo_metadata.as_ref(), entry_points, meta_mutant, generated_crate_ast);
 
     // HACK: The generated code is currently based on the expanded AST and contains references to the internals
     //       of macro expansions. These are patched over using a static attribute prelude (here) and a static

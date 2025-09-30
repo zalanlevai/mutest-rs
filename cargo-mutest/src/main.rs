@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::process::{self, Command};
 
@@ -82,7 +83,7 @@ fn main() {
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
             // Experimental Flags
-            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file(s) into JSON output directory.").display_order(500))
+            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--Zwrite-json`.").display_order(500))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
@@ -106,7 +107,7 @@ fn main() {
         .next_help_heading("Compilation Options")
         .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
         .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
-        .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts."))
+        .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts.").value_parser(clap::value_parser!(PathBuf)))
         .next_help_heading("Manifest Options")
         .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
         .arg(clap::arg!(--offline "Run without accessing the network."))
@@ -198,10 +199,10 @@ fn main() {
 
     let metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
 
-    let target_dir = matches.get_one::<String>("target-dir").map(ToOwned::to_owned)
-        .unwrap_or(metadata.target_directory.join("mutest").into_string());
-    cmd.args(["--target-dir", &target_dir]);
-    cmd.env("MUTEST_TARGET_DIR_ROOT", target_dir);
+    let target_dir = matches.get_one::<PathBuf>("target-dir").cloned().unwrap_or_else(|| metadata.target_directory.into_std_path_buf()).join("mutest");
+    cmd.arg("--target-dir");
+    cmd.arg(&target_dir);
+    cmd.env("MUTEST_TARGET_DIR_ROOT", &target_dir);
 
     if matches.get_flag("release") {
         cmd.arg("--release");
@@ -287,7 +288,9 @@ fn main() {
         cmd.arg("--");
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
-        if let Some(out_dir) = matches.get_one::<PathBuf>("Zwrite-json") {
+        if let Some(clap::parser::ValueSource::CommandLine) = matches.value_source("Zwrite-json") {
+            let out_dir = matches.get_one::<PathBuf>("Zwrite-json").cloned().unwrap_or_else(|| target_dir.join("json"));
+            fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory at `{}`", out_dir.display()));
             // NOTE: The out dir path passed to the generated test binary must be canonicalized,
             //       as it will likely be run under a different cwd.
             let out_dir = out_dir.canonicalize().expect("cannot canonicalize out dir path");

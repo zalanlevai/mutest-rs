@@ -165,8 +165,21 @@ pub enum MutationParallelism<S: SubstMap + 'static> {
     Batched(&'static [BatchedMutantMeta<S>]),
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum CargoTargetKind {
+    Lib,
+    MainBin,
+    Bin,
+    Example,
+    Test,
+}
+
 #[derive(Debug)]
 pub struct MetaMutant<S: SubstMap + 'static> {
+    pub cargo_package_name: Option<&'static str>,
+    pub cargo_target_kind: Option<CargoTargetKind>,
+    pub crate_name: &'static str,
+
     pub active_mutant_handle: &'static ActiveMutantHandle<S>,
     pub mutations: &'static [&'static MutationMeta],
     pub mutation_parallelism: MutationParallelism<S>,

@@ -68,6 +68,10 @@ pub fn compile_specialized_mutant_crate(
         mutest_search_path: config.mutest_search_path.clone(),
         opts: config::Options {
             crate_kind: config::CrateKind::MutantForExternalTests(request.external_targets),
+            // NOTE: While we are compiling a different Cargo target, we treat it like the original.
+            //       This is mainly used to ensure that JSON metadata files appear together,
+            //       as the two crates represent a single pass.
+            cargo_target_kind: config.opts.cargo_target_kind,
 
             mode: config::Mode::Build,
             verbosity: config.opts.verbosity,

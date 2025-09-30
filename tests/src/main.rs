@@ -376,6 +376,13 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
         cmd.args(["-L", AUX_OUT_DIR]);
 
+        // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.
+        for (var, _) in env::vars() {
+            if var.starts_with("CARGO_") {
+                cmd.env_remove(var);
+            }
+        }
+
         if opts.verbosity >= 1 {
             eprintln!("running {cmd:?}");
         }
@@ -458,6 +465,13 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     mutest_args.push(mutest_subcommand.to_owned());
     cmd.env("MUTEST_ARGS".to_owned(), mutest_args.join(" "));
 
+    // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.
+    for (var, _) in env::vars() {
+        if var.starts_with("CARGO_") {
+            cmd.env_remove(var);
+        }
+    }
+
     if opts.verbosity >= 1 {
         eprintln!("running {cmd:?}");
     }
@@ -495,6 +509,13 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         let run_flags = directives.iter().filter_map(|d| d.strip_prefix("run-flags:").map(str::trim))
             .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
         cmd.args(run_flags);
+
+        // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.
+        for (var, _) in env::vars() {
+            if var.starts_with("CARGO_") {
+                cmd.env_remove(var);
+            }
+        }
 
         if opts.verbosity >= 1 {
             eprintln!("running {cmd:?}");

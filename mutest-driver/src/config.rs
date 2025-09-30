@@ -44,6 +44,15 @@ impl CrateKind {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum CargoTargetKind {
+    Lib,
+    MainBin,
+    Bin,
+    Example,
+    Test,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum GraphFormat {
     Simple,
@@ -149,6 +158,7 @@ pub struct VerifyOptions {
 
 pub struct Options<'op, 'm> {
     pub crate_kind: CrateKind,
+    pub cargo_target_kind: Option<CargoTargetKind>,
 
     pub mode: Mode,
     pub verbosity: u8,

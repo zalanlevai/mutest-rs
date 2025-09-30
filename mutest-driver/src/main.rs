@@ -10,6 +10,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
@@ -97,6 +98,63 @@ fn guess_test_type(input: &Input) -> TestType {
     }
 }
 
+fn fetch_cargo_target_kind(input: &Input) -> Option<config::CargoTargetKind> {
+    let cargo_package_manifest_path_str = env::var("CARGO_MANIFEST_PATH").ok()?;
+
+    let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
+    metadata_cmd.manifest_path(&cargo_package_manifest_path_str);
+    metadata_cmd.no_deps();
+
+    let metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
+
+    let Some(package) = metadata.packages.iter().find(|package| package.manifest_path == cargo_package_manifest_path_str) else {
+        panic!("cannot find package in Cargo metadata");
+    };
+
+    let Some(cargo_package_name) = env::var("CARGO_PKG_NAME").ok() else {
+        panic!("invalid Cargo invocation: missing `CARGO_PKG_NAME` environment variable");
+    };
+    let Some(cargo_crate_name) = env::var("CARGO_CRATE_NAME").ok() else {
+        panic!("invalid Cargo invocation: missing `CARGO_CRATE_NAME` environment variable");
+    };
+
+    let input_file_path = input.opt_path().expect("cannot get input file path").to_owned();
+    let input_file_path = input_file_path.canonicalize().expect("cannot canonicalize input file path");
+
+    let Some(target) = package.targets.iter().find(|target| target.name.replace("-", "_") == cargo_crate_name && target.src_path == input_file_path) else {
+        panic!("cannot find target in Cargo package metadata");
+    };
+
+    match () {
+        _ if target.kind.contains(&cargo_metadata::TargetKind::Bin) => {
+            // NOTE: We infer the main `bin` target based on whether its crate name matches the Cargo package name.
+            match cargo_package_name.replace("-", "_") == cargo_crate_name {
+                true => Some(config::CargoTargetKind::MainBin),
+                false => Some(config::CargoTargetKind::Bin),
+            }
+        }
+        // NOTE: We do not modify or analyze build scripts.
+        _ if target.kind.contains(&cargo_metadata::TargetKind::CustomBuild) => None,
+        // NOTE: We do not modify or analyze proc macro crates.
+        _ if target.kind.contains(&cargo_metadata::TargetKind::ProcMacro) => None,
+
+        _ if target.kind.contains(&cargo_metadata::TargetKind::Example) => Some(config::CargoTargetKind::Example),
+        _ if target.kind.contains(&cargo_metadata::TargetKind::Test) => Some(config::CargoTargetKind::Test),
+        // NOTE: Benchmarks are currently not supported.
+        _ if target.kind.contains(&cargo_metadata::TargetKind::Bench) => None,
+
+        // NOTE: Cargo allows only one `lib` target for each package, so there is no need for the "main" distinction like with `bin` targets.
+        _ if target.kind.contains(&cargo_metadata::TargetKind::Lib)
+            || target.kind.contains(&cargo_metadata::TargetKind::RLib)
+            || target.kind.contains(&cargo_metadata::TargetKind::DyLib)
+            || target.kind.contains(&cargo_metadata::TargetKind::CDyLib)
+            || target.kind.contains(&cargo_metadata::TargetKind::StaticLib)
+        => Some(config::CargoTargetKind::Lib),
+
+        _ => None,
+    }
+}
+
 mod crate_kind {
     mutest_driver_cli::exclusive_opts! { pub(crate) possible_values where
         INFER = "infer"; ["Infer crate kind based on the Cargo rustc invocation."]
@@ -160,6 +218,8 @@ pub fn main() {
 
         let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 
+        let cargo_target_kind = fetch_cargo_target_kind(&compiler_config.input);
+
         let mut package_config = cargo_package_config::fetch_merged_cargo_package_config(&early_dcx);
 
         let crate_kind_arg = mutest_arg_matches.get_one::<String>("crate-kind").map(String::as_str);
@@ -192,10 +252,14 @@ pub fn main() {
                 Some(opts::MUTABLE_DEP_FOR_EXTERNAL_TESTS) => unreachable!(),
                 Some(opts::INTEGRATION_TESTS) => config::CrateKind::IntegrationTest,
 
-                None | Some(opts::INFER) => match guess_test_type(&compiler_config.input) {
-                    TestType::UnitTest | TestType::Unknown => config::CrateKind::MutantWithInternalTests,
-                    TestType::IntegrationTest => config::CrateKind::IntegrationTest,
-                },
+                None | Some(opts::INFER) => match cargo_target_kind {
+                    None => match guess_test_type(&compiler_config.input) {
+                        TestType::UnitTest | TestType::Unknown => config::CrateKind::MutantWithInternalTests,
+                        TestType::IntegrationTest => config::CrateKind::IntegrationTest,
+                    },
+                    Some(config::CargoTargetKind::Test) => config::CrateKind::IntegrationTest,
+                    Some(_) => config::CrateKind::MutantWithInternalTests,
+                }
 
                 _ => unreachable!(),
             }
@@ -453,9 +517,43 @@ pub fn main() {
         };
 
         let write_opts = 'write_opts: {
-            let Some(out_dir) = mutest_arg_matches.get_one::<PathBuf>("Zwrite-json").cloned() else {
+            let Some(clap::parser::ValueSource::CommandLine) = mutest_arg_matches.value_source("Zwrite-json") else {
                 break 'write_opts None;
             };
+
+            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("Zwrite-json").cloned()
+                .unwrap_or_else(|| mutest_target_dir_root.clone().unwrap_or(PathBuf::from("target/mutest")).join("json"));
+
+            if let Some(cargo_package_name) = env::var("CARGO_PKG_NAME").ok() {
+                // NOTE: `CARGO_PKG_NAME` always corresponds to the root package name, even for other targets.
+                out_dir.push(cargo_package_name);
+
+                let Some(cargo_crate_name) = env::var("CARGO_CRATE_NAME").ok() else {
+                    panic!("invalid Cargo invocation: missing `CARGO_CRATE_NAME` environment variable");
+                };
+
+                match cargo_target_kind {
+                    None => {}
+
+                    Some(config::CargoTargetKind::Lib) => out_dir.push("lib"),
+                    Some(config::CargoTargetKind::MainBin) => out_dir.push("bin"),
+
+                    Some(config::CargoTargetKind::Bin) => {
+                        out_dir.push("bins");
+                        out_dir.push(cargo_crate_name);
+                    }
+                    Some(config::CargoTargetKind::Example) => {
+                        out_dir.push("examples");
+                        out_dir.push(cargo_crate_name);
+                    }
+                    Some(config::CargoTargetKind::Test) => {
+                        out_dir.push("tests");
+                        out_dir.push(cargo_crate_name);
+                    }
+                }
+
+                fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory for crate at `{}`", out_dir.display()));
+            }
 
             Some(config::WriteOptions { out_dir })
         };
@@ -489,6 +587,7 @@ pub fn main() {
             mutest_search_path,
             opts: config::Options {
                 crate_kind,
+                cargo_target_kind,
 
                 mode,
                 verbosity,

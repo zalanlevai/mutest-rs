@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use crate::config::{self, Options};
 use crate::detections::{MutationDetectionMatrix, print_mutation_detection_matrix};
 use crate::flakiness::{MutationFlakinessMatrix, print_mutation_flakiness_epilogue, print_mutation_flakiness_matrix};
-use crate::metadata::{self, ExternalTestsExtra, MetaMutant, Mutant, MutationMeta, MutationParallelism, MutationSafety, StandaloneMutantMeta, SubstLocIdx, SubstMap, SubstMeta, TestSuite};
+use crate::metadata::{self, CargoTargetKind, ExternalTestsExtra, MetaMutant, Mutant, MutationMeta, MutationParallelism, MutationSafety, StandaloneMutantMeta, SubstLocIdx, SubstMap, SubstMeta, TestSuite};
 use crate::subsumption::{MutationSubsumptionMatrix, print_mutation_subsumption_matrix};
 use crate::test_runner;
 use crate::thread_pool::ThreadPool;
@@ -752,8 +752,37 @@ pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, external_test
             subsumption_matrix: args.contains(&"--print=subsumption-matrix").then_some(()),
         },
         write_opts: args.iter().flat_map(|arg| arg.strip_prefix("--Zwrite-json=")).next().map(|out_dir_str| {
+            let mut out_dir = PathBuf::from(out_dir_str);
+
+            if let Some(cargo_package_name) = meta_mutant.cargo_package_name {
+                out_dir.push(cargo_package_name);
+
+                match meta_mutant.cargo_target_kind {
+                    None => {}
+
+                    Some(CargoTargetKind::Lib) => out_dir.push("lib"),
+                    Some(CargoTargetKind::MainBin) => out_dir.push("bin"),
+
+                    Some(CargoTargetKind::Bin) => {
+                        out_dir.push("bins");
+                        out_dir.push(meta_mutant.crate_name);
+                    }
+                    Some(CargoTargetKind::Example) => {
+                        out_dir.push("examples");
+                        out_dir.push(meta_mutant.crate_name);
+                    }
+                    Some(CargoTargetKind::Test) => {
+                        let Some(external_tests_extra) = external_tests_extra else {
+                            panic!("encountered meta-mutant compiled for `test` Cargo target being run without external test metadata");
+                        };
+                        out_dir.push("tests");
+                        out_dir.push(external_tests_extra.test_crate_name);
+                    }
+                }
+            }
+
             config::WriteOptions {
-                out_dir: PathBuf::from(out_dir_str),
+                out_dir,
                 eval_stream: args.contains(&"--Zwrite-json-eval-stream").then_some(()),
             }
         }),

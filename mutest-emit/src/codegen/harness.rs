@@ -290,9 +290,51 @@ fn mk_active_mutant_handle_static(sp: Span) -> P<ast::Item> {
     ast::mk::item_static(sp, vis, mutbl, ident, ty, expr)
 }
 
-fn mk_meta_mutant_struct_static<'trg, 'm>(sp: Span, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>) -> P<ast::Item> {
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum CargoTargetKind {
+    Lib,
+    MainBin,
+    Bin,
+    Example,
+    Test,
+}
+
+#[derive(Debug)]
+pub struct CargoMetadata {
+    pub package_name: String,
+    pub target_kind: CargoTargetKind,
+}
+
+fn mk_meta_mutant_struct_static<'tcx, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, cargo_metadata: Option<&CargoMetadata>, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>) -> P<ast::Item> {
     // mutest_runtime::MetaMutant { ... }
     let meta_mutant_struct_expr = ast::mk::expr_struct(sp, ast::mk::path_local(path::MetaMutant(sp)), thin_vec![
+        ast::mk::expr_struct_field(sp, Ident::new(sym::cargo_package_name, sp), {
+            match cargo_metadata {
+                Some(cargo_metadata) => {
+                    let cargo_package_name_str = ast::mk::expr_str(sp, &cargo_metadata.package_name);
+                    ast::mk::expr_call_path(sp, path::Some(sp), thin_vec![cargo_package_name_str])
+                }
+                None => ast::mk::expr_path(path::None(sp)),
+            }
+        }),
+        ast::mk::expr_struct_field(sp, Ident::new(sym::cargo_target_kind, sp), {
+            match cargo_metadata {
+                Some(cargo_metadata) => {
+                    let cargo_metadata_expr = match cargo_metadata.target_kind {
+                        CargoTargetKind::Lib => ast::mk::expr_path(ast::mk::path_local(path::CargoTargetKindLib(sp))),
+                        CargoTargetKind::MainBin => ast::mk::expr_path(ast::mk::path_local(path::CargoTargetKindMainBin(sp))),
+                        CargoTargetKind::Bin => ast::mk::expr_path(ast::mk::path_local(path::CargoTargetKindBin(sp))),
+                        CargoTargetKind::Example => ast::mk::expr_path(ast::mk::path_local(path::CargoTargetKindExample(sp))),
+                        CargoTargetKind::Test => ast::mk::expr_path(ast::mk::path_local(path::CargoTargetKindTest(sp))),
+                    };
+                    ast::mk::expr_call_path(sp, path::Some(sp), thin_vec![cargo_metadata_expr])
+                }
+                None => ast::mk::expr_path(path::None(sp)),
+            }
+        }),
+        ast::mk::expr_struct_field(sp, Ident::new(sym::crate_name, sp), {
+            ast::mk::expr_str(sp, tcx.crate_name(hir::LOCAL_CRATE).as_str())
+        }),
         ast::mk::expr_struct_field(sp, Ident::new(sym::active_mutant_handle, sp), {
             ast::mk::expr_ref(sp, ast::mk::expr_path(path::ACTIVE_MUTANT_HANDLE(sp)))
         }),
@@ -409,6 +451,7 @@ pub enum MetaMutant<'trg, 'm> {
 
 pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
+    cargo_metadata: Option<&CargoMetadata>,
     entry_points: EntryPoints<'ent>,
     meta_mutant: MetaMutant<'trg, 'm>,
     krate: &mut ast::Crate,
@@ -476,7 +519,7 @@ pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
                 mk_active_mutant_handle_static(def_site),
                 mk_mutations_mod(def_site, tcx, entry_points, mutations, unsafe_targeting),
                 mk_mutants_slice_const(def_site, mutations, mutation_parallelism, subst_locs),
-                mk_meta_mutant_struct_static(def_site, mutations, mutation_parallelism),
+                mk_meta_mutant_struct_static(def_site, tcx, cargo_metadata, mutations, mutation_parallelism),
                 mk_harness_fn(def_site, None),
             ]);
         }
