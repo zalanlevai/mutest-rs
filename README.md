@@ -5,7 +5,7 @@
 
 Generate and analyze runtime-swappable code mutants of Rust programs using a dynamic set of abstract mutation operators. For more information, see [the mutest-rs book](https://mutest.rs).
 
-![Output of mutest](docs/res/output.png)
+![Output of mutest-rs](docs/res/output.png)
 
 > [!NOTE]
 > mutest-rs is primarily a research tool, but is an extremely capable mutation testing tool for all use cases. It was originally developed for my ongoing PhD work.
@@ -39,7 +39,7 @@ For more information, and examples, see [docs/operators.md](docs/operators.md).
 
 ## Build
 
-> `mutest` relies on the nightly compiler toolchain. `rustup` is configured to automatically install and use the right nightly version.
+> mutest-rs relies on the nightly compiler toolchain. `rustup` is configured to automatically install and use the right nightly version.
 
 Build the `mutest-runtime` crate in release mode.
 
@@ -58,20 +58,14 @@ cargo install --force --path cargo-mutest
 
 ## Usage
 
-> [!IMPORTANT]
-> Currently, the Cargo test target may have to be specified explicitly with the `--lib` or `--bin <BIN>` options, alongside the `-p <PACKAGE>` option. For more targeting options, see `--help`.
->
-> Thus, a typical invocation with a library target will look as follows:
->
-> ```sh
-> cargo mutest --lib run
-> ```
-
-Run the `cargo mutest` subcommand against a standard Cargo package directory or workspace containing your crate.
+Run the `cargo mutest` subcommand against a standard Cargo package or workspace directory containing your crate.
 
 ```sh
 cargo mutest -p <PACKAGE> run
 ```
+
+> [!TIP]
+> It is recommended to specify specific Cargo test targets to start with, using the standard `--lib`, `--bin <BIN>`, `--test <TEST>`, and `--example <EXAMPLE>` targeting options, alongside the `-p <PACKAGE>` option.
 
 See `--help` for more options and subcommands.
 
@@ -79,7 +73,7 @@ See `--help` for more options and subcommands.
 
 When running `cargo mutest`, the `mutest` cfg is set. This can be used to detect if code is running under mutest-rs, and enable conditional compilation based on it.
 
-Starting with Rust 1.80, cfgs are checked against a known set of config names and values. If your Cargo package is checked with a regular Cargo command, it will warn you about the "unexpected" `mutest` cfg. To [let rustc know that this custom cfg is expected](https://blog.rust-lang.org/2024/05/06/check-cfg.html#expecting-custom-cfgs), ensure that `cfg(mutest)` is present in the `[lints.rust.unexpected_cfgs.check-cfg]` array in the package's `Cargo.toml`, like so:
+Starting with Rust 1.80, cfgs are checked against a known set of config names and values. If your Cargo package is checked with a regular Cargo command, it will warn you about the "unexpected" `mutest` cfg. To [let rustc know that this custom cfg is expected](https://blog.rust-lang.org/2024/05/06/check-cfg.html#expecting-custom-cfgs), ensure that `cfg(mutest)` is present in the `lints.rust.unexpected_cfgs.check-cfg` array in the package's `Cargo.toml`, like so:
 
 ```toml
 [lints.rust]
