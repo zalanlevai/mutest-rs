@@ -106,34 +106,34 @@ where
 
     let mutation_runs = results.into_iter()
         .map(|run_results| {
-            let mut overall_detections = String::with_capacity(run_results.mutation_detection_matrix.inner.len());
+            let mut overall_detections = mutest_json::IdxVec::<mutest_json::mutations::MutationId, _>::with_capacity(run_results.mutation_detection_matrix.inner.len());
             for (_mutation_id, mutation_test_result) in run_results.mutation_detection_matrix.iter_detections() {
                 match mutation_test_result {
-                    MutationTestResult::Undetected => overall_detections.push('-'),
-                    MutationTestResult::Detected => overall_detections.push('D'),
-                    MutationTestResult::Crashed => overall_detections.push('C'),
-                    MutationTestResult::TimedOut => overall_detections.push('T'),
+                    MutationTestResult::Undetected => { overall_detections.push(mutest_json::evaluation::MutationDetection::Undetected); }
+                    MutationTestResult::Detected => { overall_detections.push(mutest_json::evaluation::MutationDetection::Detected); }
+                    MutationTestResult::Crashed => { overall_detections.push(mutest_json::evaluation::MutationDetection::Crashed); }
+                    MutationTestResult::TimedOut => { overall_detections.push(mutest_json::evaluation::MutationDetection::TimedOut); }
                 }
             }
 
             let mut test_detections = mutest_json::IdxVec::with_capacity(tests.len());
             for test in tests {
-                let mut detections = String::with_capacity(run_results.mutation_detection_matrix.inner.len());
+                let mut detections = mutest_json::IdxVec::<mutest_json::mutations::MutationId, _>::with_capacity(run_results.mutation_detection_matrix.inner.len());
                 for (_mutation_id, mutation_test_result) in run_results.mutation_detection_matrix.iter_test_detections(&test.desc.name) {
                     match mutation_test_result {
-                        None => detections.push('.'),
-                        Some(MutationTestResult::Undetected) => detections.push('-'),
-                        Some(MutationTestResult::Detected) => detections.push('D'),
-                        Some(MutationTestResult::Crashed) => detections.push('C'),
-                        Some(MutationTestResult::TimedOut) => detections.push('T'),
+                        None => { detections.push(mutest_json::evaluation::MutationDetection::NotRun); }
+                        Some(MutationTestResult::Undetected) => { detections.push(mutest_json::evaluation::MutationDetection::Undetected); }
+                        Some(MutationTestResult::Detected) => { detections.push(mutest_json::evaluation::MutationDetection::Detected); }
+                        Some(MutationTestResult::Crashed) => { detections.push(mutest_json::evaluation::MutationDetection::Crashed); }
+                        Some(MutationTestResult::TimedOut) => { detections.push(mutest_json::evaluation::MutationDetection::TimedOut); }
                     }
                 }
                 // NOTE: Test detections are populated in the same order as test IDs were assigned.
-                test_detections.push(detections);
+                test_detections.push(mutest_json::evaluation::MutationDetections(detections));
             }
 
             let mutation_detection_matrix = mutest_json::evaluation::MutationDetectionMatrix {
-                overall_detections,
+                overall_detections: mutest_json::evaluation::MutationDetections(overall_detections),
                 test_detections,
             };
 

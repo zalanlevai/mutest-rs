@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::time::Duration;
 
 use serde::{Serialize, Deserialize};
 use smallvec::SmallVec;
 
 use crate::data_structures::{Idx, IdxVec};
+use crate::mutations::MutationId;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct RuntimeTestId(pub u32);
@@ -52,6 +54,66 @@ pub struct MutationDetectionStats {
     pub undetected_mutations_count: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum MutationDetection {
+    NotRun,
+    Detected,
+    Undetected,
+    TimedOut,
+    Crashed,
+}
+
+#[derive(Clone, Debug)]
+pub struct MutationDetections(pub IdxVec<MutationId, MutationDetection>);
+
+impl Serialize for MutationDetections {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::Error;
+
+        let mut string_encoded_detections = String::with_capacity(self.0.len());
+        for detection in &self.0 {
+            write!(&mut string_encoded_detections, "{}", match detection {
+                MutationDetection::NotRun => ".",
+                MutationDetection::Detected => "D",
+                MutationDetection::Undetected => "-",
+                MutationDetection::TimedOut => "T",
+                MutationDetection::Crashed => "C",
+            }).map_err(|_| S::Error::custom("cannot write detection string"))?;
+        }
+
+        serializer.serialize_str(&string_encoded_detections)
+    }
+}
+
+impl<'de> Deserialize<'de> for MutationDetections {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let string_encoded_detections = <&str>::deserialize(deserializer)?;
+
+        let mut decoded_detections = IdxVec::with_capacity(string_encoded_detections.len());
+        for (char_offset, char_encoded_detection) in string_encoded_detections.chars().enumerate() {
+            let decoded_detection = match char_encoded_detection {
+                '.' => MutationDetection::NotRun,
+                'D' => MutationDetection::Detected,
+                '-' => MutationDetection::Undetected,
+                'T' => MutationDetection::TimedOut,
+                'C' => MutationDetection::Crashed,
+                _ => { return Err(D::Error::custom(format!("unknown detection character code at offset {}", char_offset))); }
+            };
+            decoded_detections.push(decoded_detection);
+        }
+
+        Ok(MutationDetections(decoded_detections))
+    }
+}
+
 /// Test--mutation detection matrix,
 /// depicting mutation detections between individual test--mutation pairs.
 ///
@@ -61,9 +123,9 @@ pub struct MutationDetectionStats {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MutationDetectionMatrix {
     /// Overall detection of mutations across all evaluated tests.
-    pub overall_detections: String,
+    pub overall_detections: MutationDetections,
     /// Detections of mutations by individual tests.
-    pub test_detections: IdxVec<RuntimeTestId, String>,
+    pub test_detections: IdxVec<RuntimeTestId, MutationDetections>,
 }
 
 /// Results of a mutation run.
