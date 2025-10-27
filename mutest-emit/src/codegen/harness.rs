@@ -397,7 +397,7 @@ fn mk_external_tests_extra_const<'tcx, 'trg>(sp: Span, tcx: TyCtxt<'tcx>) -> P<a
     ast::mk::item_const(sp, vis, ident, ty, expr)
 }
 
-fn mk_harness_fn<'tst>(sp: Span, external_meta_mutant: Option<Symbol>) -> P<ast::Item> {
+fn mk_harness_fn(sp: Span, embedded: bool, external_meta_mutant: Option<Symbol>) -> P<ast::Item> {
     let meta_mutant_path_expr = match external_meta_mutant {
         None => ast::mk::expr_path(path::META_MUTANT(sp)),
         Some(crate_name) => ast::mk::expr_path(ast::mk::path_global(sp, vec![Ident::new(crate_name, sp), Ident::new(sym::mutest_generated, sp), Ident::new(sym::META_MUTANT, sp)])),
@@ -429,8 +429,13 @@ fn mk_harness_fn<'tst>(sp: Span, external_meta_mutant: Option<Symbol>) -> P<ast:
     let inputs = thin_vec![ast::mk::param_ident(sp, Ident::new(sym::tests, sp), {
         let static_lifetime = ast::mk::lifetime(sp, Ident::new(kw::StaticLifetime, sp));
 
-        // &'static [&'static test::TestDescAndFn]
-        let element_ty = ast::mk::ty_ref(sp, ast::mk::ty_path(None, ast::mk::path_local(path::TestDescAndFn(sp))), Some(static_lifetime));
+        // &'static [...]
+        let element_ty = match embedded {
+            // &'static test::TestDescAndFn
+            false => ast::mk::ty_ref(sp, ast::mk::ty_path(None, ast::mk::path_local(path::TestDescAndFn(sp))), Some(static_lifetime)),
+            // &'static mutest_runtime::EmbeddedTestDescAndFn
+            true => ast::mk::ty_ref(sp, ast::mk::ty_path(None, ast::mk::path_local(path::EmbeddedTestDescAndFn(sp))), Some(static_lifetime)),
+        };
         ast::mk::ty_ref(sp, ast::mk::ty_slice(sp, element_ty), Some(static_lifetime))
     })];
     ast::mk::item_fn(sp, vis, ident, None, None, inputs, None, Some(body))
@@ -452,6 +457,7 @@ pub enum MetaMutant<'trg, 'm> {
 pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
     tcx: TyCtxt<'tcx>,
     cargo_metadata: Option<&CargoMetadata>,
+    embedded: bool,
     entry_points: EntryPoints<'ent>,
     meta_mutant: MetaMutant<'trg, 'm>,
     krate: &mut ast::Crate,
@@ -501,15 +507,18 @@ pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
         diagnostic.emit();
     }
 
-    // extern crate test;
-    let extern_crate_test = ast::mk::item_extern_crate(def_site, sym::test, None);
+    let mut mutest_generated_mod_items = thin_vec![];
+
+    if !embedded {
+        // extern crate test;
+        let extern_crate_test = ast::mk::item_extern_crate(def_site, sym::test, None);
+        mutest_generated_mod_items.push(extern_crate_test);
+    }
+
     // extern crate mutest_runtime;
     let extern_crate_mutest_runtime = ast::mk::item_extern_crate(def_site, sym::mutest_runtime, None);
+    mutest_generated_mod_items.push(extern_crate_mutest_runtime);
 
-    let mut mutest_generated_mod_items = thin_vec![
-        extern_crate_test,
-        extern_crate_mutest_runtime,
-    ];
 
     match meta_mutant {
         MetaMutant::Internal { mutations, subst_locs, mutation_parallelism, unsafe_targeting } => {
@@ -520,14 +529,14 @@ pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
                 mk_mutations_mod(def_site, tcx, entry_points, mutations, unsafe_targeting),
                 mk_mutants_slice_const(def_site, mutations, mutation_parallelism, subst_locs),
                 mk_meta_mutant_struct_static(def_site, tcx, cargo_metadata, mutations, mutation_parallelism),
-                mk_harness_fn(def_site, None),
+                mk_harness_fn(def_site, embedded, None),
             ]);
         }
         MetaMutant::External { crate_name } => {
             mutest_generated_mod_items.extend([
                 mk_crate_kind_const(def_site, "external_tests"),
                 mk_external_tests_extra_const(def_site, tcx),
-                mk_harness_fn(def_site, Some(crate_name)),
+                mk_harness_fn(def_site, embedded, Some(crate_name)),
             ]);
         }
     }

@@ -8,7 +8,7 @@ use rustc_lint_defs::Level as LintLevel;
 use rustc_session::config::{Input, OutputFilenames};
 
 use crate::config::Config;
-use crate::inject::inject_runtime_crate_and_deps;
+use crate::inject::{inject_test_crate_shim_if_no_target_std, inject_runtime_crate_and_deps};
 use crate::passes::base_compiler_config;
 use crate::passes::analysis::AnalysisPassResult;
 use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationResult;
@@ -31,6 +31,11 @@ pub fn run(config: &Config, analysis_pass: &AnalysisPassResult, specialized_exte
     compiler_config.opts.unstable_features = UnstableFeatures::Allow;
     // Disable lints on generated crate code.
     compiler_config.opts.lint_cap = Some(LintLevel::Allow);
+
+    // NOTE: We need to inject a shim for the `test` crate if no `std` is available for the target.
+    if config.opts.crate_kind.provides_tests() {
+        inject_test_crate_shim_if_no_target_std(config, &mut compiler_config);
+    }
 
     // The generated crate code relies on the `mutest_runtime` crate (and its dependencies), which must be loaded.
     inject_runtime_crate_and_deps(config, &mut compiler_config, specialized_external_mutant_crate);

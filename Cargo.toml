@@ -8,5 +8,8 @@ members = [
     "mutest-json",
     "mutest-operators",
     "mutest-runtime",
+    "mutest-runtime-embedded-target-stub",
+    "mutest-runtime-embedded-host-driver",
+    "test-metadata-shim",
     "tests",
 ]

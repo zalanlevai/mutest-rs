@@ -1,0 +1,38 @@
+
+@@@ tests @@@
+
+test tests::ignored_test [ignored]
+test tests::panicking_test
+test tests::panicking_test_with_message
+test tests::simple_test
+test tests::test_taking_peripherals
+
+tests: 5 total; 1 ignored
+
+@@@ targets @@@
+
+tests -(0)-> mutable_fn at tests/ui/embedded/embedded_test/test_suite_expanded.rs:19:1: 19:37 (#0)
+  (0) tests::simple_test
+  (0) tests::test_taking_peripherals
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+@@@ mutations @@@
+
+[arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/embedded/embedded_test/test_suite_expanded.rs:19:15: 19:21
+  <-(0)- tests::simple_test
+  <-(0)- tests::test_taking_peripherals
+
+[arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/embedded/embedded_test/test_suite_expanded.rs:19:23: 19:29
+  <-(0)- tests::simple_test
+  <-(0)- tests::test_taking_peripherals
+
+[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/embedded/embedded_test/test_suite_expanded.rs:20:5: 20:10
+  <-(0)- tests::simple_test
+  <-(0)- tests::test_taking_peripherals
+
+[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/embedded/embedded_test/test_suite_expanded.rs:20:5: 20:10
+  <-(0)- tests::simple_test
+  <-(0)- tests::test_taking_peripherals
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)

@@ -87,6 +87,7 @@ pub fn compile_specialized_mutant_crate(
 
             write_opts: config.opts.write_opts.clone(),
             verify_opts: config.opts.verify_opts.clone(),
+            embedded: config.opts.embedded,
             sanitize_macro_expns: config.opts.sanitize_macro_expns,
         },
     };

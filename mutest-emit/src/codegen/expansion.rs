@@ -75,11 +75,7 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(fmt_helpers_for_derive)]
         #![feature(str_internals)]
         #![feature(panic_internals)]
-        #![feature(print_internals)]
-        #![feature(liballoc_internals)]
         #![feature(allocator_internals)]
-        #![feature(libstd_sys_internals)]
-        #![feature(thread_local_internals)]
 
         #![feature(allocator_api)]
         #![feature(cfg_target_thread_local)]
@@ -89,13 +85,30 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(derive_eq)]
         #![feature(coverage_attribute)]
         #![feature(hint_must_use)]
-        #![feature(mpmc_channel)]
         #![feature(never_type)]
-        #![feature(rt)]
         #![feature(rustc_private)]
-        #![feature(stdarch_internal)]
         #![feature(structural_match)]
         #![feature(thread_local)]
+    }
+
+    // NOTE: Some features are only valid if the alloc crate is loaded.
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::alloc) {
+        ensure_attrs! {
+            #![feature(liballoc_internals)]
+        }
+    }
+
+    // NOTE: Some features are only valid if the std crate is loaded.
+    if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+        ensure_attrs! {
+            #![feature(print_internals)]
+            #![feature(libstd_sys_internals)]
+            #![feature(thread_local_internals)]
+
+            #![feature(mpmc_channel)]
+            #![feature(rt)]
+            #![feature(stdarch_internal)]
+        }
     }
 }
 
@@ -107,9 +120,17 @@ pub fn insert_generated_code_crate_refs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    // extern crate alloc;
-    if !krate.items.iter().any(|item| ast::inspect::is_extern_crate_decl(item, sym::alloc)) {
-        krate.items.push(ast::mk::item_extern_crate(def_site, sym::alloc, None));
+    if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+        // NOTE: For std-dependent crates, we often rewrite paths through alloc,
+        //       which is the actual definition crate.
+        //       However, these references can only be resolved correctly if an explicit
+        //       `extern crate alloc;` declaration is present in the crate root.
+        //       In such cases, we ensure that an explicit reference to the alloc crate exists,
+        //       whether from user code or from our code generation.
+        // extern crate alloc;
+        if !krate.items.iter().any(|item| ast::inspect::is_extern_crate_decl(item, sym::alloc)) {
+            krate.items.push(ast::mk::item_extern_crate(def_site, sym::alloc, None));
+        }
     }
 }
 

@@ -173,6 +173,7 @@ pub struct Options<'op, 'm> {
 
     pub write_opts: Option<WriteOptions>,
     pub verify_opts: VerifyOptions,
+    pub embedded: bool,
     pub sanitize_macro_expns: bool,
 }
 

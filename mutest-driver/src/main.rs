@@ -578,6 +578,8 @@ pub fn main() {
             verify_opts
         };
 
+        let embedded = mutest_arg_matches.get_flag("Zembedded");
+
         let sanitize_macro_expns = !mutest_arg_matches.get_flag("Zno-sanitize-macro-expns");
 
         let config = Config {
@@ -602,6 +604,7 @@ pub fn main() {
 
                 write_opts,
                 verify_opts,
+                embedded,
                 sanitize_macro_expns,
             },
         };

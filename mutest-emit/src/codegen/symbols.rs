@@ -55,6 +55,8 @@ pub mod sym {
         CRATE_KIND,
         display_location,
         display_name,
+        end_col,
+        end_line,
         EXTERNAL_TESTS_EXTRA,
         harness,
         id,
@@ -68,10 +70,14 @@ pub mod sym {
         mutest_runtime,
         op_name,
         reachable_from,
+        source_file,
+        start_col,
+        start_line,
         substitutions,
         SubstMap,
         subst_at_unchecked,
         test_crate_name,
+        test_fn,
         tests,
         undetected_diagnostic,
     }
@@ -153,5 +159,7 @@ pub mod path {
         subst_map_array (::mutest_runtime::subst_map_array),
         SubstMeta (::mutest_runtime::SubstMeta),
         TestSuiteTests (::mutest_runtime::TestSuite::Tests),
+
+        EmbeddedTestDescAndFn (::mutest_runtime::EmbeddedTestDescAndFn),
     }
 }

@@ -109,7 +109,3 @@ pub fn generate_dummy_main<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
 
     krate.items.push(main);
 }
-
-pub fn remove_dummy_main(krate: &mut ast::Crate) {
-    krate.items.retain(|item| item.kind.ident().is_none_or(|ident| ident.name != sym::main));
-}

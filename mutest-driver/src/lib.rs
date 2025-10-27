@@ -1,6 +1,7 @@
 #![feature(decl_macro)]
 #![feature(if_let_guard)]
 #![feature(iter_array_chunks)]
+#![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
 #![feature(try_trait_v2)]
@@ -20,6 +21,7 @@ extern crate rustc_lint_defs;
 extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
+extern crate rustc_target;
 
 extern crate itertools;
 extern crate smallvec;

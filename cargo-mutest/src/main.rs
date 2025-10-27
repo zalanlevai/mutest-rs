@@ -105,6 +105,7 @@ fn main() {
         .arg(clap::arg!(--"all-features" "Activate all available features."))
         .arg(clap::arg!(--"no-default-features" "Do not activate the `default` feature."))
         .next_help_heading("Compilation Options")
+        .arg(clap::arg!(--target [TRIPLE] "Test for the given architecture. The default is the host architecture."))
         .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
         .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
         .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts.").value_parser(clap::value_parser!(PathBuf)))
@@ -203,6 +204,11 @@ fn main() {
     cmd.arg("--target-dir");
     cmd.arg(&target_dir);
     cmd.env("MUTEST_TARGET_DIR_ROOT", &target_dir);
+
+    if let Some(target) = matches.get_one::<String>("target") {
+        cmd.args(["--target", target]);
+        strip_arg(&mut mutest_args, true, None, Some("target"));
+    }
 
     if matches.get_flag("release") {
         cmd.arg("--release");

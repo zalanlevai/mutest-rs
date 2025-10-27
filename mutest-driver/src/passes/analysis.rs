@@ -17,7 +17,7 @@ use mutest_emit::codegen::harness::{CargoMetadata, CargoTargetKind, MetaMutant};
 use mutest_emit::codegen::symbols::{Symbol, span_diagnostic_ord};
 
 use crate::config::{self, Config};
-use crate::inject::inject_runtime_crate_and_deps;
+use crate::inject::{inject_test_crate_shim_if_no_target_std, inject_runtime_crate_and_deps};
 use crate::passes::{Flow, base_compiler_config};
 use crate::passes::external_mutant::{ExternalTargets, StableTarget};
 use crate::passes::external_mutant::crate_const_storage;
@@ -82,7 +82,7 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
         }
         _ => None,
     };
-    mutest_emit::codegen::harness::generate_harness(tcx, cargo_metadata.as_ref(), entry_points, meta_mutant, generated_crate_ast);
+    mutest_emit::codegen::harness::generate_harness(tcx, cargo_metadata.as_ref(), opts.embedded, entry_points, meta_mutant, generated_crate_ast);
 
     // HACK: The generated code is currently based on the expanded AST and contains references to the internals
     //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
@@ -109,6 +109,11 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
     // Compile the crate in test-mode to access tests defined behind `#[cfg(test)]`.
     compiler_config.opts.test = config.opts.crate_kind.provides_tests();
+
+    // NOTE: We need to inject a shim for the `test` crate if no `std` is available for the target.
+    if config.opts.crate_kind.provides_tests() {
+        inject_test_crate_shim_if_no_target_std(config, &mut compiler_config);
+    }
 
     // NOTE: We need to inject the `mutest_runtime` crate and its dependencies during analysis
     //       for test crates that link against external meta-mutants because
@@ -182,7 +187,10 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let t_test_discovery_start = Instant::now();
             let tests = opts.crate_kind.provides_tests()
-                .then(|| mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res))
+                .then(|| match opts.embedded {
+                    false => mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res),
+                    true => mutest_emit::analysis::tests::collect_and_mark_embedded_tests(sess, &mut generated_crate_ast, &def_res),
+                })
                 .unwrap_or_default();
             pass_result.test_discovery_duration = t_test_discovery_start.elapsed();
 
@@ -373,7 +381,14 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             };
 
             if opts.crate_kind.provides_tests() {
-                mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
+                // NOTE: We deliberately keep the expanded code for embedded-test tests,
+                //       which are marked up with `#[rustc_test_marker]` attrs to
+                //       trigger the generation of visible paths to custom tests
+                //       using the built-in codegen mechanism.
+                if !opts.embedded {
+                    // Undo `#[test]` macro expansions, since these are only valid with hygiene information.
+                    mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
+                }
             }
 
             let body_res = mutest_emit::analysis::ast_lowering::resolve_bodies(tcx, &def_res, &generated_crate_ast);

@@ -34,6 +34,11 @@ jobs:
       - name: Build mutest-runtime
         run: cargo build --release -p mutest-runtime
 
+      - name: Build mutest-runtime-embedded-target-stub and test-metadata-shim for host
+        run: |
+          cargo build --release -p test-metadata-shim
+          cargo build --release -p mutest-runtime-embedded-target-stub
+
       - name: Build mutest-driver with runtime embedding
         run: cargo build --release -p mutest-driver --features embed-runtime
 

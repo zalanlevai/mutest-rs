@@ -159,6 +159,7 @@ pub fn command() -> clap::Command {
         // Experimental Flags
         .arg(clap::arg!(--"Zwrite-json" [OUT_DIR] "Write JSON metadata files. An output directory may be optionally specified.").num_args(0..=1).require_equals(true).value_parser(clap::value_parser!(PathBuf)).display_order(500))
         .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
+        .arg(clap::arg!(--Zembedded "Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime.").display_order(500))
         .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended.").display_order(500))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
