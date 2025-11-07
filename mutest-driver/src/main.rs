@@ -1,3 +1,4 @@
+#![feature(array_windows)]
 #![feature(decl_macro)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
@@ -191,7 +192,11 @@ pub fn main() {
     }
 
     let primary_package = env::var("CARGO_PRIMARY_PACKAGE").is_ok();
-    let test_target = args.iter().any(|arg| arg == "--test");
+    let test_target = args.iter().any(|arg| arg == "--test")
+        // NOTE: We attempt to mutate testing targets even if the libtest harness is disabled.
+        //       This is required for supporting alternative test harnesses, such as embedded-test.
+        //       If ultimately no tests are discovered, we simply generate an "empty" no-op meta-mutant.
+        || (args.iter().any(|arg| arg == "--cfg=test") || args.array_windows().any(|[a, b]| a == "--cfg" && b == "test"));
     let normal_rustc = args.iter().any(|arg| arg.starts_with("--print"));
 
     let bin_target = args.iter().any(|arg| arg == "--crate-type=bin")

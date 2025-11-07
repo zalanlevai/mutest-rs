@@ -1,0 +1,18 @@
+profiling reference test run
+
+applying mutation:
+- [arg_default_shadow] ignore `_a` argument by shadowing it with `Default::default()` at tests/ui/entry_points/bin_with_main.rs:12:15: 12:22
+
+ran 1 out of 1 test
+
+warning: [arg_default_shadow] mutation was not detected
+  --> tests/ui/entry_points/bin_with_main.rs:12:15
+   |
+12 | fn mutable_fn(_a: u32) { () }
+   |               ^^^^^^^ ignore argument by shadowing it with `Default::default()`
+   |
+   = note: local `_a` inserted: `let _a: u32 = ::core::default::Default::default();`
+
+mutations: 0.00%. 0 detected (0 timed out; 0 crashed); 1 undetected; 1 total
+     safe: 0.00%. 0 detected (0 timed out; 0 crashed); 1 undetected; 1 total
+   unsafe: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total

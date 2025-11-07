@@ -218,6 +218,8 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut edition: Option<&str> = None;
+    let mut bin = false;
+    let mut no_harness = false;
     let mut expect_build_fail = false;
     let mut expectations = BTreeSet::new();
     let mut mutest_prints = BTreeSet::new();
@@ -286,6 +288,9 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                 }
                 edition = Some(edition_str);
             }
+
+            "no-harness" => no_harness = true,
+            "bin" => bin = true,
 
             "stdout" => { expectations.insert(Expectation::StdOut { empty: false }); }
             "stdout: empty" => { expectations.insert(Expectation::StdOut { empty: true }); }
@@ -418,13 +423,19 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     cmd.args(["--crate-name", &test_crate_name]);
     cmd.arg(format!("--edition={edition}"));
 
-    cmd.args(["--crate-type", "lib"]);
+    match bin {
+        false => { cmd.args(["--crate-type", "lib"]); }
+        true => { cmd.args(["--crate-type", "bin"]); }
+    }
 
     cmd.args(["--out-dir", BUILD_OUT_DIR]);
 
     // Trick mutest-driver into invoking its behaviour, rather than falling back to a rustc invocation.
     cmd.env("CARGO_PRIMARY_PACKAGE", "1");
-    cmd.arg("--test");
+    match no_harness {
+        false => { cmd.arg("--test"); }
+        true => { cmd.arg("--cfg=test"); }
+    }
 
     // Explicitly disable color output. This mainly affects diagnostic messages generated for undetected mutations.
     cmd.arg("--color=never");
