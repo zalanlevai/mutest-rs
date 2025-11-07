@@ -54,6 +54,10 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
 
     if opts.crate_kind.provides_tests() {
         mutest_emit::codegen::entry_point::clean_generated_entry_points(generated_crate_ast);
+
+        if opts.embedded {
+            mutest_emit::codegen::entry_point::generate_embedded_test_entry_point(tcx, generated_crate_ast);
+        }
     }
 
     // TODO: Deprecate and remove from expansion module.

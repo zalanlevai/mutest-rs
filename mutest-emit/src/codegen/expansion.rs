@@ -577,7 +577,7 @@ impl<'tcx, 'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tcx, 'tst> {
             let g = &self.sess.psess.attr_id_generator;
 
             // #[test]
-            let test_attr = ast::mk::attr_outer(g, item.span, Ident::new(sym::test, item.span), ast::AttrArgs::Empty);
+            let test_attr = ast::mk::attr_outer(g, item.span, ast::Safety::Default, Ident::new(sym::test, item.span), ast::AttrArgs::Empty);
 
             item.attrs = item.attrs.into_iter()
                 .filter(|attr| !attr.has_name(sym::rustc_test_marker))

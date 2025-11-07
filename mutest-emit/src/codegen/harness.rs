@@ -124,6 +124,7 @@ fn mk_mutations_mod<'tcx, 'ent, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, entry_poi
 
     // #[allow(non_upper_case_globals)]
     let allow_non_upper_case_globals_attr = ast::mk::attr_outer(g, sp,
+        ast::Safety::Default,
         Ident::new(sym::allow, sp),
         ast::mk::attr_args_delimited(sp, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
             ast::mk::tt_token_joint(sp, ast::TokenKind::Ident(sym::non_upper_case_globals, ast::token::IdentIsRaw::No)),

@@ -1,10 +1,14 @@
+use rustc_middle::ty::TyCtxt;
 use smallvec::{SmallVec, smallvec};
+use thin_vec::thin_vec;
 
 use crate::codegen::ast;
 use crate::codegen::ast::P;
 use crate::codegen::ast::entry::EntryPointType;
 use crate::codegen::ast::mut_visit::{ExpectOne, MutVisitor};
-use crate::codegen::symbols::sym;
+use crate::codegen::expansion::TcxExpansionExt;
+use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym};
+use crate::codegen::symbols::hygiene::AstPass;
 
 fn entry_point_type(item: &ast::Item, depth: usize) -> EntryPointType {
     match &item.kind {
@@ -53,4 +57,50 @@ impl ast::mut_visit::MutVisitor for EntryPointCleaner {
 pub fn clean_generated_entry_points(krate: &mut ast::Crate) {
     let mut cleaner = EntryPointCleaner { depth: 0 };
     cleaner.visit_crate(krate);
+}
+
+pub fn generate_embedded_test_entry_point<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
+    let expn_id = tcx.expansion_for_ast_pass(
+        AstPass::TestHarness,
+        DUMMY_SP,
+        &[sym::test, sym::rustc_attrs],
+    );
+    let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
+
+    let g = &tcx.sess.psess.attr_id_generator;
+
+    // #![reexport_test_harness_main = "__rustc_generated_test_harness_main"]
+    let rustc_test_marker_attr = ast::mk::attr_inner(g, def_site,
+        Ident::new(sym::reexport_test_harness_main, def_site),
+        ast::AttrArgs::Eq { eq_span: def_site, expr: ast::mk::expr_str(def_site, "__rustc_generated_test_harness_main") },
+    );
+
+    krate.attrs.push(rustc_test_marker_attr);
+
+    // fn __mutest_generated_embedded_test_setup() { ... }
+    let vis = ast::mk::vis_default(def_site);
+    let ident = Ident::new(Symbol::intern("__mutest_generated_embedded_test_setup"), def_site);
+    let mut generated_embedded_test_setup = ast::mk::item_fn(def_site, vis, ident, None, None, thin_vec![], None, Some(ast::mk::block(def_site, thin_vec![
+        ast::mk::stmt_expr(ast::mk::expr_call_ident(def_site, Ident::new(Symbol::intern("__rustc_generated_test_harness_main"), def_site), thin_vec![])),
+    ])));
+
+    // #[unsafe(export_name = "_embedded_test_setup")]
+    let export_name_attr = ast::mk::attr_outer(g, def_site,
+        ast::Safety::Unsafe(def_site),
+        Ident::new(sym::export_name, def_site),
+        ast::AttrArgs::Eq { eq_span: def_site, expr: ast::mk::expr_str(def_site, "_embedded_test_setup") },
+    );
+    generated_embedded_test_setup.attrs.push(export_name_attr);
+
+    // #[inline(never)]
+    let inline_never_attr = ast::mk::attr_outer(g, def_site,
+        ast::Safety::Default,
+        Ident::new(sym::inline, def_site),
+        ast::mk::attr_args_delimited(def_site, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+            ast::mk::tt_token_alone(def_site, ast::token::TokenKind::Ident(Symbol::intern("never"), ast::token::IdentIsRaw::No))
+        ])),
+    );
+    generated_embedded_test_setup.attrs.push(inline_never_attr);
+
+    krate.items.push(generated_embedded_test_setup);
 }

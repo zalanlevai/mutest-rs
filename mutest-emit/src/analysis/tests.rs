@@ -218,6 +218,7 @@ fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_loweri
 
         // #[rustc_test_marker = "..."]
         let rustc_test_marker_attr = ast::mk::attr_outer(g, sp,
+            ast::Safety::Default,
             Ident::new(sym::rustc_test_marker, sp),
             ast::AttrArgs::Eq { eq_span: sp, expr: ast::mk::expr_str(sp, &test_path_str) },
         );

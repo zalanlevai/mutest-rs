@@ -882,8 +882,8 @@ pub mod mk {
         self::attr_inner_path(g, sp, ast::Path::from_ident(ident), args)
     }
 
-    pub fn attr_outer(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
-        self::attr_outer_path(g, sp, ast::Path::from_ident(ident), args)
+    pub fn attr_outer(g: &ast::attr::AttrIdGenerator, sp: Span, unsafety: ast::Safety, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety, path: ast::Path::from_ident(ident), args, tokens: None }, None, ast::AttrStyle::Outer, sp)
     }
 
     pub fn attr_args_delimited(sp: Span, delimiter: ast::token::Delimiter, tokens: ast::tokenstream::TokenStream) -> ast::AttrArgs {
