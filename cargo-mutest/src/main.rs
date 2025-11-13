@@ -63,6 +63,22 @@ mod run_print {
     }
 }
 
+#[cfg(not(windows))]
+fn cargo_command_base() -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.arg(format!("+{}", build::RUST_TOOLCHAIN_VERSION));
+    cmd
+}
+
+#[cfg(windows)]
+fn cargo_command_base() -> Command {
+    let mut cmd = Command::new("rustup");
+    cmd.arg("run");
+    cmd.arg(build::RUST_TOOLCHAIN_VERSION);
+    cmd.arg("cargo");
+    cmd
+}
+
 fn main() {
     let args = env::args().skip(2).collect::<Vec<_>>();
 
@@ -116,6 +132,8 @@ fn main() {
         .after_long_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest help run</>` to display additional options that can be specified for the running test harness."))
         .get_matches_from(&args);
 
+    let embedded = matches.get_flag("Zembedded");
+
     let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args): (_, &[&str], _, _) = match matches.subcommand() {
         Some(("print", _)) => ("check", &["--profile", "test"], "print", None),
         Some(("build", _)) => ("test", &["--no-run"], "build", None),
@@ -127,8 +145,10 @@ fn main() {
 
             if matches.get_flag("exhaustive") { passed_args.push("--exhaustive".to_owned()); }
 
-            if let Some(isolation_mode) = matches.get_one::<String>("isolate") { passed_args.push(format!("--isolate={isolation_mode}")); }
-            if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
+            if !embedded {
+                if let Some(isolation_mode) = matches.get_one::<String>("isolate") { passed_args.push(format!("--isolate={isolation_mode}")); }
+                if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
+            }
 
             let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();
             if print_names.contains("all") { print_names = HashSet::from_iter(run_print::ALL.into_iter().map(|s| *s)); }
@@ -141,20 +161,58 @@ fn main() {
         _ => unreachable!(),
     };
 
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut cmd = Command::new("cargo");
-        cmd.arg(format!("+{}", build::RUST_TOOLCHAIN_VERSION));
-        cmd
-    };
-    #[cfg(windows)]
-    let mut cmd = {
-        let mut cmd = Command::new("rustup");
-        cmd.arg("run");
-        cmd.arg(build::RUST_TOOLCHAIN_VERSION);
-        cmd.arg("cargo");
-        cmd
-    };
+    let mut cmd = cargo_command_base();
+
+    if embedded {
+        let target = match matches.get_one::<String>("target") {
+            Some(target) => target.clone(),
+            None => {
+                let mut config_cmd = cargo_command_base();
+                config_cmd.arg("-Zunstable-options");
+                config_cmd.args(["config", "get"]);
+                config_cmd.arg("--format=json-value");
+                config_cmd.arg("build.target");
+
+                let output = config_cmd.output().expect("failed to run Cargo");
+
+                if !output.status.success() {
+                    color_print::ceprintln!("<red,bold>error</>: target must be specified when using the embedded mutation runtime");
+                    color_print::ceprintln!("       consider specifying `build.target` in `.cargo/config.toml` or using the `--target` option");
+                    process::exit(101);
+                }
+
+                let stdout_str = str::from_utf8(&output.stdout).expect("invalid Cargo output");
+                let val_str = stdout_str
+                    .lines().last().expect("invalid Cargo output")
+                    .strip_prefix('\"').and_then(|s| s.strip_suffix('\"')).expect("invalid Cargo output");
+
+                val_str.to_owned()
+            }
+        };
+
+        let mut runner_path = env::current_exe().expect("current executable path invalid");
+        runner_path.set_file_name("mutest-runtime-embedded-host-driver");
+        if cfg!(windows) { runner_path.set_extension("exe"); }
+
+        match fs::exists(&runner_path) {
+            Ok(true) => {}
+            // NOTE: We let Cargo emit its usual error message upon being unable to run the runner executable.
+            Err(_) => {}
+
+            Ok(false) => {
+                color_print::ceprintln!("<red,bold>error</>: cannot find mutest-rs embedded runtime host driver");
+                color_print::ceprintln!("       consider running `cargo install --force --path mutest-runtime-embedded-host-driver` in the mutest-rs source tree");
+                process::exit(101);
+            }
+        }
+
+        // Override test bin runner for the target, replacing it with our embedded mutation runtime host driver,
+        // which flashes the test binary and drives the mutation evaluation on embedded targets.
+        // NOTE: This must be specified for the specific target triple,
+        //       as those override any `cfg(true)` specifications.
+        cmd.arg("--config");
+        cmd.arg(format!("target.{target}.runner=\"{}\"", runner_path.display()));
+    }
 
     cmd.arg(cargo_subcommand);
     cmd.args(cargo_args);

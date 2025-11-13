@@ -470,6 +470,10 @@ dependencies = [
 [[package]]
 name = "mutest-runtime-embedded-host-driver"
 version = "0.0.0"
+dependencies = [
+ "clap",
+ "mutest-driver-cli",
+]
 
 [[package]]
 name = "mutest-runtime-embedded-target-stub"
