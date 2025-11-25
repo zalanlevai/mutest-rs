@@ -1,17 +1,18 @@
 use std::collections::HashMap;
+use std::iter;
 use std::path::PathBuf;
 
 use mutest_json::mutations::MutationId;
 
 use crate::ctxt::WebCtxt;
 use crate::source_file::LineNo;
-use crate::syntax_highlight::SyntaxHighlighter;
+use crate::syntax_highlight::{MappedLine, SyntaxHighlighter};
 
 #[derive(Debug)]
 pub struct SubstHtml {
     pub start_line: LineNo,
-    pub original_lines_html: Vec<String>,
-    pub replacement_lines_html: Vec<String>,
+    pub original_lines_html: Vec<MappedLine>,
+    pub replacement_lines_html: Vec<MappedLine>,
 }
 
 impl SubstHtml {
@@ -57,7 +58,7 @@ pub fn render_mutation_subst_lines(wcx: &WebCtxt, syntax_highlighter: &mut Synta
     };
     let original_source_start_line_whitespace_prefix = &source_file.lines[subst_start_line][..start_line_whitespace_prefix_byte_offset];
 
-    let (original_lines_html, replacement_text) = match subst.location {
+    let (mut original_lines_html, replacement_text) = match subst.location {
         mutest_json::mutations::SubstitutionLocation::Replace(_) => {
             let mut replacement_text = String::new();
             replacement_text.push_str(prefix_original_source);
@@ -146,8 +147,45 @@ pub fn render_mutation_subst_lines(wcx: &WebCtxt, syntax_highlighter: &mut Synta
         }
     };
 
-    let highlighted_lines_html = syntax_highlighter.highlight_lines_html(&replacement_text)
+    match &mut original_lines_html[..] {
+        [] => {}
+        [original_line_html] => {
+            original_line_html.insert_unbreakable_segment(start_line_start_byte_offset, end_line_end_byte_offset, "<span class=\"hi-mut\">", "</span>");
+        }
+        [original_start_line_html, original_between_lines_html @ .., original_end_line_html] => {
+            original_start_line_html.insert_unbreakable_segment(start_line_start_byte_offset, source_file.lines[subst_start_line].len(), "<span class=\"hi-mut\">", "</span>");
+            for (original_line_html, source_file_line) in iter::zip(original_between_lines_html, &source_file.lines[LineNo(subst_start_line.0 + 1)..]) {
+                original_line_html.insert_unbreakable_segment(0, source_file_line.len(), "<span class=\"hi-mut\">", "</span>");
+            }
+            original_end_line_html.insert_unbreakable_segment(0, end_line_end_byte_offset, "<span class=\"hi-mut\">", "</span>");
+        }
+    }
+
+    let mut highlighted_lines_html = syntax_highlighter.highlight_lines_html(&replacement_text)
         .expect(&format!("cannot syntax highlight mutation substitution `{}`", subst.substitute.replacement));
+
+    match &mut highlighted_lines_html[..] {
+        [] => {}
+        [highlighted_line_html] => {
+            let end_line_end_replacement_byte_offset = replacement_text.len() - (source_file.lines[subst_end_line].len() - end_line_end_byte_offset);
+            highlighted_line_html.insert_unbreakable_segment(start_line_start_byte_offset, end_line_end_replacement_byte_offset, "<span class=\"hi-mut\">", "</span>");
+        }
+        [highlighted_start_line_html, highlighted_between_lines_html @ .., highlighted_end_line_html] => {
+            let mut replacement_text_lines = replacement_text.lines();
+
+            let Some(replacement_text_start_line) = replacement_text_lines.next() else { unreachable!() };
+            highlighted_start_line_html.insert_unbreakable_segment(start_line_start_byte_offset, replacement_text_start_line.len(), "<span class=\"hi-mut\">", "</span>");
+
+            for highlighted_line_html in highlighted_between_lines_html {
+                let Some(replacement_text_line) = replacement_text_lines.next() else { unreachable!() };
+                highlighted_line_html.insert_unbreakable_segment(0, replacement_text_line.len(), "<span class=\"hi-mut\">", "</span>");
+            }
+
+            let Some(replacement_text_end_line) = replacement_text_lines.next() else { unreachable!() };
+            let end_line_end_replacement_byte_offset = replacement_text_end_line.len() - (source_file.lines[subst_end_line].len() - end_line_end_byte_offset);
+            highlighted_end_line_html.insert_unbreakable_segment(0, end_line_end_replacement_byte_offset, "<span class=\"hi-mut\">", "</span>");
+        }
+    }
 
     Some(SubstHtml {
         start_line: subst_start_line,

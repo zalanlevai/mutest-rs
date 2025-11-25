@@ -142,11 +142,19 @@ body {
         &.original {
             .line-content {
                 background-color: rgba(255, 31, 31, 0.25);
+
+                .hi-mut {
+                    background-color: rgba(255, 31, 31, 0.5);
+                }
             }
         }
         &.mutated {
             .line-content {
                 background-color: rgba(0, 128, 0, 0.25);
+
+                .hi-mut {
+                    background-color: rgba(0, 128, 0, 0.5);
+                }
             }
         }
     }
