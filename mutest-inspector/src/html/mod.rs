@@ -4,13 +4,14 @@ use mutest_json::data_structures::IdxVec;
 use pulldown_cmark_escape::escape_html_body_text;
 
 use crate::source_file::LineNo;
+use crate::syntax_highlight::MappedLine;
 
 pub mod mutations;
 
 #[derive(Debug)]
 pub struct SourceFileHtml {
     pub display_path_html: String,
-    pub highlighted_lines_html: IdxVec<LineNo, String>,
+    pub highlighted_lines_html: IdxVec<LineNo, MappedLine>,
 }
 
 pub fn escape_html_body_text_with_inline_code(text: &str) -> String {
