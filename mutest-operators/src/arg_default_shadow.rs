@@ -29,7 +29,7 @@ fn find_ident_pats<'ast>(pat: &'ast ast::Pat) -> Vec<&'ast ast::Pat> {
             | ast::PatKind::Paren(inner_pat)
             | ast::PatKind::Ident(_, _, Some(inner_pat))
             | ast::PatKind::Box(inner_pat)
-            | ast::PatKind::Ref(inner_pat, _)
+            | ast::PatKind::Ref(inner_pat, _, _)
             | ast::PatKind::Deref(inner_pat)
             | ast::PatKind::Guard(inner_pat, _)
             => find_ident_pats_impl(inner_pat, ident_pats),

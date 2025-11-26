@@ -16,7 +16,7 @@ edition = "2024"
 mutest-driver-cli = { path = "../mutest-driver-cli" }
 mutest-operators = { path = "../mutest-operators" }
 
-cargo_metadata = "0.21"
+cargo_metadata = "0.23"
 clap = { version = "4", features = ["cargo"] }
 color-print = "0.3"
 

@@ -7,7 +7,6 @@
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
-#![feature(let_chains)]
 #![feature(macro_metavar_expr)]
 #![feature(never_type)]
 
@@ -19,6 +18,7 @@ extern crate rustc_ast_lowering;
 extern crate rustc_ast_pretty;
 extern crate rustc_const_eval;
 extern crate rustc_data_structures;
+extern crate rustc_driver;
 extern crate rustc_error_messages;
 extern crate rustc_errors;
 extern crate rustc_expand;
@@ -39,7 +39,6 @@ extern crate rustc_trait_selection;
 
 extern crate itertools;
 extern crate lazy_static;
-extern crate termcolor;
 // HACK: When compiling mutest-operators, the compiler is unable to resolve the right version of smallvec. We have to
 //       use the version used by the compiler to interface with it but we also expose APIs which use smallvec for use by
 //       other crates. To resolve this, we re-export the compiler-supplied version of the library.

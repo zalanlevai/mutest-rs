@@ -8,7 +8,7 @@ use crate::analysis::hir;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol};
 
 pub fn impls_trait<'tcx>(tcx: TyCtxt<'tcx>, body_def_id: hir::LocalDefId, ty: Ty<'tcx>, trait_def_id: hir::DefId, args: Vec<ty::GenericArg<'tcx>>) -> bool {
-    let ty = tcx.erase_regions(ty);
+    let ty = tcx.erase_and_anonymize_regions(ty);
     if ty.has_escaping_bound_vars() { return false; }
 
     let infcx = tcx.infer_ctxt().build(ty::TypingMode::analysis_in_body(tcx, body_def_id));
@@ -54,7 +54,7 @@ pub mod print {
     use crate::analysis::ast_lowering;
     use crate::analysis::hir::{self, LOCAL_CRATE};
     use crate::analysis::res;
-    use crate::codegen::ast::{self, P};
+    use crate::codegen::ast;
     use crate::codegen::hygiene;
     use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
@@ -223,8 +223,8 @@ pub mod print {
     impl<'tcx, 'op> Printer<'tcx> for AstTyPrinter<'tcx, 'op> {
         type Error = String;
 
-        type Type = P<ast::Ty>;
-        type DynExistential = P<ast::Ty>;
+        type Type = Box<ast::Ty>;
+        type DynExistential = Box<ast::Ty>;
         type Const = ast::AnonConst;
         type Region = Option<ast::Lifetime>;
         type Path = ast::Path;
@@ -332,7 +332,7 @@ pub mod print {
             }
 
             let Some(last_segment) = path.segments.last_mut() else { return Err("encountered empty path".to_owned()) };
-            last_segment.args = Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: self.sp, args: args_ast })));
+            last_segment.args = Some(Box::new(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: self.sp, args: args_ast })));
 
             Ok(path)
         }
@@ -415,7 +415,8 @@ pub mod print {
                 | ty::RegionKind::ReBound(_, ty::BoundRegion { kind: bound_region_kind, .. })
                 | ty::RegionKind::RePlaceholder(ty::Placeholder { bound: ty::BoundRegion { kind: bound_region_kind, .. }, .. })
                 => {
-                    let ty::BoundRegionKind::Named(def_id, region_name) = bound_region_kind else { return Ok(None); };
+                    let ty::BoundRegionKind::Named(def_id) = bound_region_kind else { return Ok(None); };
+                    let region_name = self.tcx.item_name(def_id);
                     if region_name == sym::empty || region_name == kw::UnderscoreLifetime { return Ok(None); }
 
                     let mut ident = Ident::new(region_name, sp);
@@ -427,7 +428,8 @@ pub mod print {
                 }
 
                 ty::RegionKind::ReLateParam(ty::LateParamRegion { kind: late_param_region_kind, .. }) => {
-                    let ty::LateParamRegionKind::Named(def_id, region_name) = late_param_region_kind else { return Ok(None); };
+                    let ty::LateParamRegionKind::Named(def_id) = late_param_region_kind else { return Ok(None); };
+                    let region_name = self.tcx.item_name(def_id);
                     if region_name == sym::empty || region_name == kw::UnderscoreLifetime { return Ok(None); }
 
                     let mut ident = Ident::new(region_name, sp);
@@ -460,7 +462,7 @@ pub mod print {
                         }
                     }
 
-                    Ok(ast::mk::anon_const(sp, ast::mk::expr_ident(sp, ident).into_inner().kind))
+                    Ok(ast::mk::anon_const(sp, ast::mk::expr_ident(sp, ident).kind))
                 }
 
                 | ty::ConstKind::Infer(_)
@@ -587,7 +589,7 @@ pub mod print {
                                 _ => Err("encountered unknown constant scalar value".to_owned())
                             }?;
 
-                            Ok(ast::mk::anon_const(sp, lit_expr.into_inner().kind))
+                            Ok(ast::mk::anon_const(sp, lit_expr.kind))
                         }
 
                         mir::ConstValue::ZeroSized => Err("encountered zero-sized const".to_owned()),
@@ -703,15 +705,11 @@ pub mod print {
                     let def_path = self.print_def_path(def_id, &[])?;
                     Ok(ast::mk::ty_path(None, def_path))
                 }
-                ty::TyKind::Dynamic(predicates, region, dyn_kind) => {
+                ty::TyKind::Dynamic(predicates, region) => {
                     let mut dyn_existential = self.print_dyn_existential(predicates)?;
-                    let ast::TyKind::TraitObject(bounds, syntax) = &mut dyn_existential.kind else { unreachable!() };
+                    let ast::TyKind::TraitObject(bounds, _syntax) = &mut dyn_existential.kind else { unreachable!() };
                     if let Some(lifetime) = self.print_region(region)? {
                         bounds.push(ast::mk::lifetime_bound(lifetime));
-                        *syntax = match dyn_kind {
-                            ty::DynKind::Dyn => ast::TraitObjectSyntax::Dyn,
-                            ty::DynKind::DynStar => ast::TraitObjectSyntax::DynStar,
-                        };
                     }
                     // NOTE: `dyn` trait objects of multiple bounds are syntactically ambiguous in some positions
                     //       unless surrounded by parens.
@@ -741,7 +739,7 @@ pub mod print {
                             let def_path = self.print_def_path(alias_ty.def_id, alias_ty.args)?;
 
                             let self_ty = self.print_ty(alias_ty.self_ty())?;
-                            let qself = P(ast::QSelf {
+                            let qself = Box::new(ast::QSelf {
                                 ty: self_ty,
                                 path_span: DUMMY_SP,
                                 position: def_path.segments.len() - 1,
@@ -780,7 +778,7 @@ pub mod print {
                     let output_ty_ast = self.print_ty(fn_sig_tys.output())?;
 
                     let input_params = input_tys_ast.into_iter().map(|ty| ast::mk::param(sp, ast::mk::pat_wild(sp), ty)).collect();
-                    Ok(ast::mk::ty(sp, ast::TyKind::BareFn(P(ast::BareFnTy {
+                    Ok(ast::mk::ty(sp, ast::TyKind::FnPtr(Box::new(ast::FnPtrTy {
                         safety: match fn_header.safety {
                             hir::Safety::Safe => ast::Safety::Default,
                             hir::Safety::Unsafe => ast::Safety::Unsafe(sp),
@@ -827,7 +825,7 @@ pub mod print {
         opaque_ty_handling: OpaqueTyHandling,
         sanitize_macro_expns: bool,
         binding_item_def_id: hir::DefId,
-    ) -> Option<P<ast::Ty>> {
+    ) -> Option<Box<ast::Ty>> {
         let mut printer = AstTyPrinter {
             tcx,
             crate_res,

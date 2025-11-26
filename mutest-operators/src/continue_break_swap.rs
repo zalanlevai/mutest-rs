@@ -83,7 +83,7 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id, expr.span),
-                Subst::AstExpr(swapped_expr.into_inner()),
+                Subst::AstExpr(*swapped_expr),
             ),
         ])
     }

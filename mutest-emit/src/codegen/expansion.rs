@@ -13,7 +13,7 @@ use thin_vec::ThinVec;
 
 use crate::analysis::hir;
 use crate::analysis::tests::Test;
-use crate::codegen::ast::{self, P};
+use crate::codegen::ast;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, Symbol, kw, sym};
 use crate::codegen::symbols::hygiene::AstPass;
@@ -89,6 +89,7 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(rustc_private)]
         #![feature(structural_match)]
         #![feature(thread_local)]
+        #![feature(trivial_clone)]
     }
 
     // NOTE: Some features are only valid if the alloc crate is loaded.
@@ -246,7 +247,7 @@ fn mod_dir_path(
 
             (dir_path, dir_ownership)
         }
-        ast::Inline::No => {
+        ast::Inline::No { had_parse_error: _ } => {
             let module_path = mod_file_path(sess, dir_path, dir_ownership, ident, &attrs);
             let file_path = module_path.file_path;
             dir_ownership = module_path.dir_ownership;
@@ -264,7 +265,7 @@ struct ExternalMod {
     pub dir_path: PathBuf,
     pub dir_ownership: DirOwnership,
     pub spans: ast::ModSpans,
-    pub items: ThinVec<P<ast::Item>>,
+    pub items: ThinVec<Box<ast::Item>>,
 }
 
 fn parse_external_mod(
@@ -276,10 +277,11 @@ fn parse_external_mod(
     attrs: &mut ThinVec<ast::Attribute>,
 ) -> ExternalMod {
     use rustc_parse::exp;
+    use rustc_parse::lexer::StripTokens;
 
     let module_path = mod_file_path(sess, dir_path, dir_ownership, ident, attrs);
 
-    let mut parser = rustc_parse::new_parser_from_file(&sess.psess, &module_path.file_path, Some(span)).expect("cannot create file parser");
+    let mut parser = rustc_parse::new_parser_from_file(&sess.psess, &module_path.file_path, StripTokens::ShebangAndFrontmatter, Some(span)).expect("cannot create file parser");
     let (mut inner_attrs, items, inner_span) = parser.parse_mod(exp!(Eof)).expect("parsing module failed");
     attrs.append(&mut inner_attrs);
 
@@ -299,21 +301,19 @@ struct ModuleLoader<'tcx> {
 }
 
 impl<'tcx> ast::mut_visit::MutVisitor for ModuleLoader<'tcx> {
-    fn flat_map_item(&mut self, item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        let mut item = item.into_inner();
-
+    fn flat_map_item(&mut self, mut item: Box<ast::Item>) -> SmallVec<[Box<ast::Item>; 1]> {
         let ast::ItemKind::Mod(_, ident, ref mut mod_kind) = item.kind else {
-            return ast::mut_visit::walk_flat_map_item(self, P(item));
+            return ast::mut_visit::walk_flat_map_item(self, item);
         };
 
         let (_file_path, dir_path, dir_ownership) = match mod_kind {
-            ast::ModKind::Loaded(_, inline, _, _) => {
+            ast::ModKind::Loaded(_, inline, _) => {
                 let (dir_path, dir_ownership) = mod_dir_path(self.sess, &self.current_dir_path, self.current_dir_ownership, ident, &item.attrs, *inline);
                 (None, dir_path, dir_ownership)
             }
             ast::ModKind::Unloaded => {
                 let external_mod = parse_external_mod(self.sess, &self.current_dir_path, self.current_dir_ownership, ident, item.span, &mut item.attrs);
-                *mod_kind = ast::ModKind::Loaded(external_mod.items, ast::Inline::No, external_mod.spans, Ok(()));
+                *mod_kind = ast::ModKind::Loaded(external_mod.items, ast::Inline::No { had_parse_error: Ok(()) }, external_mod.spans);
                 (Some(external_mod.file_path), external_mod.dir_path, external_mod.dir_ownership)
             }
         };
@@ -321,7 +321,7 @@ impl<'tcx> ast::mut_visit::MutVisitor for ModuleLoader<'tcx> {
         let original_dir_path = mem::replace(&mut self.current_dir_path, dir_path);
         let original_dir_ownership = mem::replace(&mut self.current_dir_ownership, dir_ownership);
 
-        let item = ast::mut_visit::walk_flat_map_item(self, P(item));
+        let item = ast::mut_visit::walk_flat_map_item(self, item);
 
         self.current_dir_path = original_dir_path;
         self.current_dir_ownership = original_dir_ownership;
@@ -411,7 +411,7 @@ fn remove_macro_attrs_from_item(item: &mut ast::Item) {
 
 struct MacroExpansionReverter<'ast> {
     original_crate: &'ast ast::Crate,
-    current_scope_in_original: &'ast [P<ast::Item>],
+    current_scope_in_original: &'ast [Box<ast::Item>],
 }
 
 impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
@@ -432,24 +432,23 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
         self.current_scope_in_original = original_scope_in_original;
     }
 
-    fn flat_map_item(&mut self, item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        let mut item = item.into_inner();
+    fn flat_map_item(&mut self, mut item: Box<ast::Item>) -> SmallVec<[Box<ast::Item>; 1]> {
         let expn = item.span.ctxt().outer_expn_data();
 
         // Visit items declared in item bodies (e.g. function bodies).
-        ast::mut_visit::walk_item_kind(&mut item.kind, item.span, item.id, &mut item.vis, (), self);
+        ast::mut_visit::walk_item(self, &mut item);
 
         match expn.kind {
             ExpnKind::Root => {
                 match &item.kind {
                     | ast::ItemKind::Use(_)
-                    | ast::ItemKind::MacroDef(_, _) => { return smallvec![P(item)]; }
+                    | ast::ItemKind::MacroDef(_, _) => { return smallvec![item]; }
                     _ => {}
                 }
 
                 let Some(original_item) = self.current_scope_in_original.iter().find(|i| i.span == item.span) else {
                     remove_macro_attrs_from_item(&mut item);
-                    return smallvec![P(item)];
+                    return smallvec![item];
                 };
 
                 match &item.kind {
@@ -469,9 +468,9 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                 match &original_item.kind {
                     ast::ItemKind::Mod(_, _, ast::ModKind::Unloaded) => panic!("encountered unloaded module"),
 
-                    ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(items, _, _, _)) => {
+                    ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(items, _, _)) => {
                         let original_scope_in_original = mem::replace(&mut self.current_scope_in_original, items);
-                        let item = ast::mut_visit::walk_flat_map_item(self, P(item));
+                        let item = ast::mut_visit::walk_flat_map_item(self, item);
                         self.current_scope_in_original = original_scope_in_original;
 
                         item
@@ -480,14 +479,14 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                     // TODO: Descend into associated and foreign item scopes.
                     | ast::ItemKind::ForeignMod(_)
                     | ast::ItemKind::Trait(_)
-                    | ast::ItemKind::Impl(_) => smallvec![P(item)],
+                    | ast::ItemKind::Impl(_) => smallvec![item],
 
                     // TODO: Descend into bodies and handle nested items.
                     | ast::ItemKind::Static(_)
                     | ast::ItemKind::Const(_)
-                    | ast::ItemKind::Fn(_) => smallvec![P(item)],
+                    | ast::ItemKind::Fn(_) => smallvec![item],
 
-                    _ => ast::mut_visit::walk_flat_map_item(self, P(item)),
+                    _ => ast::mut_visit::walk_flat_map_item(self, item),
                 }
             }
 
@@ -495,26 +494,26 @@ impl<'ast> ast::mut_visit::MutVisitor for MacroExpansionReverter<'ast> {
                 // TODO: The "original" items produced by local macros would have to be created by partially expanding
                 //       the macro calls. This is a large undertaking that we will get to eventually. For now, we ignore
                 //       local macro subtrees.
-                smallvec![P(item)]
+                smallvec![item]
             }
 
             // TODO: Revert bang macro expansions.
-            ExpnKind::Macro(MacroKind::Bang, _) => smallvec![P(item)],
+            ExpnKind::Macro(MacroKind::Bang, _) => smallvec![item],
 
             | ExpnKind::Macro(MacroKind::Attr, _)
             | ExpnKind::Macro(MacroKind::Derive, _) => {
                 // HACK: We do not actually revert macro expansions currently, as removing leftover attributes and
                 //       enabling internal features seems to do a better job than previous attempts at reverting
                 //       derive macros.
-                return smallvec![P(item)];
+                return smallvec![item];
             }
 
-            ExpnKind::AstPass(AstPass::StdImports) => smallvec![P(item)],
+            ExpnKind::AstPass(AstPass::StdImports) => smallvec![item],
             ExpnKind::AstPass(AstPass::TestHarness) => smallvec![],
-            ExpnKind::AstPass(AstPass::ProcMacroHarness) => smallvec![P(item)],
+            ExpnKind::AstPass(AstPass::ProcMacroHarness) => smallvec![item],
 
             // HIR and MIR expansions are not performed on the AST.
-            ExpnKind::Desugaring(_) => smallvec![P(item)],
+            ExpnKind::Desugaring(_) => smallvec![item],
         }
     }
 }
@@ -528,7 +527,7 @@ pub fn revert_non_local_macro_expansions<'ast>(expanded_crate: &mut ast::Crate, 
     reverter.visit_crate(expanded_crate);
 }
 
-fn dedupe_extern_crate_decls(items: &mut ThinVec<P<ast::Item>>, sym: Symbol) {
+fn dedupe_extern_crate_decls(items: &mut ThinVec<Box<ast::Item>>, sym: Symbol) {
     if let Some((first_extern_crate_index, _)) = items.iter().find_position(|&item| ast::inspect::is_extern_crate_decl(item, sym)) {
         let mut i = first_extern_crate_index + 1;
         while let Some(item) = items.get(i) {
@@ -542,7 +541,7 @@ fn dedupe_extern_crate_decls(items: &mut ThinVec<P<ast::Item>>, sym: Symbol) {
     }
 }
 
-fn ensure_test_scope(items: &mut ThinVec<P<ast::Item>>) {
+fn ensure_test_scope(items: &mut ThinVec<Box<ast::Item>>) {
     dedupe_extern_crate_decls(items, sym::test)
 }
 
@@ -558,13 +557,11 @@ impl<'tcx, 'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tcx, 'tst> {
         ensure_test_scope(&mut krate.items);
     }
 
-    fn flat_map_item(&mut self, item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        let mut item = item.into_inner();
-
+    fn flat_map_item(&mut self, mut item: Box<ast::Item>) -> SmallVec<[Box<ast::Item>; 1]> {
         if let ast::ItemKind::Mod(..) = item.kind {
-            ast::mut_visit::walk_item_kind(&mut item.kind, item.span, item.id, &mut item.vis, (), self);
+            ast::mut_visit::walk_item(self, &mut item);
 
-            if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref mut items, _, _, _)) = item.kind {
+            if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref mut items, _, _)) = item.kind {
                 ensure_test_scope(items);
             }
         }
@@ -586,7 +583,7 @@ impl<'tcx, 'tst> ast::mut_visit::MutVisitor for TestCaseCleaner<'tcx, 'tst> {
                 .collect();
         }
 
-        smallvec![P(item)]
+        smallvec![item]
     }
 }
 

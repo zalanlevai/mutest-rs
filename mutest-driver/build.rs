@@ -66,7 +66,6 @@ fn fetch_rlib_deps(crate_name: &str, rlib_path: &Path, deps_dir_path: &Path) -> 
             static USING_INTERNAL_FEATURES: AtomicBool = AtomicBool::new(false);
             &USING_INTERNAL_FEATURES
         },
-        expanded_args: Default::default(),
     };
 
     let mut dep_paths = vec![];

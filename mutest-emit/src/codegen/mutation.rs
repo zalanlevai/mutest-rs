@@ -5,6 +5,7 @@ use rustc_hash::{FxHashSet, FxHashMap};
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 use smallvec::{SmallVec, smallvec};
+use thin_vec::ThinVec;
 
 use crate::analysis::ast_lowering;
 use crate::analysis::call_graph::{Target, TargetKind, UnsafeSource, Unsafety};
@@ -12,7 +13,7 @@ use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::ty::TyCtxt;
-use crate::codegen::ast::{self, P};
+use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::substitution::conflicting_substs;
@@ -104,7 +105,7 @@ impl SubstLoc {
 pub enum Subst {
     AstExpr(ast::Expr),
     AstStmt(ast::Stmt),
-    AstLocal(Ident, ast::Mutability, Option<P<ast::Ty>>, P<ast::Expr>, Option<P<ast::Expr>>),
+    AstLocal(Ident, ast::Mutability, Option<Box<ast::Ty>>, Box<ast::Expr>, Option<Box<ast::Expr>>),
 }
 
 impl Subst {
@@ -368,7 +369,7 @@ fn report_unmatched_ast_node<'tcx>(tcx: TyCtxt<'tcx>, node_kind: &str, def_id: h
 }
 
 impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<'tcx, 'ast, 'op, 'trg, 'm> {
-    fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, span: Span, id: ast::NodeId) {
+    fn visit_fn(&mut self, kind: ast::visit::FnKind<'ast>, _attrs: &ThinVec<ast::Attribute>, span: Span, id: ast::NodeId) {
         let ast::visit::FnKind::Fn(ctx, vis, fn_item) = kind else { return; };
         let fn_ast = ast::FnItem { id, span, ctx, vis, fn_data: fn_item };
 

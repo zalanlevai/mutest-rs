@@ -26,13 +26,13 @@ pub struct FnItem<'hir> {
 impl<'tcx: 'hir, 'hir> FnItem<'hir> {
     pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
         match node {
-            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ref kind }) => {
+            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ref kind, has_delayed_lints: _ }) => {
                 let hir::ItemKind::Fn { sig, ident, generics, body, has_body: _ } = kind else { return None; };
                 let body = Some(tcx.hir_body(*body));
                 let fn_kind = hir::intravisit::FnKind::ItemFn(*ident, generics, sig.header);
                 Some(FnItem { owner_id, span, ident: *ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
             }
-            hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness: _ }) => {
+            hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness: _, has_delayed_lints: _ }) => {
                 let hir::TraitItemKind::Fn(sig, trait_fn) = kind else { return None; };
                 let body = match trait_fn {
                     hir::TraitFn::Provided(body) => Some(tcx.hir_body(*body)),
@@ -41,11 +41,11 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
                 Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body })
             }
-            hir::Node::ImplItem(&hir::ImplItem { owner_id, span, vis_span, ident, ref generics, ref kind, defaultness: _ }) => {
+            hir::Node::ImplItem(&hir::ImplItem { owner_id, span, impl_kind: _, ident, ref generics, ref kind, has_delayed_lints: _ }) => {
                 let hir::ImplItemKind::Fn(sig, body) = kind else { return None; };
                 let body = Some(tcx.hir_body(*body));
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
-                Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
+                Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body })
             }
             _ => None,
         }
@@ -56,26 +56,23 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
 pub struct ConstItem<'hir> {
     pub generics: Option<&'hir hir::Generics<'hir>>,
     pub ty: &'hir hir::Ty<'hir>,
-    pub body: Option<&'hir hir::Body<'hir>>,
+    pub rhs: Option<&'hir hir::ConstItemRhs<'hir>>,
 }
 
-impl<'tcx: 'hir, 'hir> ConstItem<'hir> {
-    pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
+impl<'hir> ConstItem<'hir> {
+    pub fn from_node(node: hir::Node<'hir>) -> Option<Self> {
         match node {
             hir::Node::Item(&hir::Item { ref kind, .. }) => {
-                let hir::ItemKind::Const(_, generics, ty, body) = kind else { return None; };
-                let body = Some(tcx.hir_body(*body));
-                Some(ConstItem { generics: Some(generics), ty, body })
+                let hir::ItemKind::Const(_, generics, ty, rhs) = kind else { return None; };
+                Some(ConstItem { generics: Some(generics), ty, rhs: Some(rhs) })
             }
             hir::Node::TraitItem(&hir::TraitItem { ref kind, .. }) => {
-                let hir::TraitItemKind::Const(ty, body) = kind else { return None; };
-                let body = body.map(|body| tcx.hir_body(body));
-                Some(ConstItem { generics: None, ty, body })
+                let hir::TraitItemKind::Const(ty, rhs) = kind else { return None; };
+                Some(ConstItem { generics: None, ty, rhs: rhs.as_ref() })
             }
             hir::Node::ImplItem(&hir::ImplItem { ref kind, .. }) => {
-                let hir::ImplItemKind::Const(ty, body) = kind else { return None; };
-                let body = Some(tcx.hir_body(*body));
-                Some(ConstItem { generics: None, ty, body })
+                let hir::ImplItemKind::Const(ty, rhs) = kind else { return None; };
+                Some(ConstItem { generics: None, ty, rhs: Some(rhs) })
             }
             _ => None,
         }
@@ -224,6 +221,29 @@ impl<'hir> DefItem<'hir> {
     }
 }
 
+impl<'hir> Descr for hir::ItemKind<'hir> {
+    fn descr(&self) -> &'static str {
+        match self {
+            hir::ItemKind::ExternCrate(..) => "extern crate",
+            hir::ItemKind::Use(..) => "use import",
+            hir::ItemKind::Static(..) => "static item",
+            hir::ItemKind::Const(..) => "const item",
+            hir::ItemKind::Fn { .. } => "function",
+            hir::ItemKind::Mod(..) => "module",
+            hir::ItemKind::ForeignMod { .. } => "extern block",
+            hir::ItemKind::TyAlias(..) => "type alias",
+            hir::ItemKind::Enum(..) => "enum",
+            hir::ItemKind::Struct(..) => "struct",
+            hir::ItemKind::Union(..) => "union",
+            hir::ItemKind::Trait(..) => "trait",
+            hir::ItemKind::TraitAlias(..) => "trait alias",
+            hir::ItemKind::Impl(..) => "impl",
+            hir::ItemKind::GlobalAsm { .. } => "global asm item",
+            hir::ItemKind::Macro(..) => "macro definition",
+        }
+    }
+}
+
 impl<'hir> Descr for hir::StmtKind<'hir> {
     fn descr(&self) -> &'static str {
         match self {
@@ -310,7 +330,7 @@ impl<'hir> Descr for hir::TyKind<'hir> {
             hir::TyKind::Slice(..) => "slice",
             hir::TyKind::Array(..) => "array",
             hir::TyKind::Tup(..) => "tuple",
-            hir::TyKind::BareFn(..) => "fn pointer",
+            hir::TyKind::FnPtr(..) => "fn pointer",
             hir::TyKind::OpaqueDef(..) => "opaque definition",
             hir::TyKind::TraitObject(..) => "trait object",
             hir::TyKind::TraitAscription(..) => "trait ascription",

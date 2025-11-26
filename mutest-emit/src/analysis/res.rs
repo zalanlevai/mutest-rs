@@ -13,7 +13,7 @@ use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
-use crate::codegen::ast::{self, P};
+use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
 pub struct CrateResolutions<'tcx> {
@@ -273,7 +273,7 @@ pub fn def_hir_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::LocalDefId) -> Vec<(hi
 pub fn qpath_res<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, qpath: &'tcx hir::QPath<'tcx>, id: hir::HirId) -> Res {
     match qpath {
         hir::QPath::Resolved(_, path) => path.res,
-        hir::QPath::TypeRelative(..) | hir::QPath::LangItem(..) => {
+        hir::QPath::TypeRelative(..) => {
             typeck.type_dependent_def(id)
                 .map_or(Res::Err, |(kind, def_id)| Res::Def(kind, def_id))
         }
@@ -431,7 +431,7 @@ impl<'tcx> DefPath<'tcx> {
         self.segments.iter().map(|segment| segment.def_id)
     }
 
-    pub fn ast_path(&self, crate_res: &CrateResolutions<'tcx>, ast_ty_printer: &mut ty::print::AstTyPrinter<'tcx, '_>) -> (Option<P<ast::QSelf>>, ast::Path) {
+    pub fn ast_path(&self, crate_res: &CrateResolutions<'tcx>, ast_ty_printer: &mut ty::print::AstTyPrinter<'tcx, '_>) -> (Option<Box<ast::QSelf>>, ast::Path) {
         use ty::print::Printer;
 
         let mut segments = self.segments.iter().map(|segment| {
@@ -460,7 +460,7 @@ impl<'tcx> DefPath<'tcx> {
                     // FIXME: Give proper diagnostic span for errors.
                     span_bug!(DUMMY_SP, "cannot construct AST representation of type `{ty:?}`");
                 };
-                qself = Some(P(ast::QSelf { ty: ty_ast, position: 0, path_span: DUMMY_SP }));
+                qself = Some(Box::new(ast::QSelf { ty: ty_ast, position: 0, path_span: DUMMY_SP }));
             }
 
             // Local path, no special prefix.
@@ -501,7 +501,7 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     };
     for (i, &def_id) in relative_def_id_path.iter().enumerate().rev() {
         let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(def_id) else { continue; };
-        let ty::ImplSubject::Inherent(implementer_ty) = tcx.impl_subject(def_id).instantiate_identity() else { unreachable!("encountered trait impl in def path") };
+        let implementer_ty = tcx.type_of(def_id).instantiate_identity();
 
         relative_def_id_path = &relative_def_id_path[(i + 1)..];
         root = DefPathRootKind::Ty(implementer_ty);
@@ -564,8 +564,8 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
 
         // `..::{impl#?}::$assoc_item` path.
         Some((0, impl_parent_def_id)) => {
-            let impl_subject = tcx.impl_subject(impl_parent_def_id);
-            let ty::ImplSubject::Inherent(implementer_ty) = impl_subject.instantiate_identity() else { unreachable!("encountered trait impl in def path") };
+            let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(impl_parent_def_id) else { unreachable!("encountered trait impl in def path") };
+            let implementer_ty = tcx.type_of(impl_parent_def_id).instantiate_identity();
 
             let ident = tcx.opt_item_ident(def_id).unwrap();
             let def_path = DefPath::new(DefPathRootKind::Ty(implementer_ty), vec![DefPathSegment { def_id, ident, reexport: None }]);

@@ -1,5 +1,5 @@
 use mutest_emit::{Mutation, Operator};
-use mutest_emit::codegen::ast::{self, P};
+use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, Symbol, sym};
 use mutest_emit::smallvec::smallvec;
@@ -56,11 +56,11 @@ impl<'a> Operator<'a> for BoolExprNegate {
                 // { let v: bool = $expr; v }
                 let v = Ident::new(Symbol::intern("v"), def);
                 ast::mk::expr_block(ast::mk::block(def, thin_vec![
-                    ast::mk::stmt_let(def, false, v, Some(expr_ty_ast), P(expr.clone())),
+                    ast::mk::stmt_let(def, false, v, Some(expr_ty_ast), Box::new(expr.clone())),
                     ast::mk::stmt_expr(ast::mk::expr_ident(def, v)),
                 ]))
             }
-            _ => P(expr.clone()),
+            _ => Box::new(expr.clone()),
         };
 
         let negated_expr = ast::mk::expr_unary(def, ast::UnOp::Not, unambiguous_base_expr);
@@ -72,7 +72,7 @@ impl<'a> Operator<'a> for BoolExprNegate {
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id, expr.span),
-                Subst::AstExpr(negated_expr.into_inner()),
+                Subst::AstExpr(*negated_expr),
             ),
         ])
     }

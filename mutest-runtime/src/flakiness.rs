@@ -95,9 +95,8 @@ pub fn print_mutation_flakiness_matrix(mutation_flakiness_matrix: &MutationFlaki
     while let Some(_) = mutation_id_chunks.next() {
         print!("1234567890");
     }
-    if let Some(last_mutation_id_chunk) = mutation_id_chunks.into_remainder() {
-        print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
-    }
+    let last_mutation_id_chunk = mutation_id_chunks.into_remainder();
+    print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
     println!();
 
     // Print matrix row for overall mutation flakiness.

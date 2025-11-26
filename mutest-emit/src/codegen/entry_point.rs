@@ -3,9 +3,8 @@ use smallvec::{SmallVec, smallvec};
 use thin_vec::thin_vec;
 
 use crate::codegen::ast;
-use crate::codegen::ast::P;
 use crate::codegen::ast::entry::EntryPointType;
-use crate::codegen::ast::mut_visit::{ExpectOne, MutVisitor};
+use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym};
 use crate::codegen::symbols::hygiene::AstPass;
@@ -34,12 +33,11 @@ struct EntryPointCleaner {
 }
 
 impl ast::mut_visit::MutVisitor for EntryPointCleaner {
-    fn flat_map_item(&mut self, i: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
+    fn flat_map_item(&mut self, i: Box<ast::Item>) -> SmallVec<[Box<ast::Item>; 1]> {
         self.depth += 1;
-        let item = ast::mut_visit::walk_flat_map_item(self, i).expect_one("noop did something");
+        let mut items = ast::mut_visit::walk_flat_map_item(self, i).into_iter();
+        let (Some(item), None) = (items.next(), items.next()) else { panic!("noop did something"); };
         self.depth -= 1;
-
-        let item = item.into_inner();
 
         match entry_point_type(&item, self.depth) {
             // Retain items that are user-defined entry points.
@@ -50,7 +48,7 @@ impl ast::mut_visit::MutVisitor for EntryPointCleaner {
             EntryPointType::None | EntryPointType::OtherMain => {}
         };
 
-        smallvec![P(item)]
+        smallvec![item]
     }
 }
 

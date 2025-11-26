@@ -9,14 +9,13 @@ use thin_vec::{ThinVec, thin_vec};
 use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::codegen::ast;
-use crate::codegen::ast::P;
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::symbols::{DUMMY_SP, FileNameDisplayPreference, Ident, Symbol, path, sym};
 
 pub struct Test {
     pub path: Vec<Ident>,
-    pub descriptor: P<ast::Item>,
-    pub item: P<ast::Item>,
+    pub descriptor: Box<ast::Item>,
+    pub item: Box<ast::Item>,
     pub def_id: hir::LocalDefId,
     pub ignore: bool,
 }
@@ -59,7 +58,7 @@ fn is_test_case(item: &ast::Item) -> bool {
     item.attrs.iter().any(|attr| attr.has_name(sym::rustc_test_marker))
 }
 
-fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident], items: &[P<ast::Item>]) -> Vec<Test> {
+fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident], items: &[Box<ast::Item>]) -> Vec<Test> {
     let mut tests = vec![];
 
     let mut item_iterator = items.iter();
@@ -104,7 +103,7 @@ impl<'ast, 'op> ast::visit::Visitor<'ast> for TestCollector<'op> {
     }
 
     fn visit_item(&mut self, item: &'ast ast::Item) {
-        if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref items, _, _, _)) = item.kind {
+        if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref items, _, _)) = item.kind {
             let ident = item.kind.ident();
 
             if let Some(ident) = ident { self.current_path.push(ident); }
@@ -126,7 +125,7 @@ pub fn collect_tests(krate: &ast::Crate, def_res: &ast_lowering::DefResolutions)
     collector.tests
 }
 
-fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_lowering::DefResolutions, tests: &mut Vec<Test>, path: &[Ident], items: &mut ThinVec<P<ast::Item>>) {
+fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_lowering::DefResolutions, tests: &mut Vec<Test>, path: &[Ident], items: &mut ThinVec<Box<ast::Item>>) {
     let g = &sess.psess.attr_id_generator;
     let sp = DUMMY_SP;
 
@@ -269,7 +268,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for EmbeddedTestCollector<'tcx, 'op> 
     fn visit_item(&mut self, item: &mut ast::Item) {
         let ident = item.kind.ident();
 
-        if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref mut items, _, _, _)) = item.kind {
+        if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref mut items, _, _)) = item.kind {
             if let Some(ident) = ident { self.current_path.push(ident); }
 
             extract_and_mark_expanded_embedded_tests(self.sess, self.def_res, &mut self.tests, &self.current_path, items);

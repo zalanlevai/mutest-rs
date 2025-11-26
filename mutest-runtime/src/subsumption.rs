@@ -151,9 +151,8 @@ pub fn print_mutation_subsumption_matrix(mutation_subsumption_matrix: &MutationS
     while let Some(_) = mutation_id_chunks.next() {
         print!("1234567890");
     }
-    if let Some(last_mutation_id_chunk) = mutation_id_chunks.into_remainder() {
-        print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
-    }
+    let last_mutation_id_chunk = mutation_id_chunks.into_remainder();
+    print!("{}", &"1234567890"[..last_mutation_id_chunk.count()]);
     // Print additional headers.
     print!(" {:>mutation_id_w$}", "<=");
     print!(" {:>mutation_id_w$}", ">=");

@@ -1,7 +1,6 @@
 #![feature(array_windows)]
 #![feature(decl_macro)]
 #![feature(if_let_guard)]
-#![feature(let_chains)]
 
 #![feature(rustc_private)]
 extern crate rustc_driver;

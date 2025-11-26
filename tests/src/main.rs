@@ -1,8 +1,6 @@
 #![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
-#![feature(let_chains)]
-#![feature(round_char_boundary)]
 
 use std::collections::BTreeSet;
 use std::env;

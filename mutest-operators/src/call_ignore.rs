@@ -3,7 +3,7 @@ use mutest_emit::analysis::call_graph;
 use mutest_emit::analysis::hir;
 use mutest_emit::analysis::res;
 use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
-use mutest_emit::codegen::ast::{self, P};
+use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, path, kw};
 use mutest_emit::thin_vec::thin_vec;
@@ -122,7 +122,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);
         // { let _: $ty = $expr; Default::default() }
         let shadow_scope = ast::mk::expr_block(ast::mk::block(def, thin_vec![
-            ast::mk::stmt_let(def, false, Ident::new(kw::Underscore, def), Some(expr_ty_ast), P(expr.clone())),
+            ast::mk::stmt_let(def, false, Ident::new(kw::Underscore, def), Some(expr_ty_ast), Box::new(expr.clone())),
             ast::mk::stmt_expr(default),
         ]));
 
@@ -133,7 +133,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id, expr.span),
-                Subst::AstExpr(shadow_scope.into_inner()),
+                Subst::AstExpr(*shadow_scope),
             ),
         ])
     }
@@ -195,7 +195,7 @@ impl<'a> Operator<'a> for CallDelete {
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id, expr.span),
-                Subst::AstExpr(default.into_inner()),
+                Subst::AstExpr(*default),
             ),
         ])
     }

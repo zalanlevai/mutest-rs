@@ -721,14 +721,19 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
 
                         if tcx.is_foreign_item(instance.def_id()) && !tcx.intrinsic(instance.def_id()).is_some() {
                             let codegen_fn_attrs = tcx.codegen_fn_attrs(instance.def_id());
-                            let is_allocator_intrinsic = codegen_fn_attrs.flags.intersects(
+                            let is_allocator_intrinsic_or_std_internal_symbol = codegen_fn_attrs.flags.intersects(
                                 CodegenFnAttrFlags::ALLOCATOR
                                 | CodegenFnAttrFlags::DEALLOCATOR
                                 | CodegenFnAttrFlags::REALLOCATOR
                                 | CodegenFnAttrFlags::ALLOCATOR_ZEROED
+                                // NOTE: Some functions in the standard library are annotated with
+                                //       the #[rustc_std_internal_symbol] attribute.
+                                //       These are all part of heavily internal mechanisms, and
+                                //       we do not want to reveal them with spammy diagnostics.
+                                | CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL
                             );
 
-                            if !is_allocator_intrinsic {
+                            if !is_allocator_intrinsic_or_std_internal_symbol {
                                 call_graph.foreign_calls_count += 1;
 
                                 let mut diagnostic = tcx.dcx().struct_warn("encountered foreign call during call graph construction");

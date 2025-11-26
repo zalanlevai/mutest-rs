@@ -91,7 +91,6 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
         make_codegen_backend: None,
         registry: rustc_driver::diagnostics_registry(),
         using_internal_features: config.using_internal_features,
-        expanded_args: config.expanded_args.clone(),
     }
 }
 

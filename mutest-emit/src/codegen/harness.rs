@@ -8,7 +8,6 @@ use crate::analysis::call_graph::{EntryPoints, TargetReachability, Unsafety};
 use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::codegen::ast;
-use crate::codegen::ast::P;
 use crate::codegen::expansion::TcxExpansionExt;
 use crate::codegen::mutation::{Mut, MutationBatch, MutationParallelism, SubstLoc, UnsafeTargeting};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, kw, path, sym};
@@ -25,7 +24,7 @@ pub fn opaque_stable_def_id_for_embedding<'tcx>(tcx: TyCtxt<'tcx>, prefix: &str,
     Symbol::intern(&format!("{prefix}{}", tcx.def_path_hash(def_id).0.to_hex()))
 }
 
-pub fn mk_crate_kind_const(sp: Span, crate_kind: &str) -> P<ast::Item> {
+pub fn mk_crate_kind_const(sp: Span, crate_kind: &str) -> Box<ast::Item> {
     // pub const CRATE_KIND: &str = "...";
     let vis = ast::mk::vis_pub(sp);
     let ident = Ident::new(sym::CRATE_KIND, sp);
@@ -34,7 +33,7 @@ pub fn mk_crate_kind_const(sp: Span, crate_kind: &str) -> P<ast::Item> {
     ast::mk::item_const(sp, vis, ident, ty, expr)
 }
 
-fn mk_static_map<I>(sp: Span, entries: I) -> P<ast::Expr>
+fn mk_static_map<I>(sp: Span, entries: I) -> Box<ast::Expr>
 where
     I: IntoIterator<Item = (ast::tokenstream::TokenTree, ast::tokenstream::TokenTree)>,
 {
@@ -46,9 +45,9 @@ where
         })
         .collect::<Vec<_>>();
 
-    ast::mk::expr(sp, ast::ExprKind::MacCall(P(ast::MacCall {
+    ast::mk::expr(sp, ast::ExprKind::MacCall(Box::new(ast::MacCall {
         path: ast::mk::path_local(path::static_map(sp)),
-        args: P(ast::DelimArgs {
+        args: Box::new(ast::DelimArgs {
             dspan: ast::tokenstream::DelimSpan::from_single(sp),
             delim: ast::token::Delimiter::Brace,
             tokens: ast::mk::token_stream(args_token_trees),
@@ -56,7 +55,7 @@ where
     })))
 }
 
-pub fn bake_mutation<'tcx, 'ent>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, mutation: &Mut, unsafe_targeting: UnsafeTargeting) -> P<ast::Expr> {
+pub fn bake_mutation<'tcx, 'ent>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, mutation: &Mut, unsafe_targeting: UnsafeTargeting) -> Box<ast::Expr> {
     ast::mk::expr_struct(sp, ast::mk::path_local(path::MutationMeta(sp)), thin_vec![
         ast::mk::expr_struct_field(sp, Ident::new(sym::id, sp), {
             ast::mk::expr_u32(sp, mutation.id.index())
@@ -108,7 +107,7 @@ pub fn bake_mutation<'tcx, 'ent>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: Entr
     ])
 }
 
-fn mk_mutations_mod<'tcx, 'ent, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, mutations: &'m [Mut<'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> P<ast::Item> {
+fn mk_mutations_mod<'tcx, 'ent, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: EntryPoints<'ent>, mutations: &'m [Mut<'trg, 'm>], unsafe_targeting: UnsafeTargeting) -> Box<ast::Item> {
     let g = &tcx.sess.psess.attr_id_generator;
 
     let items = iter::once(ast::mk::item_extern_crate(sp, sym::mutest_runtime, None))
@@ -134,7 +133,10 @@ fn mk_mutations_mod<'tcx, 'ent, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, entry_poi
     // pub(crate) mod mutations { ... }
     let vis = ast::mk::vis_pub_crate(sp);
     let ident = Ident::new(sym::mutations, sp);
-    ast::mk::item_mod(sp, vis, ident, items).map(|mut m| { m.attrs = thin_vec![allow_non_upper_case_globals_attr]; m })
+    let mut m = ast::mk::item_mod(sp, vis, ident, items);
+    m.attrs = thin_vec![allow_non_upper_case_globals_attr];
+
+    m
 }
 
 pub enum Mutant<'trg, 'm> {
@@ -142,7 +144,7 @@ pub enum Mutant<'trg, 'm> {
     Batch(&'m MutationBatch<'trg, 'm>),
 }
 
-pub fn bake_mutant<'trg, 'm>(sp: Span, mutant: Mutant<'trg, 'm>, subst_locs: &[SubstLoc]) -> P<ast::Expr> {
+pub fn bake_mutant<'trg, 'm>(sp: Span, mutant: Mutant<'trg, 'm>, subst_locs: &[SubstLoc]) -> Box<ast::Expr> {
     let mutations = match mutant {
         Mutant::Mutation(mutation) => &[mutation],
         Mutant::Batch(mutation_batch) => &mutation_batch.mutations[..],
@@ -215,7 +217,7 @@ pub fn bake_mutant<'trg, 'm>(sp: Span, mutant: Mutant<'trg, 'm>, subst_locs: &[S
     }
 }
 
-fn mk_mutants_slice_const<'trg, 'm>(sp: Span, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>, subst_locs: &[SubstLoc]) -> P<ast::Item> {
+fn mk_mutants_slice_const<'trg, 'm>(sp: Span, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>, subst_locs: &[SubstLoc]) -> Box<ast::Item> {
     let (mutant_meta_ty, mutants) = match mutation_parallelism {
         None => {
             // mutest_runtime::StandaloneMutantMeta<SubstMap>
@@ -256,12 +258,12 @@ fn mk_mutants_slice_const<'trg, 'm>(sp: Span, mutations: &'m [Mut<'trg, 'm>], mu
     ast::mk::item_const(sp, vis, ident, ty, expr)
 }
 
-fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
+fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> Box<ast::Item> {
     let option_subst_meta_ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp, path::Option(sp), vec![], vec![
         ast::GenericArg::Type(ast::mk::ty_path(None, ast::mk::path_local(path::SubstMeta(sp)))),
     ]));
 
-    let subst_locs_count_anon_const = ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&subst_locs.len().to_string()), None).into_inner().kind);
+    let subst_locs_count_anon_const = ast::mk::anon_const(sp, ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&subst_locs.len().to_string()), None).kind);
 
     // pub type SubstMap = [Option<mutest_runtime::SubstMeta>; $subst_locs_count];
     let vis = ast::mk::vis_pub(sp);
@@ -270,14 +272,14 @@ fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> P<ast::Item> {
         ident,
         defaultness: ast::Defaultness::Final,
         generics: Default::default(),
-        where_clauses: Default::default(),
+        after_where_clause: Default::default(),
         bounds: vec![],
         // [Option<mutest_runtime::SubstMeta>; $subst_locs_count]
         ty: Some(ast::mk::ty_array(sp, option_subst_meta_ty, subst_locs_count_anon_const)),
     })))
 }
 
-fn mk_active_mutant_handle_static(sp: Span) -> P<ast::Item> {
+fn mk_active_mutant_handle_static(sp: Span) -> Box<ast::Item> {
     // pub(crate) static ACTIVE_MUTANT_HANDLE: ActiveMutantHandle<Mutant> = ActiveMutantHandle::empty();
     let vis = ast::mk::vis_pub_crate(sp);
     let mutbl = ast::Mutability::Not;
@@ -306,7 +308,7 @@ pub struct CargoMetadata {
     pub target_kind: CargoTargetKind,
 }
 
-fn mk_meta_mutant_struct_static<'tcx, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, cargo_metadata: Option<&CargoMetadata>, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>) -> P<ast::Item> {
+fn mk_meta_mutant_struct_static<'tcx, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, cargo_metadata: Option<&CargoMetadata>, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>) -> Box<ast::Item> {
     // mutest_runtime::MetaMutant { ... }
     let meta_mutant_struct_expr = ast::mk::expr_struct(sp, ast::mk::path_local(path::MetaMutant(sp)), thin_vec![
         ast::mk::expr_struct_field(sp, Ident::new(sym::cargo_package_name, sp), {
@@ -382,7 +384,7 @@ fn mk_meta_mutant_struct_static<'tcx, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, car
     ast::mk::item_static(sp, vis, mutbl, ident, ty, meta_mutant_struct_expr)
 }
 
-fn mk_external_tests_extra_const<'tcx, 'trg>(sp: Span, tcx: TyCtxt<'tcx>) -> P<ast::Item> {
+fn mk_external_tests_extra_const<'tcx, 'trg>(sp: Span, tcx: TyCtxt<'tcx>) -> Box<ast::Item> {
     // mutest_runtime::ExternalTestsExtra { .. }
     let external_tests_extra_struct_expr = ast::mk::expr_struct(sp, ast::mk::path_local(path::ExternalTestsExtra(sp)), thin_vec![
         ast::mk::expr_struct_field(sp, Ident::new(sym::test_crate_name, sp), {
@@ -398,7 +400,7 @@ fn mk_external_tests_extra_const<'tcx, 'trg>(sp: Span, tcx: TyCtxt<'tcx>) -> P<a
     ast::mk::item_const(sp, vis, ident, ty, expr)
 }
 
-fn mk_harness_fn(sp: Span, embedded: bool, external_meta_mutant: Option<Symbol>) -> P<ast::Item> {
+fn mk_harness_fn(sp: Span, embedded: bool, external_meta_mutant: Option<Symbol>) -> Box<ast::Item> {
     let meta_mutant_path_expr = match external_meta_mutant {
         None => ast::mk::expr_path(path::META_MUTANT(sp)),
         Some(crate_name) => ast::mk::expr_path(ast::mk::path_global(sp, vec![Ident::new(crate_name, sp), Ident::new(sym::mutest_generated, sp), Ident::new(sym::META_MUTANT, sp)])),

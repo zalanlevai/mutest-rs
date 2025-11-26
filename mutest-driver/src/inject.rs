@@ -211,7 +211,7 @@ pub fn inject_runtime_crate_and_deps(config: &Config, compiler_config: &mut Comp
 pub fn inject_test_crate_shim_if_no_target_std(config: &Config, compiler_config: &mut CompilerConfig) {
     let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 
-    let target = build_target_config(&early_dcx, &compiler_config.opts.target_triple, &compiler_config.opts.sysroot);
+    let target = build_target_config(&early_dcx, &compiler_config.opts.target_triple, compiler_config.opts.sysroot.path());
     if target.metadata.std == Some(true) { return; }
 
     let target_triple = compiler_config.opts.target_triple.tuple();

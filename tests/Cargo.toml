@@ -6,7 +6,7 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-cargo_metadata = "0.21"
+cargo_metadata = "0.23"
 path-slash = "0.2"
 clap = { version = "4", features = ["cargo"] }
 similar = { version = "2", features = ["inline"] }

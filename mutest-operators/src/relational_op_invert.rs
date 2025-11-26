@@ -57,7 +57,7 @@ impl<'a> Operator<'a> for RelationalOpInvert {
         Mutations::new_one(mutation, smallvec![
             SubstDef::new(
                 SubstLoc::Replace(expr.id, expr.span),
-                Subst::AstExpr(inverted_bin_expr.into_inner()),
+                Subst::AstExpr(*inverted_bin_expr),
             ),
         ])
     }

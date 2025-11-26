@@ -4,7 +4,6 @@ use rustc_session::Session;
 use thin_vec::{ThinVec, thin_vec};
 
 use crate::codegen::ast;
-use crate::codegen::ast::P;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::cancellation;
 use crate::codegen::expansion::TcxExpansionExt;
@@ -42,12 +41,12 @@ impl SubstLocId {
     }
 }
 
-fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, default: Option<P<ast::Expr>>, substs: Vec<(MutId, P<ast::Expr>)>) -> P<ast::Expr> {
+fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, default: Option<Box<ast::Expr>>, substs: Vec<(MutId, Box<ast::Expr>)>) -> Box<ast::Expr> {
     let mut arms = substs.into_iter()
         .map(|(mut_id, subst)| {
             // Some(subst) if subst.mutation.id == crate::mutest_generated::mutations::$mut_id.id => $subst,
             let subst_ident = Ident::new(Symbol::intern("subst"), sp);
-            let pat_some_subst = ast::mk::pat_tuple_struct(sp, path::Some(sp), thin_vec![ast::mk::pat_ident(sp, subst_ident)]);
+            let pat_some_subst = ast::mk::pat_tuple_struct(sp, path::Some(sp), thin_vec![*ast::mk::pat_ident(sp, subst_ident)]);
             let guard = ast::mk::expr_binary(sp, ast::BinOpKind::Eq,
                 ast::mk::expr_field_deep(sp, ast::mk::expr_ident(sp, subst_ident), vec![Ident::new(sym::mutation, sp), Ident::new(sym::id, sp)]),
                 ast::mk::expr_field(sp, ast::mk::expr_path(ast::mk::pathx(sp, path::mutations(sp), vec![Ident::new(mut_id.into_symbol(), sp)])), Ident::new(sym::id, sp)),
@@ -81,11 +80,11 @@ fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, def
     ast::mk::expr_paren(sp, ast::mk::expr_match(sp, subst_lookup_expr, arms))
 }
 
-pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usize, original: Option<P<ast::Expr>>, substs: Vec<(MutId, &Subst)>) -> P<ast::Expr> {
+pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usize, original: Option<Box<ast::Expr>>, substs: Vec<(MutId, &Subst)>) -> Box<ast::Expr> {
     let subst_exprs = substs.into_iter()
         .map(|(mut_id, subst)| {
             let subst_expr = match subst {
-                Subst::AstExpr(expr) => P(expr.clone()),
+                Subst::AstExpr(expr) => Box::new(expr.clone()),
                 Subst::AstStmt(stmt) => ast::mk::expr_block(ast::mk::block(sp, thin_vec![stmt.clone()])),
                 Subst::AstLocal(..) => panic!("invalid substitution: local substitutions cannot be made in expression positions"),
             };
@@ -98,7 +97,7 @@ pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usi
 }
 
 pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usize, original: Option<ast::Stmt>, substs: Vec<(MutId, &Subst)>) -> Vec<ast::Stmt> {
-    let mut binding_substs: Vec<(MutId, (Ident, ast::Mutability, Option<P<ast::Ty>>, P<ast::Expr>, Option<P<ast::Expr>>))> = vec![];
+    let mut binding_substs: Vec<(MutId, (Ident, ast::Mutability, Option<Box<ast::Ty>>, Box<ast::Expr>, Option<Box<ast::Expr>>))> = vec![];
     let mut non_binding_substs: Vec<(MutId, &Subst)> = vec![];
 
     for (mut_id, subst) in substs {
@@ -204,7 +203,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
+    fn visit_expr(&mut self, expr: &mut ast::Expr) {
         match &mut expr.kind {
             // The AST printer does not print the field name, only the expression, when using shorthand syntax. This
             // happens even if the field's expression is not an ident matching the field's name, resulting in malformed
@@ -232,7 +231,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
             let subst_loc_idx = self.indexed_subst_locs.len();
             self.indexed_subst_locs.push(replacement_loc);
 
-            *expr = expand_subst_match_expr(expr.span, replacement_loc, subst_loc_idx, Some(expr.clone()), replacements);
+            *expr = *expand_subst_match_expr(expr.span, replacement_loc, subst_loc_idx, Some(Box::new(expr.clone())), replacements);
         }
 
         if let Some(_insertions_after) = self.substitutions.remove(&SubstLoc::InsertAfter(expr.id, expr.span)) {
@@ -280,14 +279,14 @@ struct SyntaxAmbiguityResolver<'tcx> {
 }
 
 impl<'tcx> ast::mut_visit::MutVisitor for SyntaxAmbiguityResolver<'tcx> {
-    fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
+    fn visit_expr(&mut self, expr: &mut ast::Expr) {
         ast::mut_visit::walk_expr(self, expr);
 
         match &expr.kind {
             // Expressions compared with a cast expression may be misinterpreted as type arguments for the type in the
             // cast expression. To avoid this, we simply parenthesize every cast expression.
             ast::ExprKind::Cast(_, _) => {
-                *expr = ast::mk::expr_paren(expr.span, expr.clone())
+                *expr = *ast::mk::expr_paren(expr.span, Box::new(expr.clone()))
             }
             _ => {}
         }

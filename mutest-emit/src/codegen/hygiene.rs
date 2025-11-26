@@ -20,7 +20,7 @@ use crate::analysis::ast_lowering;
 use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};
 use crate::analysis::res;
 use crate::analysis::ty::{self, Ty, TyCtxt};
-use crate::codegen::ast::{self, P};
+use crate::codegen::ast;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
 use crate::codegen::symbols::hygiene::{ExpnData, ExpnId, MacroKind, Transparency};
@@ -653,7 +653,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         ty::print::region_ast(self.tcx, span, region, binding_item_def_id, true)
     }
 
-    fn sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> P<ast::Ty> {
+    fn sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Box<ast::Ty> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
         let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true, binding_item_def_id) else {
@@ -663,7 +663,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         ty_ast
     }
 
-    fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], binding_item_def_id: hir::DefId, span: Span) -> Option<P<ast::GenericArgs>> {
+    fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], binding_item_def_id: hir::DefId, span: Span) -> Option<Box<ast::GenericArgs>> {
         let args_ast = generic_args.into_iter()
             .filter_map(|generic_arg| {
                 match generic_arg.kind() {
@@ -684,17 +684,17 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         if args_ast.is_empty() { return None; }
 
-        Some(P(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
+        Some(Box::new(ast::GenericArgs::AngleBracketed(ast::AngleBracketedArgs { span: DUMMY_SP, args: args_ast })))
     }
 
     /// Extract bound params from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
-    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, span: Span) -> Option<P<ast::GenericArgs>> {
+    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, span: Span) -> Option<Box<ast::GenericArgs>> {
         let (parent_def_id, generic_predicates, param_index) = match param_res {
             // `Self::$assoc` in `impl<'a, 'b> Trait<'a, 'b> for T`
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
-                let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
+                let trait_ref = self.tcx.impl_trait_ref(impl_def_id);
 
                 // We instantiate the trait predicates with the impl's trait arguments
                 // for correct resolution of the local bounds later
@@ -753,7 +753,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         self.sanitize_generic_args(&trait_predicate.trait_ref.args[1..], parent_def_id, span)
     }
 
-    fn sanitize_qualified_path(&mut self, qself: &mut Option<P<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
+    fn sanitize_qualified_path(&mut self, qself: &mut Option<Box<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
         // Short-circuit if `self`.
         if let [path_segment] = &path.segments[..] && path_segment.ident.name == kw::SelfLower { return hir::Res::Err; }
 
@@ -864,7 +864,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     parent_path_segment.args = Some(generic_args_ast);
                                 }
 
-                                *qself = Some(P(ast::QSelf {
+                                *qself = Some(Box::new(ast::QSelf {
                                     ty: qself_ty_ast,
                                     path_span: DUMMY_SP,
                                     position: path.segments.len() - 1,
@@ -943,7 +943,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                             let assoc_item_trait_def_id = self.tcx.parent(trait_item_def_id);
 
-                                            let Some(trait_ref) = self.tcx.impl_trait_ref(impl_def_id) else { unreachable!() };
+                                            let trait_ref = self.tcx.impl_trait_ref(impl_def_id);
                                             let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, trait_ref.skip_binder().args);
 
                                             // Extract impl predicate related to the trait of the assoc item.
@@ -984,7 +984,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 // corresponding to the HIR self type, like so:
                                 // `<$ty>::$assoc` (note the lack of the `as` qualifier).
                                 path.segments.splice(0..(path.segments.len() - 1), []);
-                                *qself = Some(P(ast::QSelf {
+                                *qself = Some(Box::new(ast::QSelf {
                                     ty: qself_ty_ast,
                                     path_span: DUMMY_SP,
                                     position: 0,
@@ -1003,8 +1003,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                         qres.expect_non_local()
                     }
-
-                    hir::QPath::LangItem(_, _) => span_bug!(path.span, "encountered #[lang] item path"),
                 }
             }
         }
@@ -1362,7 +1360,7 @@ macro def_flat_map_item_fns(
     });+;
 ) {
     $(
-        fn $ident(&mut $self, mut $item: P<ast::Item<ast::$item_kind>> $(, $($args)*)?) -> SmallVec<[P<ast::Item<ast::$item_kind>>; 1]> {
+        fn $ident(&mut $self, mut $item: Box<ast::Item<ast::$item_kind>> $(, $($args)*)?) -> SmallVec<[Box<ast::Item<ast::$item_kind>>; 1]> {
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
             if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
@@ -1434,7 +1432,10 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
 
                 if let ast::ItemKind::Use(use_tree) = &mut item.kind {
-                    self.sanitize_use_tree(use_tree, id, span);
+                    // FIXME: Resolutions for the prelude import path are missing; ignore.
+                    if !item.attrs.iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::prelude_import)) {
+                        self.sanitize_use_tree(use_tree, id, span);
+                    }
                     return smallvec![item];
                 }
             }
@@ -1447,7 +1448,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     ast::ItemKind::Struct(_, generics, _) => Some(generics),
                     ast::ItemKind::Union(_, generics, _) => Some(generics),
                     ast::ItemKind::Trait(trait_item) => Some(&mut trait_item.generics),
-                    ast::ItemKind::TraitAlias(_, generics, _) => Some(generics),
+                    ast::ItemKind::TraitAlias(trait_alias) => Some(&mut trait_alias.generics),
                     ast::ItemKind::Impl(impl_item) => Some(&mut impl_item.generics),
                     _ => None,
                 };
@@ -1487,17 +1488,18 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     // Match definition ident if this is an assoc item corresponding to a trait.
                     if let Some(assoc_item) = self.tcx.opt_associated_item(def_id.to_def_id()) {
                         match assoc_item.container {
-                            ty::AssocItemContainer::Trait => {
+                            ty::AssocContainer::Trait => {
                                 // Trait items make new standalone definitions rather than referring to another definition,
                                 // and so their ident does not have to be adjusted to another definition's.
                             }
-                            ty::AssocItemContainer::Impl => {
+                            ty::AssocContainer::InherentImpl => {
                                 // Adjustment only needed if this assoc item is in a trait impl, not a bare impl.
-                                if let Some(trait_item_def_id) = assoc_item.trait_item_def_id {
-                                    // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
-                                    let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
-                                    copy_def_span_ctxt(ident, trait_item_ident_span);
-                                }
+                            }
+                            ty::AssocContainer::TraitImpl(Err(_)) => {}
+                            ty::AssocContainer::TraitImpl(Ok(trait_item_def_id)) => {
+                                // HACK: Copy ident syntax context from trait item definition for correct sanitization later.
+                                let Some(trait_item_ident_span) = self.tcx.def_ident_span(trait_item_def_id) else { unreachable!() };
+                                copy_def_span_ctxt(ident, trait_item_ident_span);
                             }
                         }
                     }
@@ -1515,7 +1517,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         }
     }
 
-    fn visit_ty(&mut self, ty: &mut P<ast::Ty>) {
+    fn visit_ty(&mut self, ty: &mut ast::Ty) {
         let ty_id = ty.id;
 
         match &mut ty.kind {
@@ -1553,7 +1555,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         self.protected_idents.remove(&assoc_item_constraint.ident);
     }
 
-    fn visit_expr(&mut self, expr: &mut P<ast::Expr>) {
+    fn visit_expr(&mut self, expr: &mut ast::Expr) {
         let mut protected_ident = None;
 
         let expr_id = expr.id;
@@ -1654,7 +1656,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         if let Some(protected_ident) = protected_ident { self.protected_idents.remove(&protected_ident); }
     }
 
-    fn visit_pat(&mut self, pat: &mut P<ast::Pat>) {
+    fn visit_pat(&mut self, pat: &mut ast::Pat) {
         let mut protected_ident = None;
 
         let pat_id = pat.id;
@@ -1747,7 +1749,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         };
     }
 
-    fn visit_lifetime(&mut self, lifetime: &mut ast::Lifetime) {
+    fn visit_lifetime(&mut self, lifetime: &mut ast::Lifetime, _lifetime_ctx: ast::visit::LifetimeCtxt) {
         self.sanitize_lifetime(lifetime);
     }
 
@@ -1846,8 +1848,23 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     let prelude_mod = tcx.hir_root_module().item_ids.iter().find_map(|&item_id| {
         let hir::ItemKind::Use(use_path, hir::UseKind::Glob) = tcx.hir_item(item_id).kind else { return None; };
         if !tcx.hir_attrs(item_id.hir_id()).iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::prelude_import)) { return None; }
-        let [.., last_segment] = use_path.segments else { unreachable!() };
-        Some(last_segment.res.def_id())
+
+        // HACK: The resolutions on the prelude import use path are all `Err`, so we resolve the def manually,
+        //       making use of crude assumptions about the built-in prelude import generation.
+        let mut crate_segment_idx = 0;
+        if use_path.segments[0].ident.name == kw::PathRoot { crate_segment_idx = 1; }
+        let crate_name = use_path.segments[crate_segment_idx].ident.name;
+        let Some(cnum) = crate_res.crate_by_visible_name(crate_name) else { span_bug!(use_path.span, "cannot find crate referenced by prelude import path"); };
+        let mut def_id = cnum.as_def_id();
+        for segment in use_path.segments.iter().skip(crate_segment_idx + 1) {
+            let Some(mod_child_def_id) = tcx.module_children(def_id).iter()
+                .filter(|mod_child| mod_child.ident.name == segment.ident.name)
+                .find_map(|mod_child| mod_child.res.mod_def_id())
+            else { span_bug!(use_path.span, "cannot find module referenced by prelude import path"); };
+            def_id = mod_child_def_id;
+        }
+
+        Some(def_id)
     });
 
     let mut sanitizer = MacroExpansionSanitizer {

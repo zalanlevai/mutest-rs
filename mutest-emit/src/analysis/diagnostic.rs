@@ -1,9 +1,9 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-use rustc_error_messages::{FluentBundle, LazyFallbackBundle};
-use rustc_errors::{Diag, DiagCtxt, EmissionGuarantee, TerminalUrl};
+use rustc_errors::{AutoStream, ColorChoice, Diag, DiagCtxt, EmissionGuarantee, TerminalUrl};
 use rustc_errors::emitter::{ColorConfig, Destination, DynEmitter, HumanEmitter, OutputTheme};
+use rustc_errors::translation::Translator;
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 
@@ -57,8 +57,7 @@ fn emit_with_emitter<G: EmissionGuarantee>(mut diagnostic: Diag<G>, emitter: Box
 pub fn raw_output_full<G: EmissionGuarantee>(
     diagnostic: Diag<G>,
     source_map: Option<Arc<SourceMap>>,
-    fluent_bundle: Option<Arc<FluentBundle>>,
-    fallback_bundle: LazyFallbackBundle,
+    translator: Translator,
     short_message: bool,
     ui_testing: bool,
     ignored_directories_in_source_blocks: Vec<String>,
@@ -79,13 +78,13 @@ pub fn raw_output_full<G: EmissionGuarantee>(
     // NOTE: Similar to Cargo, we could always embed colors, and strip them during printing,
     //       if needed, using `anstream::adapter::strip_str`.
     //       However, this would require mutest_runtime to depend on anstream.
-    let dst: Destination = match color_config {
-        ColorConfig::Never => Box::new(termcolor::NoColor::new(shared_buffer)),
-        _ => Box::new(termcolor::Ansi::new(shared_buffer)),
+    let color_choice = match color_config {
+        ColorConfig::Never => ColorChoice::Never,
+        _ => ColorChoice::AlwaysAnsi,
     };
-    let emitter = HumanEmitter::new(dst, fallback_bundle)
+    let dst: Destination = AutoStream::new(Box::new(shared_buffer), color_choice);
+    let emitter = HumanEmitter::new(dst, translator)
         .sm(source_map)
-        .fluent_bundle(fluent_bundle)
         .short_message(short_message)
         .ui_testing(ui_testing)
         .ignored_directories_in_source_blocks(ignored_directories_in_source_blocks)
@@ -103,8 +102,7 @@ pub fn raw_output_full<G: EmissionGuarantee>(
 pub fn output_full<G: EmissionGuarantee>(
     diagnostic: Diag<G>,
     source_map: Option<Arc<SourceMap>>,
-    fluent_bundle: Option<Arc<FluentBundle>>,
-    fallback_bundle: LazyFallbackBundle,
+    translator: Translator,
     short_message: bool,
     ui_testing: bool,
     ignored_directories_in_source_blocks: Vec<String>,
@@ -115,14 +113,13 @@ pub fn output_full<G: EmissionGuarantee>(
     theme: OutputTheme,
     color_config: ColorConfig,
 ) -> String {
-    let bytes = raw_output_full(diagnostic, source_map, fluent_bundle, fallback_bundle, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config);
+    let bytes = raw_output_full(diagnostic, source_map, translator, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config);
     String::from_utf8(bytes).unwrap()
 }
 
 pub fn output<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> String {
     let source_map = Some(sess.psess.clone_source_map());
-    let fluent_bundle = None;
-    let fallback_bundle = rustc_errors::fallback_fluent_bundle(vec![], true);
+    let translator = rustc_driver::default_translator();
     let short_message = false;
     let ui_testing = sess.opts.unstable_opts.ui_testing;
     let ignored_directories_in_source_blocks = vec![];
@@ -133,7 +130,7 @@ pub fn output<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> Stri
     let theme = OutputTheme::Ascii;
     let color_config = sess.opts.color;
 
-    output_full(diagnostic, source_map, fluent_bundle, fallback_bundle, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config)
+    output_full(diagnostic, source_map, translator, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config)
 }
 
 pub fn emit_str<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> String {
