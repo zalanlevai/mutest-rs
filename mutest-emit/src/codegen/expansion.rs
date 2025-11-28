@@ -87,6 +87,7 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(hint_must_use)]
         #![feature(never_type)]
         #![feature(rustc_private)]
+        #![feature(stmt_expr_attributes)]
         #![feature(structural_match)]
         #![feature(thread_local)]
         #![feature(trivial_clone)]
