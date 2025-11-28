@@ -1,0 +1,315 @@
+:root {
+    --interface-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    --monospace-font: monospace;
+
+    --main-background-color: #353535;
+    --main-color: #ddd;
+    --hover-background-color: #676767;
+    --border-color: #999;
+    --code-block-background-color: #2a2a2a;
+
+    --mutation-group-background-color: #635556;
+
+    /* NOTE: Syntax highlight colors taken from rustdoc. */
+    --code-highlight-kw-color: #ab8ac1;
+    --code-highlight-kw-2-color: #769acb;
+    --code-highlight-lifetime-color: #d97f26;
+    --code-highlight-prelude-color: #769acb;
+    --code-highlight-prelude-val-color: #ee6868;
+    --code-highlight-number-color: #83a300;
+    --code-highlight-string-color: #83a300;
+    --code-highlight-literal-color: #ee6868;
+    --code-highlight-attribute-color: #ee6868;
+    --code-highlight-self-color: #ee6868;
+    --code-highlight-macro-color: #3e999f;
+    --code-highlight-question-mark-color: #ff9011;
+    --code-highlight-comment-color: #8d8d8b;
+    --code-highlight-doc-comment-color: #8ca375;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    background-color: var(--main-background-color);
+    color: var(--main-color);
+
+    font-family: var(--interface-font);
+    font-size: 1rem;
+}
+
+body {
+    display: flex;
+    flex-direction: row;
+
+    width: 100vw;
+    height: 100vh;
+    overflow-y: hidden;
+}
+
+.badge {
+    margin-inline: 0.3em;
+    padding-inline: 0.3em;
+    padding-block: 0.1em;
+    border-radius: 4px;
+
+    background-color: var(--code-block-background-color);
+}
+
+.inline-code {
+    padding-inline: 0.3em;
+    border-radius: 4px;
+
+    font-family: var(--monospace-font);
+
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+.sidebar {
+    width: 300px;
+    height: auto;
+    min-height: 100%;
+    overflow-y: auto;
+
+    border-right: 1px solid var(--border-color);
+
+    ol {
+        list-style: none;
+    }
+
+    li {
+        & > .item {
+            display: block;
+            width: 100%;
+            height: 100%;
+            padding-inline: 1em;
+            padding-block: 0.2em;
+
+            user-select: none;
+
+            text-decoration: none;
+            color: var(--main-color);
+
+            &:hover {
+                background-color: var(--hover-background-color);
+            }
+        }
+
+        & > ol {
+            padding-inline-start: 1em;
+        }
+    }
+}
+
+.main-content {
+    width: 100%;
+    height: auto;
+    min-height: 100%;
+    overflow-y: scroll;
+}
+
+.source-code {
+    padding-inline: 0.75em;
+    border-spacing: 0;
+
+    white-space: pre;
+    tab-size: 4;
+
+    font-family: var(--monospace-font);
+
+    background-color: var(--code-block-background-color);
+    color: var(--main-color);
+
+    .line {
+        & .line-no {
+            background-color: var(--main-background-color);
+            padding-left: 1.5em;
+            padding-right: 0.75em;
+
+            user-select: none;
+
+            text-align: right;
+        }
+
+        & .line-content {
+            width: 100%;
+            padding-left: 0.75em;
+        }
+
+        &.original {
+            .line-content {
+                background-color: rgba(255, 31, 31, 0.25);
+
+                .hi-mut {
+                    background-color: rgba(255, 31, 31, 0.5);
+                }
+            }
+        }
+        &.mutated {
+            .line-content {
+                background-color: rgba(0, 128, 0, 0.25);
+
+                .hi-mut {
+                    background-color: rgba(0, 128, 0, 0.5);
+                }
+            }
+        }
+    }
+
+    --mutation-group-margin: 2px;
+    --mutation-group-border-width: 2px;
+    --mutation-group-border-radius: 8px;
+
+    .group, .mutation {
+        & .heading {
+            & td {
+                padding-block: 0.1em;
+                padding-inline: 0.5em;
+            }
+
+            user-select: none;
+
+            background-color: var(--mutation-group-background-color);
+        }
+
+        /* Sides of the border that surrounds all overlapping mutation groups. */
+        & .line {
+            & td:first-child {
+                border-left: solid var(--mutation-group-border-width) var(--mutation-group-background-color);
+            }
+            & td:last-child {
+                border-right: solid var(--mutation-group-border-width) var(--mutation-group-background-color);
+            }
+        }
+    }
+
+    .group {
+        .heading {
+            & td {
+                border-top-left-radius: var(--mutation-group-border-radius);
+                border-top-right-radius: var(--mutation-group-border-radius);
+            }
+        }
+
+        /* Gap before each group. */
+        /* NOTE: This needs to be a before pseudo-element because the table layout does not support margins. */
+        &::before {
+            content: "";
+            display: table-row;
+            height: var(--mutation-group-margin);
+        }
+    }
+
+    .mutation {
+        &:has(+ .line) {
+            /* Gap after each group. */
+            /* NOTE: This needs to be a before pseudo-element because the table layout does not support margins. */
+            &::after {
+                content: "";
+                display: table-row;
+                height: var(--mutation-group-margin);
+            }
+        }
+
+        &:has(+ .line, + .group) {
+            /* Bottom of the border that surrounds all overlapping mutation groups. */
+            /* NOTE: The border needs to be applied specifically to the td elements. */
+            & tr:last-child td {
+                border-bottom: solid var(--mutation-group-border-width) var(--mutation-group-background-color);
+
+                &:first-child {
+                    border-bottom-left-radius: var(--mutation-group-border-radius);
+                }
+                &:last-child {
+                    border-bottom-right-radius: var(--mutation-group-border-radius);
+                }
+            }
+        }
+    }
+}
+
+/* Assignment of syntax highlighting colors. */
+.attr {
+    color: var(--code-highlight-attribute-color);
+}
+.comment {
+    color: var(--code-highlight-comment-color);
+}
+.const {
+    color: var(--main-color);
+}
+.const\! {
+    color: var(--main-color);
+}
+.fn {
+    color: var(--main-color);
+}
+.fn\! {
+    color: var(--main-color);
+}
+.kw {
+    color: var(--code-highlight-kw-color);
+}
+.label {
+    color: var(--code-highlight-lifetime-color);
+}
+.macro {
+    color: var(--code-highlight-macro-color);
+}
+.mod {
+    color: var(--main-color);
+}
+.num {
+    color: var(--code-highlight-number-color);
+}
+.op {
+    color: var(--code-highlight-kw-2-color);
+}
+.prop {
+    color: var(--main-color);
+}
+.prop\! {
+    color: var(--main-color);
+}
+.p {
+    color: var(--main-color);
+}
+.pb {
+    color: var(--main-color);
+}
+.pd {
+    color: var(--main-color);
+}
+.p\! {
+    color: var(--main-color);
+}
+.str {
+    color: var(--code-highlight-string-color);
+}
+.escape {
+    color: var(--code-highlight-string-color);
+}
+.str\! {
+    color: var(--code-highlight-string-color);
+}
+.tag {
+    color: var(--main-color);
+}
+.ty {
+    color: var(--main-color);
+}
+.ty\! {
+    color: var(--code-highlight-prelude-color);
+}
+.var {
+    color: var(--main-color);
+}
+.var\! {
+    color: var(--main-color);
+}
+.param {
+    color: var(--main-color);
+}
