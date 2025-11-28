@@ -170,8 +170,8 @@ pub mod visit {
             walk_trait_ref(self, trait_ref_ast, trait_ref_hir);
         }
 
-        fn visit_generics(&mut self, generics_ast: &'ast ast::Generics, generics_hir: &'hir hir::Generics<'hir>) {
-            walk_generics(self, generics_ast, generics_hir);
+        fn visit_generics(&mut self, generics_ast: &'ast ast::Generics, after_where_clause_ast: Option<&'ast ast::WhereClause>, generics_hir: &'hir hir::Generics<'hir>) {
+            walk_generics(self, generics_ast, after_where_clause_ast, generics_hir);
         }
 
         fn visit_generic_param(&mut self, generic_param_ast: &'ast ast::GenericParam, generic_param_hir: &'hir hir::GenericParam<'hir>) {
@@ -307,7 +307,7 @@ pub mod visit {
             | (ast::visit::FnKind::Fn(_, _, fn_data_ast), hir::intravisit::FnKind::ItemFn(_, _, _))
             | (ast::visit::FnKind::Fn(_, _, fn_data_ast), hir::intravisit::FnKind::Method(_, _)) => {
                 if let Some(generics_hir) = generics_hir {
-                    visitor.visit_generics(&fn_data_ast.generics, generics_hir);
+                    visitor.visit_generics(&fn_data_ast.generics, None, generics_hir);
                 }
 
                 let body_hir = body_hir.and_then(|body_hir| visitor.nested_body(body_hir));
@@ -470,7 +470,7 @@ pub mod visit {
     pub fn walk_const<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, const_ast: &'ast ast::ConstItem, const_hir: &hir::ConstItem<'hir>) {
         visit_matching_ty(visitor, &const_ast.ty, const_hir.ty);
         if let Some(generics_hir) = const_hir.generics {
-            visitor.visit_generics(&const_ast.generics, generics_hir);
+            visitor.visit_generics(&const_ast.generics, None, generics_hir);
         }
         if let Some(const_item_rhs_ast) = &const_ast.rhs && let Some(const_item_rhs_hir) = const_hir.rhs {
             match (const_item_rhs_ast, const_item_rhs_hir) {
@@ -496,14 +496,14 @@ pub mod visit {
     }
 
     pub fn walk_enum<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, enum_def_ast: &'ast ast::EnumDef, generics_ast: &'ast ast::Generics, enum_def_hir: &'hir hir::EnumDef<'hir>, generics_hir: &'hir hir::Generics<'hir>) {
-        visitor.visit_generics(generics_ast, generics_hir);
+        visitor.visit_generics(generics_ast, None, generics_hir);
         for (variant_ast, variant_hir) in iter::zip(&enum_def_ast.variants, enum_def_hir.variants) {
             visitor.visit_variant(variant_ast, variant_hir);
         }
     }
 
     pub fn walk_struct<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, variant_data_ast: &'ast ast::VariantData, generics_ast: &'ast ast::Generics, variant_data_hir: &'hir hir::VariantData<'hir>, generics_hir: &'hir hir::Generics<'hir>) {
-        visitor.visit_generics(generics_ast, generics_hir);
+        visitor.visit_generics(generics_ast, None, generics_hir);
         visitor.visit_variant_data(variant_data_ast, variant_data_hir);
     }
 
@@ -531,29 +531,29 @@ pub mod visit {
 
         match ty_alias_hir {
             hir::TyAliasItem::Item(generics_hir, _) => {
-                visitor.visit_generics(&ty_alias_ast.generics, generics_hir);
+                visitor.visit_generics(&ty_alias_ast.generics, Some(&ty_alias_ast.after_where_clause), generics_hir);
             }
             hir::TyAliasItem::TraitItem(generics_hir, generic_bounds_hir, _) => {
-                visitor.visit_generics(&ty_alias_ast.generics, generics_hir);
+                visitor.visit_generics(&ty_alias_ast.generics, Some(&ty_alias_ast.after_where_clause), generics_hir);
                 for (generic_bound_ast, generic_bound_hir) in iter::zip(&ty_alias_ast.bounds, *generic_bounds_hir) {
                     visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
                 }
             }
             hir::TyAliasItem::ImplItem(generics_hir, _) => {
-                visitor.visit_generics(&ty_alias_ast.generics, generics_hir);
+                visitor.visit_generics(&ty_alias_ast.generics, Some(&ty_alias_ast.after_where_clause), generics_hir);
             }
         }
     }
 
     pub fn walk_trait<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, trait_ast: &'ast ast::Trait, generics_hir: &'hir hir::Generics<'hir>, generic_bounds_hir: hir::GenericBounds<'hir>) {
-        visitor.visit_generics(&trait_ast.generics, generics_hir);
+        visitor.visit_generics(&trait_ast.generics, None, generics_hir);
         for (generic_bound_ast, generic_bound_hir) in iter::zip(&trait_ast.bounds, generic_bounds_hir) {
             visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
         }
     }
 
     pub fn walk_trait_alias<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, trait_alias_ast: &'ast ast::TraitAlias, generics_hir: &'hir hir::Generics<'hir>, generic_bounds_hir: hir::GenericBounds<'hir>) {
-        visitor.visit_generics(&trait_alias_ast.generics, generics_hir);
+        visitor.visit_generics(&trait_alias_ast.generics, None, generics_hir);
         for (generic_bound_ast, generic_bound_hir) in iter::zip(&trait_alias_ast.bounds, generic_bounds_hir) {
             visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
         }
@@ -564,7 +564,7 @@ pub mod visit {
             visitor.visit_trait_ref(&trait_impl_header_ast.trait_ref, &trait_impl_header_hir.trait_ref);
         }
         visit_matching_ty(visitor, &impl_ast.self_ty, impl_hir.self_ty);
-        visitor.visit_generics(&impl_ast.generics, impl_hir.generics);
+        visitor.visit_generics(&impl_ast.generics, None, impl_hir.generics);
     }
 
     pub fn walk_poly_trait_ref<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, poly_trait_ref_ast: &'ast ast::PolyTraitRef, poly_trait_ref_hir: &'hir hir::PolyTraitRef<'hir>) {
@@ -578,7 +578,7 @@ pub mod visit {
         visitor.visit_path(&trait_ref_ast.path, trait_ref_hir.path);
     }
 
-    pub fn walk_generics<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, generics_ast: &'ast ast::Generics, generics_hir: &'hir hir::Generics<'hir>) {
+    pub fn walk_generics<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, generics_ast: &'ast ast::Generics, after_where_clause_ast: Option<&'ast ast::WhereClause>, generics_hir: &'hir hir::Generics<'hir>) {
         let mut where_predicates_hir_iter = generics_hir.predicates.iter();
 
         for (generic_param_ast, generic_param_hir) in iter::zip(&generics_ast.params, generics_hir.params) {
@@ -606,7 +606,10 @@ pub mod visit {
             }
         }
 
-        for (where_predicate_ast, where_predicate_hir) in iter::zip(&generics_ast.where_clause.predicates, where_predicates_hir_iter) {
+        let where_predicates_ast_iter = generics_ast.where_clause.predicates.iter()
+            .chain(after_where_clause_ast.map(|after_where_clause_ast| &after_where_clause_ast.predicates).into_iter().flatten());
+
+        for (where_predicate_ast, where_predicate_hir) in iter::zip(where_predicates_ast_iter, where_predicates_hir_iter) {
             match (&where_predicate_ast.kind, where_predicate_hir.kind) {
                 (ast::WherePredicateKind::BoundPredicate(predicate_ast), hir::WherePredicateKind::BoundPredicate(predicate_hir)) => {
                     assert_matches!(predicate_hir.origin, hir::PredicateOrigin::WhereClause);
@@ -1894,8 +1897,8 @@ impl<'ast, 'hir, 'op> visit::AstHirVisitor<'ast, 'hir> for BodyResolutionsCollec
         visit::walk_trait_ref(self, trait_ref_ast, trait_ref_hir);
     }
 
-    fn visit_generics(&mut self, generics_ast: &'ast ast::Generics, generics_hir: &'hir hir::Generics<'hir>) {
-        visit::walk_generics(self, generics_ast, generics_hir);
+    fn visit_generics(&mut self, generics_ast: &'ast ast::Generics, after_where_clause_ast: Option<&'ast ast::WhereClause>, generics_hir: &'hir hir::Generics<'hir>) {
+        visit::walk_generics(self, generics_ast, after_where_clause_ast, generics_hir);
     }
 
     fn visit_generic_param(&mut self, generic_param_ast: &'ast ast::GenericParam, generic_param_hir: &'hir hir::GenericParam<'hir>) {
