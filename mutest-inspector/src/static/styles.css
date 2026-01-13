@@ -10,6 +10,11 @@
 
     --mutation-group-background-color: #635556;
 
+    --status-undetected-color: rgba(255, 31, 31, 0.9);
+    --status-detected-color: rgba(0, 128, 0, 0.9);
+    --status-timed-out-color: rgba(115, 0, 128, 0.9);
+    --status-crashed-color: rgba(0, 20, 128, 0.9);
+
     /* NOTE: Syntax highlight colors taken from rustdoc. */
     --code-highlight-kw-color: #ab8ac1;
     --code-highlight-kw-2-color: #769acb;
@@ -57,6 +62,29 @@ body {
     border-radius: 4px;
 
     background-color: var(--code-block-background-color);
+}
+
+.status {
+    margin-right: 0.5em;
+    padding-inline: 0.3em;
+    border-radius: 4px;
+
+    font-family: var(--interface-font);
+
+    background-color: red;
+
+    &.undetected {
+        background-color: var(--status-undetected-color);
+    }
+    &.detected {
+        background-color: var(--status-detected-color);
+    }
+    &.timed-out {
+        background-color: var(--status-timed-out-color);
+    }
+    &.crashed {
+        background-color: var(--status-crashed-color);
+    }
 }
 
 .inline-code {

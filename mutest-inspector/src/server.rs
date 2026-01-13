@@ -51,6 +51,8 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
 
     let overlapping_groups_of_mutations_in_file = wcx.overlapping_groups_of_mutations_in_file(&path);
 
+    let evaluation_info = wcx.evaluation_info();
+
     let mut body = String::new();
 
     write!(body, "<!DOCTYPE html>").unwrap();
@@ -150,8 +152,13 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
             for &mutation_id in &g.mutations {
                 let Some(mutation_html) = wcx.mutation_html(mutation_id) else { continue; };
 
+                let mutation_detection_html = match evaluation_info {
+                    Some(evaluation_info) => evaluation_info.mutation_detections[mutation_id].badge_html(),
+                    None => "",
+                };
+
                 // Write out mutation heading.
-                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">mutation {}: {}</td></tr>", mutation_id.0, mutation_id.0, mutation_html.display_name_html).unwrap();
+                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">{}mutation {}: {}</td></tr>", mutation_id.0, mutation_detection_html, mutation_id.0, mutation_html.display_name_html).unwrap();
 
                 // Filter to relevant substitutions that fall within this overlap group.
                 let substs_within_group = mutation_html.subst_htmls.iter().filter(|subst_html| {

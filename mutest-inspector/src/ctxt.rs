@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use mutest_json::data_structures::{IdxVec, IdxSlice};
 use mutest_json::mutations::MutationId;
 
+use crate::evaluation::EvaluationInfo;
 use crate::html::SourceFileHtml;
 use crate::html::mutations::{MutationHtml, OverlappingGroupOfMutations, update_overlapping_groups};
 use crate::source_file::SourceFile;
@@ -16,6 +17,7 @@ pub struct WebCtxt {
     loaded_source_files: HashMap<PathBuf, SourceFile>,
     source_file_htmls: HashMap<PathBuf, SourceFileHtml>,
     mutation_htmls: IdxVec<MutationId, MutationHtml>,
+    evaluation_info: Option<EvaluationInfo>,
 }
 
 impl WebCtxt {
@@ -51,6 +53,7 @@ impl WebCtxt {
             loaded_source_files: Default::default(),
             source_file_htmls: Default::default(),
             mutation_htmls: IdxVec::new(),
+            evaluation_info: None,
         }
     }
 
@@ -61,6 +64,10 @@ impl WebCtxt {
 
     pub(crate) fn register_loaded_mutations(&mut self, mutation_htmls: IdxVec<MutationId, MutationHtml>) {
         self.mutation_htmls = mutation_htmls;
+    }
+
+    pub(crate) fn update_evaluation_info(&mut self, evaluation_info: Option<EvaluationInfo>) {
+        self.evaluation_info = evaluation_info;
     }
 
     #[inline]
@@ -96,5 +103,10 @@ impl WebCtxt {
     #[inline]
     pub fn overlapping_groups_of_mutations_in_file(&self, path: &Path) -> &[OverlappingGroupOfMutations] {
         self.mutations_on_overlapping_lines.get(path).map(|vec| -> &[_] { vec }).unwrap_or_default()
+    }
+
+    #[inline]
+    pub fn evaluation_info(&self) -> Option<&EvaluationInfo> {
+        self.evaluation_info.as_ref()
     }
 }
