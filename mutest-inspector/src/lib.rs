@@ -1,5 +1,6 @@
 pub mod config;
 pub mod ctxt;
+pub mod evaluation;
 pub mod html;
 pub mod server;
 pub mod source_file;
@@ -8,6 +9,7 @@ pub mod syntax_highlight;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use mutest_json::data_structures::IdxVec;
@@ -15,6 +17,7 @@ use mutest_json::mutations::MutationId;
 
 use crate::config::Config;
 use crate::ctxt::WebCtxt;
+use crate::evaluation::{EvaluationInfo, MutationDetection};
 use crate::html::{SourceFileHtml, escape_html_body_text_with_inline_code};
 use crate::html::mutations::{MutationHtml, render_mutation_subst_lines};
 use crate::source_file::SourceFile;
@@ -28,6 +31,15 @@ pub async fn run(config: Config) {
 
     let mutations_metadata_file_str = fs::read_to_string(config.json_dir_path.join("mutations.json")).expect("cannot read mutations metadata file");
     let mutations_metadata = serde_json::from_str::<mutest_json::mutations::MutationsInfo>(&mutations_metadata_file_str).expect("cannot parse mutations metadata file");
+
+    let evaluation_metadata_file_str = match fs::read_to_string(config.json_dir_path.join("evaluation.json")){
+        Ok(v) => Some(v),
+        Err(err) if matches!(err.kind(), io::ErrorKind::NotFound) => None,
+        Err(err) => panic!("cannot read evaluation metadata file: {err}"),
+    };
+    let evaluation_metadata = evaluation_metadata_file_str.as_ref().map(|evaluation_metadata_file_str| {
+        serde_json::from_str::<mutest_json::evaluation::EvaluationInfo>(evaluation_metadata_file_str).expect("cannot parse evaluation metadata file")
+    });
 
     let unique_source_file_paths = call_graph_metadata.definitions.iter()
         .filter_map(|def| def.span.as_ref().map(|span| -> &Path { &span.path }))
@@ -106,6 +118,34 @@ pub async fn run(config: Config) {
         mutation_htmls.push(mutation_html);
     }
     wcx.register_loaded_mutations(mutation_htmls);
+
+    if let Some(evaluation_metadata) = &evaluation_metadata {
+        let mut evaluation_info = EvaluationInfo {
+            mutation_detections: IdxVec::with_capacity(mutations_metadata.mutations.len()),
+        };
+
+        let mutation_run = match &evaluation_metadata.mutation_runs[..] {
+            [] => panic!("evaluation metadata contains no mutation runs"),
+            [mutation_run] => mutation_run,
+            // TODO: Warn user that we are ignoring all subsequent mutation runs.
+            [first_mutation_run, ..] => first_mutation_run,
+        };
+
+        for mutation_detection in &mutation_run.mutation_detection_matrix.overall_detections.0 {
+            let mutation_detection = match mutation_detection {
+                mutest_json::evaluation::MutationDetection::NotRun => panic!("encountered unexpected mutation detection value"),
+                mutest_json::evaluation::MutationDetection::Undetected => MutationDetection::Undetected,
+                mutest_json::evaluation::MutationDetection::Detected => MutationDetection::Detected,
+                mutest_json::evaluation::MutationDetection::TimedOut => MutationDetection::TimedOut,
+                mutest_json::evaluation::MutationDetection::Crashed => MutationDetection::Crashed,
+            };
+
+            // NOTE: Mutation detection data is populated in mutation ID order.
+            evaluation_info.mutation_detections.push(mutation_detection);
+        }
+
+        wcx.update_evaluation_info(Some(evaluation_info));
+    }
 
     println!("finished in {:.2?}", t_start.elapsed());
 
