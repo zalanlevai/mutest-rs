@@ -2,18 +2,25 @@
     --interface-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
     --monospace-font: monospace;
 
+    --topbar-height: 32px;
+
     --main-background-color: #353535;
     --main-color: #ddd;
     --hover-background-color: #676767;
-    --border-color: #999;
+    --select-background-color: #444444;
+    --border-color: #4e4e4e;
     --code-block-background-color: #2a2a2a;
 
     --mutation-group-background-color: #635556;
 
+    --status-undetected-background-color: rgba(255, 31, 31, 0.9);
+    --status-detected-background-color: rgba(0, 128, 0, 0.9);
+    --status-timed-out-background-color: rgba(115, 0, 128, 0.9);
+    --status-crashed-background-color: rgba(0, 20, 128, 0.9);
     --status-undetected-color: rgba(255, 31, 31, 0.9);
-    --status-detected-color: rgba(0, 128, 0, 0.9);
-    --status-timed-out-color: rgba(115, 0, 128, 0.9);
-    --status-crashed-color: rgba(0, 20, 128, 0.9);
+    --status-detected-color: rgba(0, 255, 0, 0.9);
+    --status-timed-out-color: rgba(230, 0, 255, 0.9);
+    --status-crashed-color: rgba(0, 38, 255, 0.9);
 
     /* NOTE: Syntax highlight colors taken from rustdoc. */
     --code-highlight-kw-color: #ab8ac1;
@@ -48,7 +55,7 @@ html {
 
 body {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
 
     width: 100vw;
     height: 100vh;
@@ -56,12 +63,21 @@ body {
 }
 
 .badge {
+    display: inline;
     margin-inline: 0.3em;
     padding-inline: 0.3em;
     padding-block: 0.1em;
     border-radius: 4px;
 
     background-color: var(--code-block-background-color);
+
+    > * {
+        padding-inline: 0.2em;
+    }
+
+    .undetected {
+        color: var(--status-undetected-color);
+    }
 }
 
 .status {
@@ -74,16 +90,16 @@ body {
     background-color: red;
 
     &.undetected {
-        background-color: var(--status-undetected-color);
+        background-color: var(--status-undetected-background-color);
     }
     &.detected {
-        background-color: var(--status-detected-color);
+        background-color: var(--status-detected-background-color);
     }
     &.timed-out {
-        background-color: var(--status-timed-out-color);
+        background-color: var(--status-timed-out-background-color);
     }
     &.crashed {
-        background-color: var(--status-crashed-color);
+        background-color: var(--status-crashed-background-color);
     }
 }
 
@@ -94,6 +110,54 @@ body {
     font-family: var(--monospace-font);
 
     background-color: rgba(0, 0, 0, 0.3);
+}
+
+.topbar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+
+    width: 100%;
+    height: var(--topbar-height);
+
+    border-bottom: 1px solid var(--border-color);
+
+    & > * {
+        display: flex;
+        align-items: center;
+        height: 100%;
+    }
+
+    & .logo, & .tab {
+        padding-inline: 0.75em;
+
+        user-select: none;
+
+        text-decoration: none;
+        color: var(--main-color);
+
+        &:hover {
+            background-color: var(--hover-background-color);
+        }
+    }
+
+    & .logo {
+        font-weight: 700;
+    }
+
+    & .tab {
+        &.active {
+            box-shadow: 0px 1px var(--main-color);
+        }
+    }
+}
+
+.page-layout {
+    display: flex;
+    flex-direction: row;
+
+    width: 100%;
+    height: calc(100% - var(--topbar-height));
 }
 
 .sidebar {
@@ -110,19 +174,32 @@ body {
 
     li {
         & > .item {
-            display: block;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+
             width: 100%;
-            height: 100%;
-            padding-inline: 1em;
-            padding-block: 0.2em;
+            padding-inline: 1em 0;
 
             user-select: none;
 
             text-decoration: none;
             color: var(--main-color);
 
+            &.selected {
+                background-color: var(--select-background-color);
+            }
+
             &:hover {
                 background-color: var(--hover-background-color);
+            }
+
+            .name {
+                padding-block: 0.25em;
+
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
         }
 
@@ -137,6 +214,58 @@ body {
     height: auto;
     min-height: 100%;
     overflow-y: scroll;
+
+    header {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+
+        position: sticky;
+        top: 0px;
+        left: 0px;
+        width: 100%;
+        height: 32px;
+
+        background-color: var(--main-background-color);
+
+        border-bottom: 1px solid var(--border-color);
+
+        h1 {
+            padding-inline: 1em;
+
+            font-size: 1em;
+            font-weight: 700;
+        }
+
+        .stats {
+            .label, .value {
+                padding-inline: 0.2em;
+            }
+
+            .label {
+                padding-inline-end: 0.4em;
+
+                color: var(--main-color);
+            }
+
+            .value {
+                font-weight: 700;
+
+                &.undetected {
+                    color: var(--status-undetected-color);
+                }
+                &.detected {
+                    color: var(--status-detected-color);
+                }
+                &.timed-out {
+                    color: var(--status-timed-out-color);
+                }
+                &.crashed {
+                    color: var(--status-crashed-color);
+                }
+            }
+        }
+    }
 }
 
 .source-code {

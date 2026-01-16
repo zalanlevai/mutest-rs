@@ -9,6 +9,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use crate::config::Options;
 use crate::ctxt::WebCtxt;
+use crate::evaluation::MutationDetection;
 use crate::html::source_code_line_content;
 use crate::html::mutations::{OverlappingGroupOfMutations, OverlappingGroupKind};
 use crate::source_file::{LineNo, TreeEntry, file_tree_entries};
@@ -53,6 +54,27 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
 
     let evaluation_info = wcx.evaluation_info();
 
+    let mut total_mutations_count = 0;
+    let mut undetected_mutations_count = 0;
+    let mut detected_mutations_count = 0;
+    let mut timed_out_mutations_count = 0;
+    let mut crashed_mutations_count = 0;
+    if let Some(evaluation_info) = evaluation_info {
+        for group in overlapping_groups_of_mutations_in_file {
+            for &mutation_id in &group.mutations {
+                total_mutations_count += 1;
+
+                let mutation_detection = evaluation_info.mutation_detections[mutation_id];
+                match mutation_detection {
+                    MutationDetection::Undetected => undetected_mutations_count += 1,
+                    MutationDetection::Detected => detected_mutations_count += 1,
+                    MutationDetection::TimedOut => timed_out_mutations_count += 1,
+                    MutationDetection::Crashed => crashed_mutations_count += 1,
+                }
+            }
+        }
+    }
+
     let mut body = String::new();
 
     write!(body, "<!DOCTYPE html>").unwrap();
@@ -63,22 +85,47 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
     write!(body, "</head>").unwrap();
     write!(body, "<body>").unwrap();
 
+    write!(body, "<nav class=\"topbar\">").unwrap();
+    write!(body, "<a class=\"logo\" href=\"/\">mutest-rs</a>").unwrap();
+    write!(body, "<a class=\"tab active\" href=\"/source\">sources</a>").unwrap();
+    write!(body, "</nav>").unwrap();
+
+    write!(body, "<div class=\"page-layout\">").unwrap();
+
     write!(body, "<nav class=\"sidebar\">").unwrap();
     write!(body, "<ol class=\"file-tree\">").unwrap();
     for tree_entry in file_tree_entries(wcx.local_source_file_paths()) {
         match tree_entry {
-            TreeEntry::Dir(path) => {
-                let Some(dir_name) = path.file_name() else {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("encountered invalid path amongst file tree entries: `{}`", path.display())));
+            TreeEntry::Dir(entry_path) => {
+                let Some(dir_name) = entry_path.file_name() else {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("encountered invalid path amongst file tree entries: `{}`", entry_path.display())));
                 };
-                write!(body, "<li><a class=\"item\">{}</a><ol>", dir_name.display()).unwrap();
+                write!(body, "<li><a class=\"item\"><span class=\"name\">{}</span></a><ol>", dir_name.display()).unwrap();
             }
-            TreeEntry::File(path) => {
-                let Some(file_name) = path.file_name() else {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("encountered invalid path amongst file tree entries: `{}`", path.display())));
+            TreeEntry::File(entry_path) => {
+                let Some(file_name) = entry_path.file_name() else {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("encountered invalid path amongst file tree entries: `{}`", entry_path.display())));
                 };
-                let file_mutations = wcx.file_mutations(path);
-                write!(body, "<li><a class=\"item\" href=\"/source/{}\">{} <span class=\"badge\">{}</span></a></li>", path.display(), file_name.display(), file_mutations.len()).unwrap();
+                let file_mutations = wcx.file_mutations(entry_path);
+
+                write!(body, "<li><a class=\"item").unwrap();
+                if entry_path == path {
+                    write!(body, " selected").unwrap();
+                }
+                write!(body, "\" href=\"/source/{}\">", entry_path.display()).unwrap();
+                write!(body, "<span class=\"name\">{}</span>", file_name.display()).unwrap();
+                write!(body, "<div class=\"badge\">").unwrap();
+                if let Some(evaluation_info) = evaluation_info {
+                    let undetected_mutations_count = file_mutations.iter()
+                        .filter(|&&mutation_id| matches!(evaluation_info.mutation_detections[mutation_id], MutationDetection::Undetected))
+                        .count();
+                    if undetected_mutations_count >= 1 {
+                        write!(body, "<span class=\"undetected\">{}</span>", undetected_mutations_count).unwrap();
+                    }
+                }
+                write!(body, "<span class=\"total\">{}</span>", file_mutations.len()).unwrap();
+                write!(body, "</div>").unwrap();
+                write!(body, "</a></li>").unwrap();
             }
             TreeEntry::EndDir => {
                 write!(body, "</ol></li>").unwrap();
@@ -89,6 +136,30 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
     write!(body, "</nav>").unwrap();
 
     write!(body, "<main class=\"main-content\">").unwrap();
+
+    write!(body, "<header>").unwrap();
+    write!(body, "<h1>{}</h1>", path.display()).unwrap();
+    if let Some(_evaluation_info) = evaluation_info {
+        match total_mutations_count {
+            0 => {
+                write!(body, "<div class=\"stats none\">").unwrap();
+                write!(body, "<span class=\"label\">no mutations</span>").unwrap();
+                write!(body, "</div>").unwrap();
+            }
+            _ => {
+                let mutation_score = (total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64;
+                write!(body, "<div class=\"stats\">").unwrap();
+                write!(body, "<span class=\"value total\">{}</span><span class=\"label\">mutations</span>", total_mutations_count).unwrap();
+                write!(body, "<span class=\"value score\">{:.2}%</span><span class=\"label\">coverage</span>", mutation_score * 100_f64).unwrap();
+                write!(body, "<span class=\"value undetected\">{}</span><span class=\"label\">undetected</span>", undetected_mutations_count).unwrap();
+                write!(body, "<span class=\"value detected\">{}</span><span class=\"label\">detected</span>", detected_mutations_count).unwrap();
+                write!(body, "<span class=\"value timed-out\">{}</span><span class=\"label\">timed out</span>", timed_out_mutations_count).unwrap();
+                write!(body, "<span class=\"value crashed\">{}</span><span class=\"label\">crashed</span>", crashed_mutations_count).unwrap();
+                write!(body, "</div>").unwrap();
+            }
+        }
+    }
+    write!(body, "</header>").unwrap();
 
     write!(body, "<table class=\"source-code\">").unwrap();
     let mut highlighted_lines_html_iter = source_file_html.highlighted_lines_html.iter_enumerated();
@@ -233,6 +304,8 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
     write!(body, "</table>").unwrap();
 
     write!(body, "</main").unwrap();
+
+    write!(body, "</div>").unwrap();
 
     write!(body, "</body>").unwrap();
     write!(body, "</html>").unwrap();
