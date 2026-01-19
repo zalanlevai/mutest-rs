@@ -23,6 +23,7 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
 
     let router = axum::Router::new()
         .route("/", axum::routing::get(handle_root))
+        .route("/source", axum::routing::get(handle_source_request))
         .route("/source/{*path}", axum::routing::get(handle_source_request))
         .nest_service("/static", tower_http::services::ServeDir::new(env!("STATIC_DIR")))
         .fallback(handle_unknown)
@@ -39,48 +40,25 @@ async fn handle_unknown() -> impl IntoResponse {
 }
 
 async fn handle_root() -> Response {
-    // FIXME: Look up actual root source file.
-    Redirect::to("/source/src/lib.rs").into_response()
+    Redirect::to("/source").into_response()
 }
 
-async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path): Path<PathBuf>) -> (StatusCode, Html<String>) {
+async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Option<Path<PathBuf>>) -> (StatusCode, Html<String>) {
     let wcx = &state.wcx;
-
-    let Some(source_file_html) = wcx.source_file_html(&path) else {
-        return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not found", path.display())));
-    };
-
-    let overlapping_groups_of_mutations_in_file = wcx.overlapping_groups_of_mutations_in_file(&path);
 
     let evaluation_info = wcx.evaluation_info();
 
-    let mut total_mutations_count = 0;
-    let mut undetected_mutations_count = 0;
-    let mut detected_mutations_count = 0;
-    let mut timed_out_mutations_count = 0;
-    let mut crashed_mutations_count = 0;
-    if let Some(evaluation_info) = evaluation_info {
-        for group in overlapping_groups_of_mutations_in_file {
-            for &mutation_id in &group.mutations {
-                total_mutations_count += 1;
-
-                let mutation_detection = evaluation_info.mutation_detections[mutation_id];
-                match mutation_detection {
-                    MutationDetection::Undetected => undetected_mutations_count += 1,
-                    MutationDetection::Detected => detected_mutations_count += 1,
-                    MutationDetection::TimedOut => timed_out_mutations_count += 1,
-                    MutationDetection::Crashed => crashed_mutations_count += 1,
-                }
-            }
-        }
-    }
-
     let mut body = String::new();
+
+    let title = match &path {
+        Some(Path(path)) => &path.to_string_lossy(),
+        None => "source",
+    };
 
     write!(body, "<!DOCTYPE html>").unwrap();
     write!(body, "<html lang=\"en\">").unwrap();
     write!(body, "<head>").unwrap();
-    write!(body, "<title>{}</title>", path.display()).unwrap();
+    write!(body, "<title>{}</title>", title).unwrap();
     write!(body, "<link rel=\"stylesheet\" href=\"/static/styles.css\">").unwrap();
     write!(body, "</head>").unwrap();
     write!(body, "<body>").unwrap();
@@ -109,7 +87,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
                 let file_mutations = wcx.file_mutations(entry_path);
 
                 write!(body, "<li><a class=\"item").unwrap();
-                if entry_path == path {
+                if let Some(Path(path)) = &path && entry_path == path {
                     write!(body, " selected").unwrap();
                 }
                 write!(body, "\" href=\"/source/{}\">", entry_path.display()).unwrap();
@@ -136,6 +114,42 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path)
     write!(body, "</nav>").unwrap();
 
     write!(body, "<main class=\"main-content\">").unwrap();
+
+    let Some(Path(path)) = path else {
+        // NOTE: Empty main content for root source page.
+        write!(body, "</main").unwrap();
+        write!(body, "</div>").unwrap();
+        write!(body, "</body>").unwrap();
+        write!(body, "</html>").unwrap();
+        return (StatusCode::OK, Html(body));
+    };
+
+    let Some(source_file_html) = wcx.source_file_html(&path) else {
+        return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not found", path.display())));
+    };
+
+    let overlapping_groups_of_mutations_in_file = wcx.overlapping_groups_of_mutations_in_file(&path);
+
+    let mut total_mutations_count = 0;
+    let mut undetected_mutations_count = 0;
+    let mut detected_mutations_count = 0;
+    let mut timed_out_mutations_count = 0;
+    let mut crashed_mutations_count = 0;
+    if let Some(evaluation_info) = evaluation_info {
+        for group in overlapping_groups_of_mutations_in_file {
+            for &mutation_id in &group.mutations {
+                total_mutations_count += 1;
+
+                let mutation_detection = evaluation_info.mutation_detections[mutation_id];
+                match mutation_detection {
+                    MutationDetection::Undetected => undetected_mutations_count += 1,
+                    MutationDetection::Detected => detected_mutations_count += 1,
+                    MutationDetection::TimedOut => timed_out_mutations_count += 1,
+                    MutationDetection::Crashed => crashed_mutations_count += 1,
+                }
+            }
+        }
+    }
 
     write!(body, "<header>").unwrap();
     write!(body, "<h1>{}</h1>", path.display()).unwrap();
