@@ -63,7 +63,7 @@ impl Idx for DefId {
 pub struct Definition {
     pub def_id: DefId,
     pub name: Option<String>,
-    pub path: Option<String>,
+    pub path: String,
     pub span: Option<Span>,
 }
 
