@@ -70,7 +70,7 @@ pub fn write_call_graph<'tcx, 'ent>(
                 definitions.push(mutest_json::Definition {
                     def_id: json_def_id,
                     name: tcx.opt_item_name(def_id).map(|symbol| symbol.as_str().to_owned()),
-                    path: Some(tcx.def_path_str(def_id)),
+                    path: tcx.def_path_str(def_id),
                     span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(def_id)),
                 });
 
@@ -107,14 +107,12 @@ pub fn write_call_graph<'tcx, 'ent>(
 
     let mut json_entry_points = mutest_json::IdxVec::new();
     for entry_point in entry_points.iter() {
-        let _ = register_def!(entry_point.local_def_id.to_def_id());
+        let json_def_id = register_def!(entry_point.local_def_id.to_def_id());
 
         let json_entry_point_id = json_entry_points.next_index();
         let mut json_entry_point = mutest_json::call_graph::EntryPoint {
             entry_point_id: json_entry_point_id,
-            name: tcx.opt_item_name(entry_point.local_def_id.to_def_id()).map(|symbol| symbol.as_str().to_owned()).unwrap_or_default(),
-            path: tcx.def_path_str(entry_point.local_def_id.to_def_id()),
-            span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(entry_point.local_def_id.to_def_id())),
+            def_id: json_def_id,
             calls: Default::default(),
         };
 

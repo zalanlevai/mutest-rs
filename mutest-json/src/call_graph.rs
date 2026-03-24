@@ -57,12 +57,8 @@ impl Idx for EntryPointId {
 pub struct EntryPoint {
     pub entry_point_id: EntryPointId,
 
-    /// Definition name.
-    pub name: String,
-    /// Definition path.
-    pub path: String,
-    /// Definition span.
-    pub span: Option<Span>,
+    /// The corresponding definition.
+    pub def_id: DefId,
 
     /// Calls made by the entry point, grouped by the calles it is calling,
     /// with associated instance data for each call occurance.
@@ -99,7 +95,7 @@ pub struct Callee {
     pub calls: HashMap<CalleeId, SmallVec<[CallInstance; 1]>>,
 }
 
-/// Data associated with the instance of call from a particular caller.
+/// Data associated with the instance of a call from a particular caller.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct CallInstance {
     /// Span of the call's location.
