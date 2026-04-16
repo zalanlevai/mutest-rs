@@ -3,6 +3,7 @@
     --monospace-font: monospace;
 
     --topbar-height: 32px;
+    --main-heading-height: 32px;
 
     --main-background-color: #353535;
     --main-color: #ddd;
@@ -13,6 +14,7 @@
 
     --mutation-group-background-color: #635556;
 
+    --status-not-ran-background-color: rgba(0, 0, 0, 0.9);
     --status-undetected-background-color: rgba(255, 31, 31, 0.9);
     --status-detected-background-color: rgba(0, 128, 0, 0.9);
     --status-timed-out-background-color: rgba(115, 0, 128, 0.9);
@@ -62,6 +64,18 @@ body {
     overflow-y: hidden;
 }
 
+a {
+    color: var(--main-color);
+
+    &:has(> .def-path) {
+        text-decoration: none;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
 .badge {
     display: inline;
     margin-inline: 0.3em;
@@ -81,7 +95,6 @@ body {
 }
 
 .status {
-    margin-right: 0.5em;
     padding-inline: 0.3em;
     border-radius: 4px;
 
@@ -89,6 +102,9 @@ body {
 
     background-color: red;
 
+    &.not-ran {
+        background-color: var(--status-not-ran-background-color);
+    }
     &.undetected {
         background-color: var(--status-undetected-background-color);
     }
@@ -110,6 +126,14 @@ body {
     font-family: var(--monospace-font);
 
     background-color: rgba(0, 0, 0, 0.3);
+}
+
+.def-path {
+    font-family: var(--monospace-font);
+
+    > .sep {
+        color: gray;
+    }
 }
 
 .topbar {
@@ -215,6 +239,14 @@ body {
     min-height: 100%;
     overflow-y: scroll;
 
+    /* Determine whether we need to apply a sticky offset to subheaders depending on whether the page has a main sticky header. */
+    --sticky-offset: 0;
+    &:has(> header) {
+        --sticky-offset: var(--main-heading-height);
+    }
+    /* Ensure that the main sticky header does not cover the scrolled to element. */
+    scroll-padding-top: var(--sticky-offset);
+
     header {
         display: flex;
         flex-direction: row;
@@ -224,14 +256,34 @@ body {
         top: 0px;
         left: 0px;
         width: 100%;
-        height: 32px;
+        min-height: var(--main-heading-height);
+        padding-block: 0.3em;
+        padding-inline: 0.75em;
+
+        /* NOTE: The main header must be rendered above all other headers so that the section headers can slide underneath it. */
+        z-index: 1;
+
+        section > & {
+            top: var(--main-heading-height);
+
+            /* NOTE: The section headers must be rendered below the main header so that the main header can stay on top. */
+            z-index: 0;
+        }
+
+        /* Keep headers to one line of text, replacing overflow with ellipsis. */
+        /* NOTE: This must be applied to each child element individually to apply correctly. */
+        &, > * {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
         background-color: var(--main-background-color);
 
         border-bottom: 1px solid var(--border-color);
 
         h1 {
-            padding-inline: 1em;
+            padding-inline-end: 1em;
 
             font-size: 1em;
             font-weight: 700;
@@ -264,6 +316,93 @@ body {
                     color: var(--status-crashed-color);
                 }
             }
+        }
+    }
+}
+
+section.text {
+    margin-block: 1em;
+
+    > * {
+        padding-inline: 0.75em;
+    }
+
+    > h2 {
+        margin-block: 0.25em;
+        padding-block: 0.25em;
+        border-bottom: 1px solid var(--border-color);
+
+        font-size: 1.2rem;
+        line-height: 1.75rem;
+    }
+}
+
+.labeled-stats {
+    display: flex;
+    flex-direction: row;
+
+    * {
+        margin-inline: 0.5em;
+    }
+
+    .divider {
+        width: 1px;
+        min-height: 100%;
+        background-color: var(--border-color);
+    }
+}
+
+.page-table {
+    width: 100%;
+    border-spacing: 0px;
+
+    thead, tr.heading {
+        th {
+            position: sticky;
+            top: var(--sticky-offset);
+            height: var(--main-heading-height);
+            /* NOTE: Keep sticky headings on top. */
+            z-index: 2;
+
+            background-color: var(--main-background-color);
+
+            text-align: left;
+            font-weight: 700;
+        }
+    }
+
+    /* Ensure that the table sticky headers do not cover the scrolled to element by applying additional scroll offset to the table rows. */
+    :has(thead, tr.heading) {
+        tr, td {
+            scroll-margin-top: var(--main-heading-height);
+        }
+    }
+
+    th, td {
+        padding-inline: 0.75em;
+
+        border-bottom: 1px solid var(--border-color);
+
+        white-space: nowrap;
+
+        &.expand {
+            width: 100%;
+        }
+
+        &.right {
+            text-align: right !important;
+        }
+
+        &.right-tight {
+            padding-right: 0px;
+        }
+    }
+
+    tbody {
+        th, td {
+            padding-block: 0.3em;
+
+            background-color: var(--code-block-background-color);
         }
     }
 }

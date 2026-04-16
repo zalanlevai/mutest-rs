@@ -16,15 +16,20 @@ pub struct SubstHtml {
 }
 
 impl SubstHtml {
+    #[inline(always)]
     pub fn end_line(&self) -> LineNo {
         LineNo(self.start_line.0 + self.original_lines_html.len() as u32 - (!self.original_lines_html.is_empty() as u32))
     }
-}
 
-#[derive(Debug)]
-pub struct MutationHtml {
-    pub display_name_html: String,
-    pub subst_htmls: Vec<SubstHtml>,
+    #[inline(always)]
+    pub fn is_insertion(&self) -> bool {
+        self.original_lines_html.is_empty()
+    }
+
+    #[inline(always)]
+    pub fn after_source_line_no(&self) -> LineNo {
+        LineNo(self.end_line().0 + !self.is_insertion() as u32)
+    }
 }
 
 pub fn render_mutation_subst_lines(wcx: &WebCtxt, syntax_highlighter: &mut SyntaxHighlighter, subst: &mutest_json::mutations::Substitution) -> Option<SubstHtml> {

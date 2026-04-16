@@ -7,10 +7,13 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
+use mutest_json::mutations::MutationId;
+
 use crate::config::Options;
 use crate::ctxt::WebCtxt;
-use crate::evaluation::MutationDetection;
+use crate::evaluation::{TestMutationResult, MutationDetection};
 use crate::html::source_code_line_content;
+use crate::html::base::{Tab, base_html, topbar_html};
 use crate::html::mutations::{OverlappingGroupOfMutations, OverlappingGroupKind};
 use crate::source_file::{LineNo, TreeEntry, file_tree_entries};
 
@@ -25,6 +28,7 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
         .route("/", axum::routing::get(handle_root))
         .route("/source", axum::routing::get(handle_source_request))
         .route("/source/{*path}", axum::routing::get(handle_source_request))
+        .route("/mutations/{mutation_id}", axum::routing::get(handle_mutation_request))
         .nest_service("/static", tower_http::services::ServeDir::new(env!("STATIC_DIR")))
         .fallback(handle_unknown)
         .with_state(state);
@@ -54,19 +58,10 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
         Some(Path(path)) => &path.to_string_lossy(),
         None => "source",
     };
-
-    write!(body, "<!DOCTYPE html>").unwrap();
-    write!(body, "<html lang=\"en\">").unwrap();
-    write!(body, "<head>").unwrap();
-    write!(body, "<title>{}</title>", title).unwrap();
-    write!(body, "<link rel=\"stylesheet\" href=\"/static/styles.css\">").unwrap();
-    write!(body, "</head>").unwrap();
+    base_html(&mut body, title).unwrap();
     write!(body, "<body>").unwrap();
 
-    write!(body, "<nav class=\"topbar\">").unwrap();
-    write!(body, "<a class=\"logo\" href=\"/\">mutest-rs</a>").unwrap();
-    write!(body, "<a class=\"tab active\" href=\"/source\">sources</a>").unwrap();
-    write!(body, "</nav>").unwrap();
+    topbar_html(&mut body, wcx, Some(Tab::Sources)).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
@@ -232,10 +227,11 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
                 //       so we must only move the cursor for the remaining source lines.
                 for _ in g.start_line.0..g.end_line.0 { let _ = highlighted_lines_html_iter.next(); }
             }
+
             write!(body, "</tbody>").unwrap();
 
             for &mutation_id in &g.mutations {
-                let Some(mutation_html) = wcx.mutation_html(mutation_id) else { continue; };
+                let Some(mutation) = wcx.mutation(mutation_id) else { continue; };
 
                 let mutation_detection_html = match evaluation_info {
                     Some(evaluation_info) => evaluation_info.mutation_detections[mutation_id].badge_html(),
@@ -243,10 +239,10 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
                 };
 
                 // Write out mutation heading.
-                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">{}mutation {}: {}</td></tr>", mutation_id.0, mutation_detection_html, mutation_id.0, mutation_html.display_name_html).unwrap();
+                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">{} <a href=\"/mutations/{}\">mutation {}</a>: {}</td></tr>", mutation_id.0, mutation_detection_html, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
 
                 // Filter to relevant substitutions that fall within this overlap group.
-                let substs_within_group = mutation_html.subst_htmls.iter().filter(|subst_html| {
+                let substs_within_group = mutation.subst_htmls.iter().filter(|subst_html| {
                     g.overlaps(subst_html.start_line, subst_html.end_line())
                 });
 
@@ -318,6 +314,169 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
     write!(body, "</table>").unwrap();
 
     write!(body, "</main").unwrap();
+
+    write!(body, "</div>").unwrap();
+
+    write!(body, "</body>").unwrap();
+    write!(body, "</html>").unwrap();
+
+    (StatusCode::OK, Html(body))
+}
+
+async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mutation_id): Path<MutationId>) -> (StatusCode, Html<String>) {
+    let wcx = &state.wcx;
+
+    let Some(mutation) = wcx.mutation(mutation_id) else {
+        return (StatusCode::NOT_FOUND, Html(format!("mutation `{}` not found", mutation_id.0)));
+    };
+    let Some(target) = wcx.target(mutation.target_id) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target of mutation `{}` not found", mutation_id.0)));
+    };
+    let Some(def) = wcx.definition(target.def_id) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target definition of mutation `{}` not found", mutation_id.0)));
+    };
+
+    let Some(source_file_html) = wcx.source_file_html(&mutation.origin_span.path) else {
+        return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not found", mutation.origin_span.path.display())));
+    };
+
+    let evaluation_info = wcx.evaluation_info();
+
+    let mut body = String::new();
+
+    base_html(&mut body, &format!("mutation {}: {}", mutation_id.0, mutation.display_name)).unwrap();
+    write!(body, "<body>").unwrap();
+
+    topbar_html(&mut body, wcx, None).unwrap();
+
+    write!(body, "<div class=\"page-layout\">").unwrap();
+
+    // NOTE: No sidebar, emit placeholder element.
+    write!(body, "<div></div>").unwrap();
+
+    write!(body, "<main class=\"main-content\">").unwrap();
+
+    let mutation_detection_html = match evaluation_info {
+        Some(evaluation_info) => evaluation_info.mutation_detections[mutation_id].badge_html(),
+        None => "",
+    };
+
+    write!(body, "<header>").unwrap();
+    write!(body, "<h1>{} mutation {}: {}</h1>", mutation_detection_html, mutation_id.0, mutation.display_name_html).unwrap();
+    if let Some(def_span) = &def.span {
+        write!(body, " <span>in <a href=\"/source/{}#M{}\">{}</a></span>", def_span.path.display(), mutation_id.0, def_span.path.display()).unwrap();
+    }
+    write!(body, "</header>").unwrap();
+
+    write!(body, "<section>").unwrap();
+    write!(body, "<table class=\"source-code\">").unwrap();
+
+    let target_start_line = match &def.span {
+        Some(span) => LineNo(span.begin.0 as u32),
+        None => LineNo(1),
+    };
+
+    let mut source_start_line = target_start_line;
+
+    for subst_html in &mutation.subst_htmls {
+        let subst_start_line = subst_html.start_line;
+
+        // Write out prefix source lines from end of previous segment (or start of target def).
+        for (line_no, highlighted_line_html) in iter::zip(source_start_line.0.., &source_file_html.highlighted_lines_html[source_start_line..subst_start_line]) {
+            let line_content = source_code_line_content(highlighted_line_html.as_str());
+            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+        }
+        // Write out the original lines that this mutation subsitution modifies.
+        for (line_no, highlighted_line_html) in iter::zip(subst_start_line.0.., &subst_html.original_lines_html) {
+            let line_content = source_code_line_content(highlighted_line_html.as_str());
+            write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+        }
+        // Write out replacement lines.
+        for highlighted_line_html in &subst_html.replacement_lines_html {
+            let line_content = source_code_line_content(highlighted_line_html.as_str());
+            write!(body, "<tr class=\"line mutated\"><td></td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
+        }
+
+        source_start_line = subst_html.after_source_line_no();
+    }
+
+    write!(body, "</table>").unwrap();
+    write!(body, "</section>").unwrap();
+
+    let mut total_tests_count = 0;
+    let mut not_ran_tests_count = 0;
+    let mut undetected_tests_count = 0;
+    let mut detected_tests_count = 0;
+    let mut timed_out_tests_count = 0;
+    let mut crashed_tests_count = 0;
+    for (def_path, _) in &target.reachable_from {
+        match evaluation_info {
+            Some(evaluation_info) => {
+                let Some(test_runs) = evaluation_info.test_runs.get(def_path) else { continue; };
+
+                match test_runs.mutation_detections[mutation_id] {
+                    None => continue,
+                    Some(TestMutationResult::NotRan) => not_ran_tests_count += 1,
+                    Some(TestMutationResult::Ran(MutationDetection::Undetected)) => undetected_tests_count += 1,
+                    Some(TestMutationResult::Ran(MutationDetection::Detected)) => detected_tests_count += 1,
+                    Some(TestMutationResult::Ran(MutationDetection::TimedOut)) => timed_out_tests_count += 1,
+                    Some(TestMutationResult::Ran(MutationDetection::Crashed)) => crashed_tests_count += 1,
+                }
+            }
+            None => not_ran_tests_count += 1,
+        }
+
+        total_tests_count += 1;
+    }
+
+    write!(body, "<section class=\"text\">").unwrap();
+    write!(body, "<h2>tests</h2>").unwrap();
+    match total_tests_count {
+        0 => {
+            write!(body, "<p>mutation not reached by any test</p>").unwrap();
+        }
+        _ => {
+            let ran_tests_count = total_tests_count - not_ran_tests_count;
+            let coverage = (ran_tests_count - undetected_tests_count) as f64 / ran_tests_count as f64;
+
+            write!(body, "<div class=\"labeled-stats\">").unwrap();
+            write!(body, "<div class=\"stat\"><div class=\"label\">reached by</div><div class=\"value\">{}</div></div>", total_tests_count).unwrap();
+            write!(body, "<div class=\"divider\"></div>").unwrap();
+            write!(body, "<div class=\"stat\"><div class=\"label\">ran</div><div class=\"value\">{}</div></div>", ran_tests_count).unwrap();
+            write!(body, "<div class=\"stat\"><div class=\"label\">skipped</div><div class=\"value\">{}</div></div>", not_ran_tests_count).unwrap();
+            write!(body, "<div class=\"divider\"></div>").unwrap();
+            match ran_tests_count {
+                0 => write!(body, "<div class=\"stat\"><div class=\"label\">coverage</div><div class=\"value\">unknown</div></div>").unwrap(),
+                _ => write!(body, "<div class=\"stat\"><div class=\"label\">coverage</div><div class=\"value\">{:.2}%</div></div>", coverage * 100_f64).unwrap(),
+            }
+            write!(body, "<div class=\"stat\"><div class=\"label\">undetected</div><div class=\"value\">{}</div></div>", undetected_tests_count).unwrap();
+            write!(body, "<div class=\"stat\"><div class=\"label\">detected</div><div class=\"value\">{}</div></div>", detected_tests_count).unwrap();
+            write!(body, "<div class=\"stat\"><div class=\"label\">timed out</div><div class=\"value\">{}</div></div>", timed_out_tests_count).unwrap();
+            write!(body, "<div class=\"stat\"><div class=\"label\">crashed</div><div class=\"value\">{}</div></div>", crashed_tests_count).unwrap();
+            write!(body, "</div>").unwrap();
+        }
+    }
+    write!(body, "</section>").unwrap();
+
+    write!(body, "<section>").unwrap();
+    write!(body, "<table class=\"page-table\">").unwrap();
+    let mut reaching_def_paths = target.reachable_from.keys().collect::<Vec<_>>();
+    reaching_def_paths.sort_unstable();
+    for def_path in &reaching_def_paths {
+        let Some(test) = wcx.test(def_path) else { continue; };
+        let Some(test_def) = wcx.definition(test.def_id) else { continue; };
+
+        let test_mutation_result = match evaluation_info {
+            Some(evaluation_info) => evaluation_info.test_mutation_result(mutation_id, def_path).unwrap_or(TestMutationResult::NotRan),
+            None => TestMutationResult::NotRan,
+        };
+
+        write!(body, "<tr class=\"heading\"><th class=\"right right-tight\">{}</th><th class=\"expand\"><a href=\"/tests/{}\">{}</a></th></tr>", test_mutation_result.badge_html(), def_path, test_def.def_path_html).unwrap();
+    }
+    write!(body, "</table>").unwrap();
+    write!(body, "</section>").unwrap();
+
+    write!(body, "</main>").unwrap();
 
     write!(body, "</div>").unwrap();
 
