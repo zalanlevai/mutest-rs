@@ -6,6 +6,7 @@ use pulldown_cmark_escape::escape_html_body_text;
 use crate::source_file::LineNo;
 use crate::syntax_highlight::MappedLine;
 
+pub mod base;
 pub mod mutations;
 
 #[derive(Debug)]
@@ -37,4 +38,38 @@ pub fn source_code_line_content(line_html: &str) -> &str {
         //       that copying them in browsers results in a newline.
         true => "\n",
     }
+}
+
+pub fn render_def_path_html(def_path: &str) -> String {
+    let mut s = String::new();
+
+    write!(s, "<span class=\"def-path\">").unwrap();
+
+    let mut char_iter = def_path.char_indices().peekable();
+
+    let mut segment_start_offset = 0;
+    while let Some((offset, c)) = char_iter.next() {
+        let prefix = &def_path[segment_start_offset..offset];
+
+        match (c, char_iter.peek()) {
+            (':', Some((_, ':'))) => {
+                segment_start_offset = offset + 2;
+                let _ = char_iter.next();
+                write!(s, "{prefix}<span class=\"sep\">::</span>").unwrap();
+            }
+            ('<', _) => {
+                segment_start_offset = offset + 1;
+                write!(s, "{prefix}<span class=\"sep\">&lt;</span>").unwrap();
+            }
+            ('>', _) => {
+                segment_start_offset = offset + 1;
+                write!(s, "{prefix}<span class=\"sep\">&gt;</span>").unwrap();
+            }
+            (_, _) => {}
+        }
+    }
+
+    write!(s, "{}</span>", &def_path[segment_start_offset..]).unwrap();
+
+    s
 }

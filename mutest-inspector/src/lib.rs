@@ -2,6 +2,7 @@ pub mod config;
 pub mod ctxt;
 pub mod evaluation;
 pub mod html;
+pub mod metadata;
 pub mod server;
 pub mod source_file;
 pub mod syntax_highlight;
@@ -17,9 +18,10 @@ use mutest_json::mutations::MutationId;
 
 use crate::config::Config;
 use crate::ctxt::WebCtxt;
-use crate::evaluation::{EvaluationInfo, MutationDetection};
+use crate::evaluation::{EvaluationInfo, MutationDetection, TestMutationResult, TestRuns};
 use crate::html::{SourceFileHtml, escape_html_body_text_with_inline_code};
-use crate::html::mutations::{MutationHtml, render_mutation_subst_lines};
+use crate::html::mutations::render_mutation_subst_lines;
+use crate::metadata::Mutation;
 use crate::source_file::SourceFile;
 use crate::syntax_highlight::SyntaxHighlighter;
 
@@ -45,7 +47,7 @@ pub async fn run(config: Config) {
         .filter_map(|def| def.span.as_ref().map(|span| -> &Path { &span.path }))
         .collect::<HashSet<_>>();
 
-    let mut wcx = WebCtxt::new(&unique_source_file_paths, &mutations_metadata.mutations);
+    let mut wcx = WebCtxt::new(&unique_source_file_paths, &call_graph_metadata, &mutations_metadata);
 
     println!("processing {} source files", wcx.unique_source_file_paths().len());
 
@@ -104,9 +106,14 @@ pub async fn run(config: Config) {
 
     let mut mutation_htmls = IdxVec::<MutationId, _>::with_capacity(mutations_metadata.mutations.len());
     for mutation in &mutations_metadata.mutations {
-        let mut mutation_html = MutationHtml {
+        let mut mutation_html = Mutation {
+            target_id: mutation.target_id,
+            origin_span: mutation.origin_span.clone(),
+            mutation_op: mutation.mutation_op.clone(),
+            display_name: mutation.display_name.clone(),
             display_name_html: escape_html_body_text_with_inline_code(&mutation.display_name),
             subst_htmls: Vec::with_capacity(mutation.substs.len()),
+            safety: mutation.safety,
         };
 
         for subst in &mutation.substs {
@@ -122,6 +129,7 @@ pub async fn run(config: Config) {
     if let Some(evaluation_metadata) = &evaluation_metadata {
         let mut evaluation_info = EvaluationInfo {
             mutation_detections: IdxVec::with_capacity(mutations_metadata.mutations.len()),
+            test_runs: HashMap::with_capacity(wcx.tests_count()),
         };
 
         let mutation_run = match &evaluation_metadata.mutation_runs[..] {
@@ -142,6 +150,37 @@ pub async fn run(config: Config) {
 
             // NOTE: Mutation detection data is populated in mutation ID order.
             evaluation_info.mutation_detections.push(mutation_detection);
+        }
+
+        for (runtime_test_id, mutation_detections) in mutation_run.mutation_detection_matrix.test_detections.iter_enumerated() {
+            let test_path = &evaluation_metadata.tests[runtime_test_id].name;
+
+            let reachable_targets = mutations_metadata.targets.iter()
+                .filter(|target| target.reachable_from.contains_key(test_path))
+                .map(|target| target.target_id)
+                .collect::<HashSet<_>>();
+
+            let mut test_runs = TestRuns {
+                mutation_detections: IdxVec::with_capacity(mutations_metadata.mutations.len()),
+            };
+
+            for (mutation_id, mutation_detection) in mutation_detections.0.iter_enumerated() {
+                let mutation = &mutations_metadata.mutations[mutation_id];
+
+                let test_mutation_result = match mutation_detection {
+                    mutest_json::evaluation::MutationDetection::NotRun if !reachable_targets.contains(&mutation.target_id) => None,
+                    mutest_json::evaluation::MutationDetection::NotRun => Some(TestMutationResult::NotRan),
+                    mutest_json::evaluation::MutationDetection::Undetected => Some(TestMutationResult::Ran(MutationDetection::Undetected)),
+                    mutest_json::evaluation::MutationDetection::Detected => Some(TestMutationResult::Ran(MutationDetection::Detected)),
+                    mutest_json::evaluation::MutationDetection::TimedOut => Some(TestMutationResult::Ran(MutationDetection::TimedOut)),
+                    mutest_json::evaluation::MutationDetection::Crashed => Some(TestMutationResult::Ran(MutationDetection::Crashed)),
+                };
+
+                // NOTE: Mutation detection data is populated in mutation ID order.
+                test_runs.mutation_detections.push(test_mutation_result);
+            }
+
+            evaluation_info.test_runs.insert(test_path.clone(), test_runs);
         }
 
         wcx.update_evaluation_info(Some(evaluation_info));
