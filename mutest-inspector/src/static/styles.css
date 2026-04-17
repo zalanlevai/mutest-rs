@@ -85,6 +85,11 @@ a {
 
     background-color: var(--code-block-background-color);
 
+    /* NOTE: Avoid tab badges expanding tab margins. */
+    .tab > &:last-child {
+        margin-inline-end: 0;
+    }
+
     > * {
         padding-inline: 0.2em;
     }
@@ -116,6 +121,50 @@ a {
     }
     &.crashed {
         background-color: var(--status-crashed-background-color);
+    }
+}
+
+.value {
+    font-weight: 700;
+
+    &.undetected {
+        color: var(--status-undetected-color);
+    }
+    &.detected {
+        color: var(--status-detected-color);
+    }
+    &.timed-out {
+        color: var(--status-timed-out-color);
+    }
+    &.crashed {
+        color: var(--status-crashed-color);
+    }
+}
+
+.inline-stats {
+    .label, .value {
+        padding-inline: 0.2em;
+    }
+
+    .label {
+        padding-inline-end: 0.4em;
+
+        color: var(--main-color);
+    }
+}
+
+.labeled-stats {
+    display: flex;
+    flex-direction: row;
+
+    * {
+        margin-inline: 0.5em;
+    }
+
+    .divider {
+        width: 1px;
+        min-height: 100%;
+        background-color: var(--border-color);
     }
 }
 
@@ -288,35 +337,6 @@ a {
             font-size: 1em;
             font-weight: 700;
         }
-
-        .stats {
-            .label, .value {
-                padding-inline: 0.2em;
-            }
-
-            .label {
-                padding-inline-end: 0.4em;
-
-                color: var(--main-color);
-            }
-
-            .value {
-                font-weight: 700;
-
-                &.undetected {
-                    color: var(--status-undetected-color);
-                }
-                &.detected {
-                    color: var(--status-detected-color);
-                }
-                &.timed-out {
-                    color: var(--status-timed-out-color);
-                }
-                &.crashed {
-                    color: var(--status-crashed-color);
-                }
-            }
-        }
     }
 }
 
@@ -334,21 +354,6 @@ section.text {
 
         font-size: 1.2rem;
         line-height: 1.75rem;
-    }
-}
-
-.labeled-stats {
-    display: flex;
-    flex-direction: row;
-
-    * {
-        margin-inline: 0.5em;
-    }
-
-    .divider {
-        width: 1px;
-        min-height: 100%;
-        background-color: var(--border-color);
     }
 }
 

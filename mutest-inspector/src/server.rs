@@ -28,6 +28,7 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
         .route("/", axum::routing::get(handle_root))
         .route("/source", axum::routing::get(handle_source_request))
         .route("/source/{*path}", axum::routing::get(handle_source_request))
+        .route("/mutations", axum::routing::get(handle_mutations_request))
         .route("/mutations/{mutation_id}", axum::routing::get(handle_mutation_request))
         .nest_service("/static", tower_http::services::ServeDir::new(env!("STATIC_DIR")))
         .fallback(handle_unknown)
@@ -130,42 +131,46 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
     let mut detected_mutations_count = 0;
     let mut timed_out_mutations_count = 0;
     let mut crashed_mutations_count = 0;
-    if let Some(evaluation_info) = evaluation_info {
-        for group in overlapping_groups_of_mutations_in_file {
-            for &mutation_id in &group.mutations {
-                total_mutations_count += 1;
-
-                let mutation_detection = evaluation_info.mutation_detections[mutation_id];
-                match mutation_detection {
-                    MutationDetection::Undetected => undetected_mutations_count += 1,
-                    MutationDetection::Detected => detected_mutations_count += 1,
-                    MutationDetection::TimedOut => timed_out_mutations_count += 1,
-                    MutationDetection::Crashed => crashed_mutations_count += 1,
+    for group in overlapping_groups_of_mutations_in_file {
+        for &mutation_id in &group.mutations {
+            match evaluation_info {
+                Some(evaluation_info) => {
+                    match evaluation_info.mutation_detections[mutation_id] {
+                        MutationDetection::Undetected => undetected_mutations_count += 1,
+                        MutationDetection::Detected => detected_mutations_count += 1,
+                        MutationDetection::TimedOut => timed_out_mutations_count += 1,
+                        MutationDetection::Crashed => crashed_mutations_count += 1,
+                    }
                 }
+                None => {}
             }
+
+            total_mutations_count += 1;
         }
     }
 
     write!(body, "<header>").unwrap();
     write!(body, "<h1>{}</h1>", path.display()).unwrap();
-    if let Some(_evaluation_info) = evaluation_info {
-        match total_mutations_count {
-            0 => {
-                write!(body, "<div class=\"stats none\">").unwrap();
-                write!(body, "<span class=\"label\">no mutations</span>").unwrap();
-                write!(body, "</div>").unwrap();
+    match total_mutations_count {
+        0 => {
+            write!(body, "<div class=\"inline-stats none\">").unwrap();
+            write!(body, "<span class=\"label\">no mutations</span>").unwrap();
+            write!(body, "</div>").unwrap();
+        }
+        _ => {
+            let coverage = (total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64;
+
+            write!(body, "<div class=\"inline-stats\">").unwrap();
+            write!(body, "<span class=\"value total\">{}</span><span class=\"label\">mutations</span>", total_mutations_count).unwrap();
+            match evaluation_info {
+                None => write!(body, "<span class=\"value coverage\">unknown</span><span class=\"label\">coverage</span>").unwrap(),
+                Some(_) => write!(body, "<span class=\"value coverage\">{:.2}%</span><span class=\"label\">coverage</span>", coverage * 100_f64).unwrap(),
             }
-            _ => {
-                let mutation_score = (total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64;
-                write!(body, "<div class=\"stats\">").unwrap();
-                write!(body, "<span class=\"value total\">{}</span><span class=\"label\">mutations</span>", total_mutations_count).unwrap();
-                write!(body, "<span class=\"value score\">{:.2}%</span><span class=\"label\">coverage</span>", mutation_score * 100_f64).unwrap();
-                write!(body, "<span class=\"value undetected\">{}</span><span class=\"label\">undetected</span>", undetected_mutations_count).unwrap();
-                write!(body, "<span class=\"value detected\">{}</span><span class=\"label\">detected</span>", detected_mutations_count).unwrap();
-                write!(body, "<span class=\"value timed-out\">{}</span><span class=\"label\">timed out</span>", timed_out_mutations_count).unwrap();
-                write!(body, "<span class=\"value crashed\">{}</span><span class=\"label\">crashed</span>", crashed_mutations_count).unwrap();
-                write!(body, "</div>").unwrap();
-            }
+            write!(body, "<span class=\"value undetected\">{}</span><span class=\"label\">undetected</span>", undetected_mutations_count).unwrap();
+            write!(body, "<span class=\"value detected\">{}</span><span class=\"label\">detected</span>", detected_mutations_count).unwrap();
+            write!(body, "<span class=\"value timed-out\">{}</span><span class=\"label\">timed out</span>", timed_out_mutations_count).unwrap();
+            write!(body, "<span class=\"value crashed\">{}</span><span class=\"label\">crashed</span>", crashed_mutations_count).unwrap();
+            write!(body, "</div>").unwrap();
         }
     }
     write!(body, "</header>").unwrap();
@@ -314,6 +319,105 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
     write!(body, "</table>").unwrap();
 
     write!(body, "</main").unwrap();
+
+    write!(body, "</div>").unwrap();
+
+    write!(body, "</body>").unwrap();
+    write!(body, "</html>").unwrap();
+
+    (StatusCode::OK, Html(body))
+}
+
+async fn handle_mutations_request(State(state): State<Arc<ServerState>>) -> (StatusCode, Html<String>) {
+    let wcx = &state.wcx;
+
+    let evaluation_info = wcx.evaluation_info();
+
+    let mut body = String::new();
+
+    base_html(&mut body, "mutations").unwrap();
+    write!(body, "<body>").unwrap();
+
+    topbar_html(&mut body, wcx, Some(Tab::Mutations)).unwrap();
+
+    write!(body, "<div class=\"page-layout\">").unwrap();
+
+    // NOTE: No sidebar, emit placeholder element.
+    write!(body, "<div></div>").unwrap();
+
+    write!(body, "<main class=\"main-content\">").unwrap();
+
+    let total_mutations_count = wcx.mutations_count();
+    let mut undetected_mutations_count = 0;
+    let mut detected_mutations_count = 0;
+    let mut timed_out_mutations_count = 0;
+    let mut crashed_mutations_count = 0;
+    match evaluation_info {
+        Some(evaluation_info) => {
+            for mutation_detection in &evaluation_info.mutation_detections {
+                match mutation_detection {
+                    MutationDetection::Undetected => undetected_mutations_count += 1,
+                    MutationDetection::Detected => detected_mutations_count += 1,
+                    MutationDetection::TimedOut => timed_out_mutations_count += 1,
+                    MutationDetection::Crashed => crashed_mutations_count += 1,
+                }
+            }
+        }
+        None => {}
+    }
+
+    write!(body, "<header>").unwrap();
+    match total_mutations_count {
+        0 => {
+            write!(body, "<div class=\"inline-stats none\">").unwrap();
+            write!(body, "<span class=\"label\">no mutations</span>").unwrap();
+            write!(body, "</div>").unwrap();
+        }
+        _ => {
+            let coverage = (total_mutations_count - undetected_mutations_count) as f64 / total_mutations_count as f64;
+
+            write!(body, "<div class=\"inline-stats\">").unwrap();
+            write!(body, "<span class=\"value total\">{}</span><span class=\"label\">mutations</span>", total_mutations_count).unwrap();
+            match evaluation_info {
+                None => write!(body, "<span class=\"value coverage\">unknown</span><span class=\"label\">coverage</span>").unwrap(),
+                Some(_) => write!(body, "<span class=\"value coverage\">{:.2}%</span><span class=\"label\">coverage</span>", coverage * 100_f64).unwrap(),
+            }
+            write!(body, "<span class=\"value undetected\">{}</span><span class=\"label\">undetected</span>", undetected_mutations_count).unwrap();
+            write!(body, "<span class=\"value detected\">{}</span><span class=\"label\">detected</span>", detected_mutations_count).unwrap();
+            write!(body, "<span class=\"value timed-out\">{}</span><span class=\"label\">timed out</span>", timed_out_mutations_count).unwrap();
+            write!(body, "<span class=\"value crashed\">{}</span><span class=\"label\">crashed</span>", crashed_mutations_count).unwrap();
+            write!(body, "</div>").unwrap();
+        }
+    }
+    write!(body, "</header>").unwrap();
+
+    write!(body, "<table class=\"page-table\">").unwrap();
+    write!(body, "<tbody>").unwrap();
+    for file_path in wcx.local_source_file_paths() {
+        write!(body, "<tr class=\"heading\"><th colspan=\"3\">{}</th></tr>", file_path.display()).unwrap();
+
+        for &mutation_id in wcx.file_mutations(file_path) {
+            let Some(mutation) = wcx.mutation(mutation_id) else { continue; };
+
+            let mutation_detection_html = match evaluation_info {
+                Some(evaluation_info) => evaluation_info.mutation_detections[mutation_id].badge_html(),
+                None => "",
+            };
+
+            let source_path_str = mutation.origin_span.path.to_string_lossy();
+            let (lo_line, lo_col) = mutation.origin_span.begin;
+            let (hi_line, hi_col) = mutation.origin_span.end;
+
+            write!(body, "<tr id=\"M{}\" class=\"entry\">", mutation_id.0).unwrap();
+            write!(body, "<td class=\"right loc\"><a href=\"/source/{}#M{}\">{}:{} {}:{}</a></td>", source_path_str, mutation_id.0, lo_line, lo_col, hi_line, hi_col).unwrap();
+            write!(body, "<td class=\"right right-tight\">{}</td>", mutation_detection_html).unwrap();
+            write!(body, "<td class=\"expand desc\"><span><a href=\"/mutations/{}\">mutation {}</a>: {}</span></td>", mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+            write!(body, "</tr>").unwrap();
+        }
+    }
+    write!(body, "</tbody></table>").unwrap();
+
+    write!(body, "</main>").unwrap();
 
     write!(body, "</div>").unwrap();
 
