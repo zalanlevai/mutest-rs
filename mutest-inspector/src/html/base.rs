@@ -5,6 +5,7 @@ use crate::ctxt::WebCtxt;
 #[derive(Eq, PartialEq)]
 pub enum Tab {
     Sources,
+    Mutations,
 }
 
 pub(crate) fn base_html(body: &mut String, title: &str) -> Result<(), fmt::Error> {
@@ -18,13 +19,19 @@ pub(crate) fn base_html(body: &mut String, title: &str) -> Result<(), fmt::Error
     Ok(())
 }
 
-pub(crate) fn topbar_html(body: &mut String, _wcx: &WebCtxt, active_tab: Option<Tab>) -> Result<(), fmt::Error> {
+pub(crate) fn topbar_html(body: &mut String, wcx: &WebCtxt, active_tab: Option<Tab>) -> Result<(), fmt::Error> {
+    let mutations_count = wcx.mutations_count();
+
     write!(body, "<nav class=\"topbar\">")?;
     write!(body, "<a class=\"logo\" href=\"/\">mutest-rs</a>")?;
 
     write!(body, "<a class=\"tab")?;
     if active_tab == Some(Tab::Sources) { write!(body, " active")?; }
     write!(body, "\" href=\"/source\">sources</a>")?;
+
+    write!(body, "<a class=\"tab")?;
+    if active_tab == Some(Tab::Mutations) { write!(body, " active")?; }
+    write!(body, "\" href=\"/mutations\">mutations <span class=\"badge\">{}</span></a>", mutations_count)?;
 
     write!(body, "</nav>")?;
     Ok(())
