@@ -21,6 +21,8 @@ pub struct WebCtxt {
     definitions: IdxVec<DefId, Definition>,
     tests: BTreeMap<String, Test>,
     targets: IdxVec<TargetId, Target>,
+    targets_reached_by_tests: HashMap<String, Vec<TargetId>>,
+    mutations_per_target: IdxVec<TargetId, Vec<MutationId>>,
     mutations: IdxVec<MutationId, Mutation>,
     evaluation_info: Option<EvaluationInfo>,
 }
@@ -66,6 +68,7 @@ impl WebCtxt {
         }
 
         let mut targets = IdxVec::with_capacity(mutations_metadata.targets.len());
+        let mut mutations_per_target = IdxVec::with_capacity(mutations_metadata.targets.len());
         for target in &mutations_metadata.targets {
             targets.push(Target {
                 def_id: target.def_id,
@@ -73,9 +76,17 @@ impl WebCtxt {
                     .map(|(def_path, _association)| (def_path.clone(), ()))
                     .collect(),
             });
+
+            let mutations = mutations_metadata.mutations.iter()
+                .filter(|mutation| mutation.target_id == target.target_id)
+                .map(|mutation| mutation.mutation_id)
+                .collect::<Vec<_>>();
+            // NOTE: Data is populated in target ID order.
+            mutations_per_target.push(mutations);
         }
 
         let mut tests = BTreeMap::new();
+        let mut targets_reached_by_tests = HashMap::with_capacity(call_graph_metadata.call_graph.entry_points.len());
         for entry_point in &call_graph_metadata.call_graph.entry_points {
             let def = &call_graph_metadata.definitions[entry_point.def_id];
 
@@ -84,6 +95,14 @@ impl WebCtxt {
                 ignore: false,
                 span: def.span.clone().expect("encountered test without span"),
             });
+
+            let reachable_targets = mutations_metadata.targets.iter()
+                .filter(|target| target.reachable_from.contains_key(&def.path))
+                .map(|target| target.target_id)
+                .collect::<HashSet<_>>();
+            let mut reachable_targets = reachable_targets.into_iter().collect::<Vec<_>>();
+            reachable_targets.sort_unstable_by_key(|target_id| target_id.0);
+            targets_reached_by_tests.insert(def.path.clone(), reachable_targets);
         }
 
         Self {
@@ -96,6 +115,8 @@ impl WebCtxt {
             definitions,
             tests,
             targets,
+            targets_reached_by_tests,
+            mutations_per_target,
             mutations: IdxVec::new(),
             evaluation_info: None,
         }
@@ -165,8 +186,18 @@ impl WebCtxt {
     }
 
     #[inline]
+    pub fn targets_reached_by_test(&self, def_path: &str) -> &[TargetId] {
+        self.targets_reached_by_tests.get(def_path).map(|vec| -> &[_] { vec }).unwrap_or_default()
+    }
+
+    #[inline]
     pub fn target(&self, target_id: TargetId) -> Option<&Target> {
         self.targets.get(target_id)
+    }
+
+    #[inline]
+    pub fn target_mutations(&self, target_id: TargetId) -> &[MutationId] {
+        self.mutations_per_target.get(target_id).map(|vec| -> &[_] { vec }).unwrap_or_default()
     }
 
     #[inline]
