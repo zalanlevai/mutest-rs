@@ -31,6 +31,7 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
         .route("/source/{*path}", axum::routing::get(handle_source_request))
         .route("/mutations", axum::routing::get(handle_mutations_request))
         .route("/mutations/{mutation_id}", axum::routing::get(handle_mutation_request))
+        .route("/tests", axum::routing::get(handle_tests_request))
         .route("/tests/{test_name}", axum::routing::get(handle_test_request))
         .nest_service("/static", tower_http::services::ServeDir::new(env!("STATIC_DIR")))
         .fallback(handle_unknown)
@@ -581,6 +582,101 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
     }
     write!(body, "</table>").unwrap();
     write!(body, "</section>").unwrap();
+
+    write!(body, "</main>").unwrap();
+
+    write!(body, "</div>").unwrap();
+
+    write!(body, "</body>").unwrap();
+    write!(body, "</html>").unwrap();
+
+    (StatusCode::OK, Html(body))
+}
+
+async fn handle_tests_request(State(state): State<Arc<ServerState>>) -> (StatusCode, Html<String>) {
+    let wcx = &state.wcx;
+
+    let tests = wcx.tests();
+
+    let evaluation_info = wcx.evaluation_info();
+
+    let mut body = String::new();
+
+    base_html(&mut body, "tests").unwrap();
+    write!(body, "<body>").unwrap();
+
+    topbar_html(&mut body, wcx, Some(Tab::Tests)).unwrap();
+
+    write!(body, "<div class=\"page-layout\">").unwrap();
+
+    // NOTE: No sidebar, emit placeholder element.
+    write!(body, "<div></div>").unwrap();
+
+    write!(body, "<main class=\"main-content\">").unwrap();
+
+    write!(body, "<table class=\"page-table\">").unwrap();
+    write!(body, "<thead><tr><th>test</th><th class=\"right\">reachable mutations</th><th class=\"right\">ran</th><th class=\"right\">coverage</th><th class=\"right\">undetected</th><th class=\"right\">detected</th><th class=\"right\">timed out</th><th class=\"right\">crashed</th></tr></thead>").unwrap();
+    write!(body, "<tbody>").unwrap();
+    for test in tests {
+        let Some(def) = wcx.definition(test.def_id) else {
+            return (StatusCode::NOT_FOUND, Html(format!("definition `{:?}` not found", test.def_id)));
+        };
+
+        let mut total_mutations_count = 0;
+        let mut not_ran_mutations_count = 0;
+        let mut undetected_mutations_count = 0;
+        let mut detected_mutations_count = 0;
+        let mut timed_out_mutations_count = 0;
+        let mut crashed_mutations_count = 0;
+        let test_runs = evaluation_info.and_then(|evaluation_info| evaluation_info.test_runs.get(&def.def_path));
+        for &target_id in wcx.targets_reached_by_test(&def.def_path) {
+            for &mutation_id in wcx.target_mutations(target_id) {
+                match test_runs {
+                    Some(test_runs) => {
+                        match test_runs.mutation_detections[mutation_id] {
+                            None => continue,
+                            Some(TestMutationResult::NotRan) => not_ran_mutations_count += 1,
+                            Some(TestMutationResult::Ran(MutationDetection::Undetected)) => undetected_mutations_count += 1,
+                            Some(TestMutationResult::Ran(MutationDetection::Detected)) => detected_mutations_count += 1,
+                            Some(TestMutationResult::Ran(MutationDetection::TimedOut)) => timed_out_mutations_count += 1,
+                            Some(TestMutationResult::Ran(MutationDetection::Crashed)) => crashed_mutations_count += 1,
+                        }
+                    }
+                    None => not_ran_mutations_count += 1,
+                }
+
+                total_mutations_count += 1;
+            }
+        }
+
+        write!(body, "<tr>").unwrap();
+        write!(body, "<td class=\"expand sticky-content\"><a href=\"/tests/{}\">{}</a></td>", def.def_path, def.def_path_html).unwrap();
+        let ran_mutations_count = total_mutations_count - not_ran_mutations_count;
+        match (total_mutations_count, ran_mutations_count) {
+            (0, _) => {
+                write!(body, "<td class=\"right\"><span class=\"value\">0</span></td>").unwrap();
+                write!(body, "<td colspan=\"6\"></td>").unwrap();
+            }
+            (_, 0) => {
+                write!(body, "<td class=\"right\"><span class=\"value\">{}</span></td>", total_mutations_count).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value\">0</span></td>").unwrap();
+                write!(body, "<td colspan=\"5\"></td>").unwrap();
+            }
+            _ => {
+                let coverage = (ran_mutations_count - undetected_mutations_count) as f64 / ran_mutations_count as f64;
+
+                write!(body, "<td class=\"right\"><span class=\"value\">{}</span></td>", total_mutations_count).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value\">{}</span></td>", ran_mutations_count).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value\">{:.2}%</span></td>", coverage * 100_f64).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value undetected\">{}</span></td>", undetected_mutations_count).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value detected\">{}</span></td>", detected_mutations_count).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value timed-out\">{}</span></td>", timed_out_mutations_count).unwrap();
+                write!(body, "<td class=\"right\"><span class=\"value crashed\">{}</span></td>", crashed_mutations_count).unwrap();
+            }
+        }
+        write!(body, "</tr>").unwrap();
+    }
+    write!(body, "</tbody></table>").unwrap();
 
     write!(body, "</main>").unwrap();
 

@@ -401,6 +401,11 @@ section.text {
         &.right-tight {
             padding-right: 0px;
         }
+
+        &.sticky-content > * {
+            position: sticky;
+            left: 0.75em;
+        }
     }
 
     tbody {
