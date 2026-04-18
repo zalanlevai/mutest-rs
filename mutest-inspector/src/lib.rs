@@ -1,3 +1,5 @@
+#![feature(if_let_guard)]
+
 pub mod config;
 pub mod ctxt;
 pub mod evaluation;
