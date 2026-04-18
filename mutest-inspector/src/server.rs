@@ -478,12 +478,15 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
     write!(body, "<section>").unwrap();
     write!(body, "<table class=\"source-code\">").unwrap();
 
-    let target_start_line = match &def.span {
+    // Set start line for source snippet.
+    let mut source_start_line = match &def.span {
+        // Use target start line, if available.
         Some(span) => LineNo(span.begin.0 as u32),
-        None => LineNo(1),
+        // Fall back to the start line of the first substitution.
+        None if let [first_subst_html, ..] = &mutation.subst_htmls[..] => first_subst_html.start_line,
+        // Mutations without substitutions are not valid.
+        _ => { return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("mutation `{}` is invalid: no substitutions", mutation_id.0))); }
     };
-
-    let mut source_start_line = target_start_line;
 
     for subst_html in &mutation.subst_htmls {
         let subst_start_line = subst_html.start_line;
