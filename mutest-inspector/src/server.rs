@@ -485,9 +485,9 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
     write!(body, "<table class=\"source-code\">").unwrap();
 
     // Set start line for source snippet.
-    let mut source_start_line = match &def.span {
-        // Use target start line, if available.
-        Some(span) => LineNo(span.begin.0 as u32),
+    let mut source_start_line = match def.display_start_line() {
+        // Use target display start line, if available.
+        Some(def_display_start_line) => def_display_start_line,
         // Fall back to the start line of the first substitution.
         None if let [first_subst_html, ..] = &mutation.subst_htmls[..] => first_subst_html.start_line,
         // Mutations without substitutions are not valid.
@@ -771,7 +771,8 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
         write!(body, "<header>").unwrap();
         write!(body, "<span>").unwrap();
         if let Some(def_span) = &def.span {
-            write!(body, "<a href=\"/source/{}#L{}\">{}</a>: ", def_span.path.display(), def_span.begin.0, def_span.path.display()).unwrap();
+            let Some(def_display_start_line) = def.display_start_line() else { unreachable!("definition with span has no display start line") };
+            write!(body, "<a href=\"/source/{}#L{}\">{}</a>: ", def_span.path.display(), def_display_start_line.0, def_span.path.display()).unwrap();
         }
         write!(body, "<span class=\"inline-code\">{}</span>", def.def_path_html).unwrap();
         match &trace_snippet.kind {
@@ -814,7 +815,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
         };
 
         write!(body, "<table class=\"source-code\">").unwrap();
-        let start_line = LineNo(def_span.begin.0 as u32);
+        let Some(start_line) = def.display_start_line() else { unreachable!("definition with span has no display start line") };
         match &trace_snippet.kind {
             TraceSnippetKind::Calls { callee_def_id: _, call_spans } => {
                 let end_line = match call_spans.last() {
@@ -1018,7 +1019,8 @@ async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_na
     write!(body, "<header> ").unwrap();
     write!(body, "<h1>test <span class=\"inline-code\">{}</span></h1>", def.def_path_html).unwrap();
     if let Some(def_span) = &def.span {
-        write!(body, " <span>in <a href=\"/source/{}#L{}\">{}</a></span>", def_span.path.display(), def_span.begin.0, def_span.path.display()).unwrap();
+        let Some(def_display_start_line) = def.display_start_line() else { unreachable!("definition with span has no display start line") };
+        write!(body, " <span>in <a href=\"/source/{}#L{}\">{}</a></span>", def_span.path.display(), def_display_start_line.0, def_span.path.display()).unwrap();
     }
     write!(body, "</header>").unwrap();
 
