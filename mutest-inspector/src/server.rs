@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::cmp::Ordering;
 use std::fmt::Write;
 use std::iter;
 use std::path::PathBuf;
@@ -8,15 +10,17 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
+use mutest_json::{DefId, Span};
 use mutest_json::mutations::{MutationId, TargetId};
 
+use crate::call_graph::{TraceSpec, entry_point_mono_call_traces, reduce_mono_call_traces};
 use crate::config::Options;
 use crate::ctxt::WebCtxt;
 use crate::evaluation::{TestMutationResult, MutationDetection};
 use crate::html::source_code_line_content;
 use crate::html::base::{Tab, base_html, topbar_html};
 use crate::html::mutations::{OverlappingGroupOfMutations, OverlappingGroupKind};
-use crate::source_file::{LineNo, TreeEntry, file_tree_entries};
+use crate::source_file::{LineNo, TreeEntry, file_tree_entries, line_region_byte_offsets_within_span};
 
 pub(crate) struct ServerState {
     pub wcx: WebCtxt,
@@ -31,6 +35,7 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
         .route("/source/{*path}", axum::routing::get(handle_source_request))
         .route("/mutations", axum::routing::get(handle_mutations_request))
         .route("/mutations/{mutation_id}", axum::routing::get(handle_mutation_request))
+        .route("/traces/{trace_spec}", axum::routing::get(handle_trace_request))
         .route("/tests", axum::routing::get(handle_tests_request))
         .route("/tests/{test_name}", axum::routing::get(handle_test_request))
         .nest_service("/static", tower_http::services::ServeDir::new(env!("STATIC_DIR")))
@@ -447,6 +452,7 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
         return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not found", mutation.origin_span.path.display())));
     };
 
+    let call_graph = wcx.call_graph();
     let evaluation_info = wcx.evaluation_info();
 
     let mut body = String::new();
@@ -582,9 +588,301 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
         };
 
         write!(body, "<tr class=\"heading\"><th class=\"right right-tight\">{}</th><th class=\"expand\"><a href=\"/tests/{}\">{}</a></th></tr>", test_mutation_result.badge_html(), def_path, test_def.def_path_html).unwrap();
+
+        let Some(entry_point) = call_graph.entry_points.iter().find(|entry_point| entry_point.def_id == test.def_id) else { continue; };
+
+        let mono_call_traces = entry_point_mono_call_traces(&call_graph, entry_point, target.def_id);
+        let mut def_call_traces = reduce_mono_call_traces(&call_graph, &mono_call_traces);
+
+        def_call_traces.sort_unstable_by_key(|call_trace| call_trace.nested_calls.len());
+        def_call_traces.sort_by(|call_trace_a, call_trace_b| {
+            for (def_id_a, def_id_b) in iter::zip(call_trace_a.nested_calls.iter().rev(), call_trace_b.nested_calls.iter().rev()) {
+                match Ord::cmp(&def_id_a.0, &def_id_b.0) {
+                    Ordering::Equal => {}
+                    ord => return ord,
+                }
+            }
+
+            Ordering::Equal
+        });
+
+        for call_trace in &def_call_traces {
+            let trace_spec = TraceSpec {
+                entry_point_def_path: def_path,
+                callee_def_ids: call_trace.nested_calls.clone(),
+                mutation_id,
+            };
+
+            write!(body, "<tr><td class=\"right right-tight\"><a href=\"/traces/").unwrap();
+            trace_spec.write(&mut body);
+            write!(body, "\">trace ({})</a>", call_trace.nested_calls.len()).unwrap();
+            write!(body, "</td><td class=\"expand\"><span class=\"inline-trace\">").unwrap();
+
+            let [in_between_callees @ .., _] = &call_trace.nested_calls[..] else {
+                // NOTE: Not a valid case: there should always be at least one callee, the target, and we never mutate entry points.
+                return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("invalid call trace `{}`: no calllees", trace_spec.to_string())));
+            };
+
+            for &def_id in in_between_callees {
+                match wcx.definition(def_id) {
+                    Some(def) => write!(body, "<span class=\"sep\">→</span> {}", def.def_path_html).unwrap(),
+                    None => write!(body, "<span class=\"sep\">→</span> <i>unknown</i>").unwrap(),
+                }
+            }
+
+            // NOTE: Since the last def is the same mutation target in all cases, we simplify how it is shown.
+            write!(body, "<span class=\"sep\">→</span> <i>mutation</i>").unwrap();
+
+            write!(body, "</span></td></tr>").unwrap();
+        }
     }
     write!(body, "</table>").unwrap();
     write!(body, "</section>").unwrap();
+
+    write!(body, "</main>").unwrap();
+
+    write!(body, "</div>").unwrap();
+
+    write!(body, "</body>").unwrap();
+    write!(body, "</html>").unwrap();
+
+    (StatusCode::OK, Html(body))
+}
+
+async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_spec): Path<String>) -> (StatusCode, Html<String>) {
+    let wcx = &state.wcx;
+
+    let Some(trace_spec) = TraceSpec::parse(&trace_spec) else {
+        return (StatusCode::BAD_REQUEST, Html(format!("invalid trace spec: `{}`", trace_spec)));
+    };
+    let Some(entry_point_def) = wcx.lookup_definition_by_path(trace_spec.entry_point_def_path) else {
+        return (StatusCode::NOT_FOUND, Html(format!("definition `{}` not found", trace_spec.entry_point_def_path)));
+    };
+    let Some(target_def) = wcx.definition(trace_spec.target()) else {
+        return (StatusCode::NOT_FOUND, Html(format!("definition `{:?}` not found", trace_spec.target())));
+    };
+
+    let call_graph = wcx.call_graph();
+    let evaluation_info = wcx.evaluation_info();
+
+    let mut body = String::new();
+
+    let mut title = String::new();
+    write!(title, "trace ").unwrap();
+    match trace_spec.callee_def_ids.len() {
+        1 => write!(title, "1 call").unwrap(),
+        count => write!(title, "{} calls", count).unwrap(),
+    }
+    write!(title, " deep from `{}` to `{}` with mutation {}", entry_point_def.def_path, target_def.def_path, trace_spec.mutation_id.0).unwrap();
+    base_html(&mut body, &title).unwrap();
+    write!(body, "<body>").unwrap();
+
+    topbar_html(&mut body, wcx, None).unwrap();
+
+    write!(body, "<div class=\"page-layout\">").unwrap();
+
+    // NOTE: No sidebar, emit placeholder element.
+    write!(body, "<div></div>").unwrap();
+
+    write!(body, "<main class=\"main-content\">").unwrap();
+
+    write!(body, "<header>").unwrap();
+    write!(body, "<h1>").unwrap();
+    // NOTE: This is technically the detection status of the mutation for the test along any call trace, not just this one.
+    if let Some(evaluation_info) = evaluation_info && let Some(test_mutation_result) = evaluation_info.test_mutation_result(trace_spec.mutation_id, &entry_point_def.def_path) {
+        write!(body, "{} ", test_mutation_result.badge_html()).unwrap();
+    }
+    write!(body, "trace ").unwrap();
+    match trace_spec.callee_def_ids.len() {
+        1 => write!(body, "1 call").unwrap(),
+        count => write!(body, "{} calls", count).unwrap(),
+    }
+    write!(body, " deep from <span class=\"inline-code\"><a href=\"/tests/{}\">{}</a></span>", entry_point_def.def_path, entry_point_def.def_path_html).unwrap();
+    write!(body, " to <span class=\"inline-code\">{}</span>", target_def.def_path_html).unwrap();
+    write!(body, " with <a href=\"/mutations/{}\">mutation {}</a></h1>", trace_spec.mutation_id.0, trace_spec.mutation_id.0).unwrap();
+    write!(body, "</header>").unwrap();
+
+    enum TraceSnippetKind<'a> {
+        Calls {
+            callee_def_id: DefId,
+            call_spans: Vec<&'a Span>,
+        },
+        Mutation {
+            mutation_id: MutationId,
+        },
+    }
+
+    struct TraceSnippet<'a> {
+        def_id: DefId,
+        kind: TraceSnippetKind<'a>,
+    }
+
+    let mut trace_snippets = Vec::with_capacity(trace_spec.callee_def_ids.len() + 1);
+
+    let Some(entry_point) = call_graph.entry_points.iter().find(|entry_point| entry_point.def_id == entry_point_def.def_id) else {
+        return (StatusCode::BAD_REQUEST, Html(format!("definition `{}` not an entry point", entry_point_def.def_path)));
+    };
+
+    let mut call_spans = entry_point.calls.iter()
+        .filter(|&(&callee_id, _)| call_graph.callees[callee_id].def_id == trace_spec.root_callee())
+        .flat_map(|(_, calls)| calls.iter().flat_map(|call| &call.span))
+        .collect::<Vec<_>>();
+    call_spans.sort_by(|a, b| Ord::cmp(&a.end.0, &b.end.0));
+    call_spans.dedup();
+
+    let Some(root_callee_def) = wcx.definition(trace_spec.root_callee()) else { unreachable!(); };
+
+    trace_snippets.push(TraceSnippet {
+        def_id: entry_point_def.def_id,
+        kind: TraceSnippetKind::Calls {
+            callee_def_id: root_callee_def.def_id,
+            call_spans,
+        },
+    });
+
+    for &[def_id, next_def_id] in trace_spec.callee_def_ids.array_windows::<2>() {
+        let mut call_spans = call_graph.callees.iter()
+            .filter(|caller| caller.def_id == def_id)
+            .flat_map(|caller| caller.calls.iter().filter(|&(&callee_id, _)| call_graph.callees[callee_id].def_id == next_def_id))
+            .flat_map(|(_, calls)| calls.iter().flat_map(|call| &call.span))
+            .collect::<Vec<_>>();
+        call_spans.sort_by(|a, b| Ord::cmp(&a.end.0, &b.end.0));
+        call_spans.dedup();
+
+        trace_snippets.push(TraceSnippet {
+            def_id,
+            kind: TraceSnippetKind::Calls {
+                callee_def_id: next_def_id,
+                call_spans,
+            },
+        });
+    }
+
+    trace_snippets.push(TraceSnippet {
+        def_id: trace_spec.target(),
+        kind: TraceSnippetKind::Mutation { mutation_id: trace_spec.mutation_id },
+    });
+
+    for trace_snippet in trace_snippets {
+        let Some(def) = wcx.definition(trace_snippet.def_id) else { continue; };
+
+        write!(body, "<section class=\"trace-snippet\">").unwrap();
+
+        write!(body, "<header>").unwrap();
+        write!(body, "<span>").unwrap();
+        if let Some(def_span) = &def.span {
+            write!(body, "<a href=\"/source/{}#L{}\">{}</a>: ", def_span.path.display(), def_span.begin.0, def_span.path.display()).unwrap();
+        }
+        write!(body, "<span class=\"inline-code\">{}</span>", def.def_path_html).unwrap();
+        match &trace_snippet.kind {
+            &TraceSnippetKind::Calls { callee_def_id, ref call_spans } => {
+                let Some(callee_def) = wcx.definition(callee_def_id) else { continue };
+
+                write!(body, " calls ").unwrap();
+                write!(body, "<span class=\"inline-code\">{}</span>", callee_def.def_path_html).unwrap();
+                if let Some(_) = &def.span {
+                    match call_spans.len() {
+                        1 => write!(body, " in 1 place").unwrap(),
+                        count => write!(body, " in {} places", count).unwrap(),
+                    }
+                }
+            }
+            &TraceSnippetKind::Mutation { mutation_id } => {
+                let Some(mutation) = wcx.mutation(mutation_id) else {
+                    return (StatusCode::NOT_FOUND, Html(format!("mutation `{}` not found", mutation_id.0)));
+                };
+
+                write!(body, " with <a href=\"/mutations/{}\">mutation {}</a>: {}", mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+            }
+        }
+        write!(body, "</span>").unwrap();
+        write!(body, "</header>").unwrap();
+
+        let Some(def_span) = &def.span else {
+            write!(body, "<div class=\"notice\">source location not available</div>").unwrap();
+            write!(body, "</section>").unwrap();
+            continue;
+        };
+
+        let Some(source_file) = wcx.loaded_source_file(&def_span.path) else {
+            write!(body, "<div class=\"notice\">source file `{}` not found</div>", def_span.path.display()).unwrap();
+            write!(body, "</section>").unwrap();
+            continue;
+        };
+        let Some(source_file_html) = wcx.source_file_html(&def_span.path) else {
+            return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not rendered", def_span.path.display())));
+        };
+
+        write!(body, "<table class=\"source-code\">").unwrap();
+        let start_line = LineNo(def_span.begin.0 as u32);
+        match &trace_snippet.kind {
+            TraceSnippetKind::Calls { callee_def_id: _, call_spans } => {
+                let end_line = match call_spans.last() {
+                    Some(last_call_span) => LineNo(last_call_span.end.0 as u32),
+                    None => match &def.span {
+                        Some(def_span) => LineNo(def_span.end.0 as u32),
+                        None => start_line,
+                    },
+                };
+
+                for (line_no, highlighted_line_html) in iter::zip(start_line.0.., &source_file_html.highlighted_lines_html[start_line..=end_line]) {
+                    let def_line_region = line_region_byte_offsets_within_span(LineNo(line_no), &source_file.lines[LineNo(line_no)], def_span);
+                    let call_line_regions = call_spans.iter().flat_map(|call_span| line_region_byte_offsets_within_span(LineNo(line_no), &source_file.lines[LineNo(line_no)], call_span));
+
+                    let mut highlighted_line_html = Cow::Borrowed(highlighted_line_html);
+                    if let Some((start_offset, end_offset)) = def_line_region {
+                        highlighted_line_html.to_mut().insert_unbreakable_segment(start_offset, end_offset, "<span class=\"hi-def\">", "</span>");
+                    }
+                    for (start_offset, end_offset) in call_line_regions {
+                        highlighted_line_html.to_mut().insert_unbreakable_segment(start_offset, end_offset, "<span class=\"hi-call\">", "</span>");
+                    }
+
+                    let line_content = source_code_line_content(highlighted_line_html.as_str());
+                    write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                }
+            }
+            &TraceSnippetKind::Mutation { mutation_id } => {
+                let Some(mutation) = wcx.mutation(mutation_id) else {
+                    return (StatusCode::NOT_FOUND, Html(format!("mutation `{}` not found", mutation_id.0)));
+                };
+
+                for subst_html in &mutation.subst_htmls {
+                    let subst_start_line = subst_html.start_line;
+
+                    let before_subst_start_line = LineNo(subst_start_line.0 - 1);
+
+                    // Write out prefix source lines from start of target def.
+                    for (line_no, highlighted_line_html) in iter::zip(start_line.0.., &source_file_html.highlighted_lines_html[start_line..=before_subst_start_line]) {
+                        let def_line_region = line_region_byte_offsets_within_span(LineNo(line_no), &source_file.lines[LineNo(line_no)], def_span);
+                        let mut highlighted_line_html = Cow::Borrowed(highlighted_line_html);
+                        if let Some((start_offset, end_offset)) = def_line_region {
+                            highlighted_line_html.to_mut().insert_unbreakable_segment(start_offset, end_offset, "<span class=\"hi-def\">", "</span>");
+                        }
+                        let line_content = source_code_line_content(highlighted_line_html.as_str());
+                        write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                    }
+                    // Write out the original lines that this mutation subsitution modifies.
+                    for (line_no, highlighted_line_html) in iter::zip(subst_start_line.0.., &subst_html.original_lines_html) {
+                        let def_line_region = line_region_byte_offsets_within_span(LineNo(line_no), &source_file.lines[LineNo(line_no)], def_span);
+                        let mut highlighted_line_html = Cow::Borrowed(highlighted_line_html);
+                        if let Some((start_offset, end_offset)) = def_line_region {
+                            highlighted_line_html.to_mut().insert_unbreakable_segment(start_offset, end_offset, "<span class=\"hi-def\">", "</span>");
+                        }
+                        let line_content = source_code_line_content(highlighted_line_html.as_str());
+                        write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                    }
+                    // Write out replacement lines.
+                    for highlighted_line_html in &subst_html.replacement_lines_html {
+                        let line_content = source_code_line_content(highlighted_line_html.as_str());
+                        write!(body, "<tr class=\"line mutated\"><td></td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
+                    }
+                }
+            }
+        }
+        write!(body, "</table>").unwrap();
+
+        write!(body, "</section>").unwrap();
+    }
 
     write!(body, "</main>").unwrap();
 

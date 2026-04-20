@@ -1,5 +1,7 @@
+#![feature(array_windows)]
 #![feature(if_let_guard)]
 
+pub mod call_graph;
 pub mod config;
 pub mod ctxt;
 pub mod evaluation;
