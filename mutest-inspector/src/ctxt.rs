@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use mutest_json::DefId;
+use mutest_json::call_graph::CallGraph;
 use mutest_json::data_structures::IdxVec;
 use mutest_json::mutations::{MutationId, TargetId};
 
@@ -20,6 +21,7 @@ pub struct WebCtxt {
     source_file_htmls: HashMap<PathBuf, SourceFileHtml>,
     definitions: IdxVec<DefId, Definition>,
     tests: BTreeMap<String, Test>,
+    call_graph: CallGraph,
     targets: IdxVec<TargetId, Target>,
     targets_reached_by_tests: HashMap<String, Vec<TargetId>>,
     mutations_per_target: IdxVec<TargetId, Vec<MutationId>>,
@@ -114,6 +116,7 @@ impl WebCtxt {
             source_file_htmls: Default::default(),
             definitions,
             tests,
+            call_graph: call_graph_metadata.call_graph.clone(),
             targets,
             targets_reached_by_tests,
             mutations_per_target,
@@ -183,6 +186,11 @@ impl WebCtxt {
     #[inline]
     pub fn test(&self, def_path: &str) -> Option<&Test> {
         self.tests.get(def_path)
+    }
+
+    #[inline]
+    pub fn call_graph(&self) -> &CallGraph {
+        &self.call_graph
     }
 
     #[inline]

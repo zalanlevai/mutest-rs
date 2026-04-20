@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::iter;
 use std::path::{self, Path, PathBuf};
 
+use mutest_json::Span;
 use mutest_json::data_structures::{Idx, IdxVec};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -19,6 +20,51 @@ impl Idx for LineNo {
 
 pub struct SourceFile {
     pub lines: IdxVec<LineNo, String>,
+}
+
+/// Returns the start and end byte offsets of the region of the specified line that falls within the span.
+pub fn line_region_byte_offsets_within_span(line_no: LineNo, line: &str, span: &Span) -> Option<(usize, usize)> {
+    let line_no = line_no.0 as usize;
+
+    if line_no == span.begin.0 && line_no == span.end.0 {
+        let start_line_start_byte_offset = {
+            let mut char_indices_iter = line.char_indices();
+            for _ in 1..span.begin.1 { char_indices_iter.next(); }
+            char_indices_iter.offset()
+        };
+        let end_line_end_byte_offset = {
+            let mut char_indices_iter = line.char_indices();
+            for _ in 1..span.end.1 { char_indices_iter.next(); }
+            char_indices_iter.offset()
+        };
+
+        return Some((start_line_start_byte_offset, end_line_end_byte_offset));
+    }
+
+    if line_no == span.begin.0 {
+        let start_line_start_byte_offset = {
+            let mut char_indices_iter = line.char_indices();
+            for _ in 1..span.begin.1 { char_indices_iter.next(); }
+            char_indices_iter.offset()
+        };
+
+        return Some((start_line_start_byte_offset, line.len()));
+    }
+    if line_no == span.end.0 {
+        let end_line_end_byte_offset = {
+            let mut char_indices_iter = line.char_indices();
+            for _ in 1..span.end.1 { char_indices_iter.next(); }
+            char_indices_iter.offset()
+        };
+
+        return Some((0, end_line_end_byte_offset));
+    }
+
+    if line_no > span.begin.0 && line_no < span.end.0 {
+        return Some((0, line.len()));
+    }
+
+    None
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -80,29 +126,60 @@ pub fn file_tree_entries<'a>(file_paths: &'a[PathBuf]) -> impl Iterator<Item = T
     })
 }
 
-#[test]
-fn test_file_tree_entries() {
-    let file_paths = &[
-        PathBuf::from("src/lib.rs"),
-        PathBuf::from("src/mod/nested/mod.rs"),
-        PathBuf::from("src/mod/nested/other.rs"),
-        PathBuf::from("src/other/src.rs"),
-        PathBuf::from("src/root.rs"),
-    ];
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut entries = file_tree_entries(file_paths);
-    assert_eq!(Some(TreeEntry::Dir(&Path::new("src"))), entries.next());
-    assert_eq!(Some(TreeEntry::File(&Path::new("src/lib.rs"))), entries.next());
-    assert_eq!(Some(TreeEntry::Dir(&Path::new("src/mod"))), entries.next());
-    assert_eq!(Some(TreeEntry::Dir(&Path::new("src/mod/nested"))), entries.next());
-    assert_eq!(Some(TreeEntry::File(&Path::new("src/mod/nested/mod.rs"))), entries.next());
-    assert_eq!(Some(TreeEntry::File(&Path::new("src/mod/nested/other.rs"))), entries.next());
-    assert_eq!(Some(TreeEntry::EndDir), entries.next());
-    assert_eq!(Some(TreeEntry::EndDir), entries.next());
-    assert_eq!(Some(TreeEntry::Dir(&Path::new("src/other"))), entries.next());
-    assert_eq!(Some(TreeEntry::File(&Path::new("src/other/src.rs"))), entries.next());
-    assert_eq!(Some(TreeEntry::EndDir), entries.next());
-    assert_eq!(Some(TreeEntry::File(&Path::new("src/root.rs"))), entries.next());
-    assert_eq!(Some(TreeEntry::EndDir), entries.next());
-    assert_eq!(None, entries.next());
+    #[test]
+    fn test_line_region_byte_offsets_within_span() {
+        fn dummy_span(lo_line: usize, lo_col: usize, hi_line: usize, hi_col: usize) -> Span {
+            Span { path: PathBuf::new(), begin: (lo_line, lo_col), end: (hi_line, hi_col) }
+        }
+
+        // Empty string.
+        assert_eq!(Some((0, 0)), line_region_byte_offsets_within_span(LineNo(1), "", &dummy_span(1, 1, 1, 1)));
+
+        // Span selecting part of a line.
+        assert_eq!(Some((2, 5)), line_region_byte_offsets_within_span(LineNo(1), "abcdef", &dummy_span(1, 3, 1, 6)));
+        // Partially out of bounds span.
+        assert_eq!(Some((0, 3)), line_region_byte_offsets_within_span(LineNo(1), "abc", &dummy_span(1, 1, 1, 5)));
+        // Completely out of bounds span.
+        assert_eq!(Some((3, 3)), line_region_byte_offsets_within_span(LineNo(1), "abc", &dummy_span(1, 4, 1, 5)));
+        // Span selecting a different line.
+        assert_eq!(None, line_region_byte_offsets_within_span(LineNo(3), "abc", &dummy_span(1, 1, 2, 15)));
+
+        // First line of multiline span.
+        assert_eq!(Some((3, 7)), line_region_byte_offsets_within_span(LineNo(1), "abc def", &dummy_span(1, 4, 3, 1)));
+        // Last line of multiline span.
+        assert_eq!(Some((0, 1)), line_region_byte_offsets_within_span(LineNo(5), "};", &dummy_span(3, 23, 5, 2)));
+        // In-between line of multiline span.
+        assert_eq!(Some((0, 8)), line_region_byte_offsets_within_span(LineNo(8), "    foo,", &dummy_span(6, 19, 9, 1)));
+    }
+
+    #[test]
+    fn test_file_tree_entries() {
+        let file_paths = &[
+            PathBuf::from("src/lib.rs"),
+            PathBuf::from("src/mod/nested/mod.rs"),
+            PathBuf::from("src/mod/nested/other.rs"),
+            PathBuf::from("src/other/src.rs"),
+            PathBuf::from("src/root.rs"),
+        ];
+
+        let mut entries = file_tree_entries(file_paths);
+        assert_eq!(Some(TreeEntry::Dir(&Path::new("src"))), entries.next());
+        assert_eq!(Some(TreeEntry::File(&Path::new("src/lib.rs"))), entries.next());
+        assert_eq!(Some(TreeEntry::Dir(&Path::new("src/mod"))), entries.next());
+        assert_eq!(Some(TreeEntry::Dir(&Path::new("src/mod/nested"))), entries.next());
+        assert_eq!(Some(TreeEntry::File(&Path::new("src/mod/nested/mod.rs"))), entries.next());
+        assert_eq!(Some(TreeEntry::File(&Path::new("src/mod/nested/other.rs"))), entries.next());
+        assert_eq!(Some(TreeEntry::EndDir), entries.next());
+        assert_eq!(Some(TreeEntry::EndDir), entries.next());
+        assert_eq!(Some(TreeEntry::Dir(&Path::new("src/other"))), entries.next());
+        assert_eq!(Some(TreeEntry::File(&Path::new("src/other/src.rs"))), entries.next());
+        assert_eq!(Some(TreeEntry::EndDir), entries.next());
+        assert_eq!(Some(TreeEntry::File(&Path::new("src/root.rs"))), entries.next());
+        assert_eq!(Some(TreeEntry::EndDir), entries.next());
+        assert_eq!(None, entries.next());
+    }
 }

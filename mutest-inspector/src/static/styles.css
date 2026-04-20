@@ -185,6 +185,35 @@ a {
     }
 }
 
+.inline-trace {
+    display: flex;
+    flex-direction: row;
+
+    /* NOTE: Ensure that the containing table cell does not expand to the full content width. */
+    td:has(> &) {
+        max-width: 0px;
+    }
+
+    /* NOTE: Ensure that non-ellipsized items do not expand the container. */
+    overflow: hidden;
+
+    > .def-path {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
+        /* NOTE: Prevent the first (first non-entry call) and last (function directly calling the mutated target) def path in the trace from being collapsed. */
+        &:nth-child(1 of &), &:nth-last-child(1 of &) {
+            overflow: visible;
+        }
+    }
+
+    > .sep {
+        padding-inline: 0.5em;
+        color: yellow;
+    }
+}
+
 .topbar {
     display: flex;
     flex-direction: row;
@@ -417,6 +446,14 @@ section.text {
     }
 }
 
+.notice {
+    width: 100%;
+    padding-inline: 1em;
+    padding-block: 0.3em;
+
+    background-color: rgba(255, 0, 0, 0.5);
+}
+
 .source-code {
     padding-inline: 0.75em;
     border-spacing: 0;
@@ -443,6 +480,14 @@ section.text {
         & .line-content {
             width: 100%;
             padding-left: 0.75em;
+
+            .hi-def {
+                background-color: rgba(115, 0, 255, 0.5);
+            }
+
+            .hi-call {
+                background-color: rgba(255, 0, 255, 0.5);
+            }
         }
 
         &.original {
