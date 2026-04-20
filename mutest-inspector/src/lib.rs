@@ -63,6 +63,8 @@ pub async fn run(config: Config) {
     for source_file_path in &unique_source_file_paths {
         let Ok(source) = fs::read_to_string(source_file_path) else { continue; };
 
+        println!("processing {}", source_file_path.display());
+
         let mut source_file_lines = IdxVec::new();
         for line in source.lines() {
             source_file_lines.push(line.to_owned());
