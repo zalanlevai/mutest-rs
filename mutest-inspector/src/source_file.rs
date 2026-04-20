@@ -3,7 +3,7 @@ use std::iter;
 use std::path::{self, Path, PathBuf};
 
 use mutest_json::Span;
-use mutest_json::data_structures::{Idx, IdxVec};
+use mutest_json::data_structures::{Idx, IdxVec, IdxSlice};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct LineNo(pub u32);
@@ -20,6 +20,19 @@ impl Idx for LineNo {
 
 pub struct SourceFile {
     pub lines: IdxVec<LineNo, String>,
+}
+
+pub fn nudge_span_prefix_lines(lines: &IdxSlice<LineNo, String>, span: &Span) -> usize {
+    let start_line_no = LineNo(span.begin.0 as u32);
+
+    // NOTE: If span is preceeded by anything else in the same line, then we do not add prefix lines to it,
+    //       as they might pertain to the preceeding tokens.
+    // FIXME: This heuristic does not work for oddly formatted code, such as `#[test]\n#[ignore] fn test()`.
+    if !lines[start_line_no].chars().take(span.begin.1 - 1).all(char::is_whitespace) { return 0; }
+
+    lines[..start_line_no].iter().rev()
+        .take_while(|line| line.trim().starts_with("#["))
+        .count()
 }
 
 /// Returns the start and end byte offsets of the region of the specified line that falls within the span.
@@ -130,12 +143,63 @@ pub fn file_tree_entries<'a>(file_paths: &'a[PathBuf]) -> impl Iterator<Item = T
 mod tests {
     use super::*;
 
+    fn dummy_span(lo_line: usize, lo_col: usize, hi_line: usize, hi_col: usize) -> Span {
+        Span { path: PathBuf::new(), begin: (lo_line, lo_col), end: (hi_line, hi_col) }
+    }
+
+    #[test]
+    fn test_nudge_span_prefix_lines() {
+        // No preceeding lines.
+        let mut lines = IdxVec::new();
+        lines.push("    fn test() {".to_owned());
+        assert_eq!(0, nudge_span_prefix_lines(&lines, &dummy_span(1, 5, 1, 12)));
+
+        // No preceeding attributes.
+        let mut lines = IdxVec::new();
+        lines.push("    const OTHER: () = ();".to_owned());
+        lines.push("".to_owned());
+        lines.push("    fn test() {".to_owned());
+        assert_eq!(0, nudge_span_prefix_lines(&lines, &dummy_span(3, 5, 3, 12)));
+
+        // Span is preceeded by other tokens on the same line.
+        let mut lines = IdxVec::new();
+        lines.push("    #[test]".to_owned());
+        lines.push("    fn test() { let _ = || ();".to_owned());
+        assert_eq!(0, nudge_span_prefix_lines(&lines, &dummy_span(2, 25, 2, 27)));
+
+        // Single preceeding attribute.
+        let mut lines = IdxVec::new();
+        lines.push("    #[test]".to_owned());
+        lines.push("    fn test() {".to_owned());
+        assert_eq!(1, nudge_span_prefix_lines(&lines, &dummy_span(2, 5, 2, 12)));
+
+        // Multiple preceeding attributes.
+        let mut lines = IdxVec::new();
+        lines.push("    #[test]".to_owned());
+        lines.push("    #[ignore]".to_owned());
+        lines.push("    fn test() {".to_owned());
+        assert_eq!(2, nudge_span_prefix_lines(&lines, &dummy_span(3, 5, 3, 12)));
+
+        // Preceeding attribute applies to the parent, not the node it preceeds.
+        let mut lines = IdxVec::new();
+        lines.push("    #![cfg(test)]".to_owned());
+        lines.push("    #[test]".to_owned());
+        lines.push("    fn test() {".to_owned());
+        assert_eq!(1, nudge_span_prefix_lines(&lines, &dummy_span(3, 5, 3, 12)));
+
+        // Span is preceeded by attributes, comments, and doc comments.
+        // NOTE: Comments and doc comments are ignored because they can sometimes span a lot of lines.
+        let mut lines = IdxVec::new();
+        lines.push("".to_owned());
+        lines.push("    /// Documentation.".to_owned());
+        lines.push("    // Comment.".to_owned());
+        lines.push("    #[cfg(feature = \"foo\")]".to_owned());
+        lines.push("    fn foo() {".to_owned());
+        assert_eq!(1, nudge_span_prefix_lines(&lines, &dummy_span(5, 5, 5, 12)));
+    }
+
     #[test]
     fn test_line_region_byte_offsets_within_span() {
-        fn dummy_span(lo_line: usize, lo_col: usize, hi_line: usize, hi_col: usize) -> Span {
-            Span { path: PathBuf::new(), begin: (lo_line, lo_col), end: (hi_line, hi_col) }
-        }
-
         // Empty string.
         assert_eq!(Some((0, 0)), line_region_byte_offsets_within_span(LineNo(1), "", &dummy_span(1, 1, 1, 1)));
 

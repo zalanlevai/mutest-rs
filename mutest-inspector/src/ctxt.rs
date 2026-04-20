@@ -10,7 +10,7 @@ use crate::evaluation::EvaluationInfo;
 use crate::html::{SourceFileHtml, render_def_path_html};
 use crate::html::mutations::{OverlappingGroupOfMutations, update_overlapping_groups};
 use crate::metadata::{Definition, Mutation, Target, Test};
-use crate::source_file::SourceFile;
+use crate::source_file::{SourceFile, nudge_span_prefix_lines};
 
 pub struct WebCtxt {
     unique_source_file_paths: Vec<PathBuf>,
@@ -66,6 +66,8 @@ impl WebCtxt {
                 def_path: definition.path.clone(),
                 def_path_html: render_def_path_html(&definition.path),
                 span: definition.span.clone(),
+                // HACK: This requires sources to compute, and get populated as source files are registered.
+                nudge_prefix_lines: 0,
             });
         }
 
@@ -126,6 +128,14 @@ impl WebCtxt {
     }
 
     pub(crate) fn register_loaded_source_file(&mut self, file_path: &Path, source_file: SourceFile, source_file_html: SourceFileHtml) {
+        // HACK: Definition nudge prefix lines need sources to be computed, so they get populated as source files are registered.
+        for def in &mut self.definitions {
+            let Some(def_span) = &def.span else { continue; };
+            if def_span.path != file_path { continue; }
+
+            def.nudge_prefix_lines = nudge_span_prefix_lines(&source_file.lines, def_span);
+        }
+
         self.loaded_source_files.insert(file_path.to_owned(), source_file);
         self.source_file_htmls.insert(file_path.to_owned(), source_file_html);
     }
