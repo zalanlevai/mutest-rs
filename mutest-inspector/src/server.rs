@@ -38,7 +38,7 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
         .route("/traces/{trace_spec}", axum::routing::get(handle_trace_request))
         .route("/tests", axum::routing::get(handle_tests_request))
         .route("/tests/{test_name}", axum::routing::get(handle_test_request))
-        .nest_service("/static", tower_http::services::ServeDir::new(env!("STATIC_DIR")))
+        .nest("/static", memory_serve::load!().into_router())
         .fallback(handle_unknown)
         .with_state(state);
 
