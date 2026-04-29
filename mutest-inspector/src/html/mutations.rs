@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use mutest_json::mutations::MutationId;
 
-use crate::ctxt::WebCtxt;
+use crate::ctxt::WorkspaceCtxt;
 use crate::source_file::LineNo;
 use crate::syntax_highlight::{MappedLine, SyntaxHighlighter};
 
@@ -32,7 +32,7 @@ impl SubstHtml {
     }
 }
 
-pub fn render_mutation_subst_lines(wcx: &WebCtxt, syntax_highlighter: &mut SyntaxHighlighter, subst: &mutest_json::mutations::Substitution) -> Option<SubstHtml> {
+pub fn render_mutation_subst_lines(wcx: &WorkspaceCtxt, syntax_highlighter: &mut SyntaxHighlighter, subst: &mutest_json::mutations::Substitution) -> Option<SubstHtml> {
     let subst_span = subst.location.span();
     let subst_start_line = LineNo(subst_span.begin.0 as u32);
     let subst_end_line = LineNo(subst_span.end.0 as u32);

@@ -16,18 +16,18 @@ async fn main() {
                 .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))).bold())
                 .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))))
         })
-        .arg(clap::arg!(--"json-dir" [JSON_DIR] "Path to JSON metadata files from a mutest-rs analysis.").value_parser(clap::value_parser!(PathBuf)).default_value("target/mutest/json"))
+        .arg(clap::arg!(--"json-root-dir" [JSON_ROOT_DIR] "Path to JSON metadata files from a mutest-rs analysis.").value_parser(clap::value_parser!(PathBuf)).default_value("target/mutest/json"))
         .arg(clap::arg!(--port [PORT] "Port number to serve interface on.").value_parser(clap::value_parser!(u16)).default_value("3000"))
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
         .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true))
         .get_matches();
 
-    let Some(json_dir_path) = matches.get_one::<PathBuf>("json-dir").cloned() else { unreachable!() };
+    let Some(json_root_dir_path) = matches.get_one::<PathBuf>("json-root-dir").cloned() else { unreachable!() };
 
     let port = *matches.get_one::<u16>("port").unwrap();
 
     let config = Config {
-        json_dir_path,
+        json_root_dir_path,
         opts: config::Options {
             port,
         },

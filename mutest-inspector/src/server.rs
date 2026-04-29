@@ -9,13 +9,14 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
+use serde::Deserialize;
 
 use mutest_json::{DefId, Span};
 use mutest_json::mutations::{MutationId, TargetId};
 
 use crate::call_graph::{TraceSpec, entry_point_mono_call_traces, reduce_mono_call_traces};
 use crate::config::Options;
-use crate::ctxt::WebCtxt;
+use crate::ctxt::{TargetSpec, WorkspaceCtxt};
 use crate::evaluation::{TestMutationResult, MutationDetection};
 use crate::html::source_code_line_content;
 use crate::html::base::{Tab, base_html, topbar_html};
@@ -23,22 +24,25 @@ use crate::html::mutations::{OverlappingGroupOfMutations, OverlappingGroupKind};
 use crate::source_file::{LineNo, TreeEntry, file_tree_entries, line_region_byte_offsets_within_span};
 
 pub(crate) struct ServerState {
-    pub wcx: WebCtxt,
+    pub wcx: WorkspaceCtxt,
 }
 
 pub(crate) async fn run(opts: &Options, state: ServerState) {
     let state = Arc::new(state);
 
     let router = axum::Router::new()
-        .route("/", axum::routing::get(handle_root))
-        .route("/source", axum::routing::get(handle_source_request))
-        .route("/source/{*path}", axum::routing::get(handle_source_request))
-        .route("/mutations", axum::routing::get(handle_mutations_request))
-        .route("/mutations/{mutation_id}", axum::routing::get(handle_mutation_request))
-        .route("/traces/{trace_spec}", axum::routing::get(handle_trace_request))
-        .route("/tests", axum::routing::get(handle_tests_request))
-        .route("/tests/{test_name}", axum::routing::get(handle_test_request))
+        .route("/", axum::routing::get(handle_root_request))
         .nest("/static", memory_serve::load!().into_router())
+        .nest("/{package}/{target}", axum::Router::new()
+            .route("/", axum::routing::get(handle_target_root_request))
+            .route("/source", axum::routing::get(handle_source_request))
+            .route("/source/{*path}", axum::routing::get(handle_source_request))
+            .route("/mutations", axum::routing::get(handle_mutations_request))
+            .route("/mutations/{mutation_id}", axum::routing::get(handle_mutation_request))
+            .route("/traces/{trace_spec}", axum::routing::get(handle_trace_request))
+            .route("/tests", axum::routing::get(handle_tests_request))
+            .route("/tests/{test_name}", axum::routing::get(handle_test_request))
+        )
         .fallback(handle_unknown)
         .with_state(state);
 
@@ -52,31 +56,54 @@ async fn handle_unknown() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "404")
 }
 
-async fn handle_root() -> Response {
-    Redirect::to("/source").into_response()
+async fn handle_root_request(State(state): State<Arc<ServerState>>) -> Response {
+    let wcx = &state.wcx;
+    let [(package, target), ..] = wcx.targets() else {
+        return (StatusCode::OK, "no targets loaded").into_response();
+    };
+    Redirect::to(&format!("/{}/{}", package, target.path_str())).into_response()
 }
 
-async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Option<Path<PathBuf>>) -> (StatusCode, Html<String>) {
+async fn handle_target_root_request(Path((package, target)): Path<(String, TargetSpec)>) -> Response {
+    Redirect::to(&format!("/{}/{}/source", package, target.path_str())).into_response()
+}
+
+// NOTE: This struct is required because an optional trailing path segment cannot be declared in tuple form.
+#[derive(Deserialize)]
+struct SourceRequestPathParams {
+    package: String,
+    target: TargetSpec,
+    path: Option<PathBuf>,
+}
+
+async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_params): Path<SourceRequestPathParams>) -> (StatusCode, Html<String>) {
+    let SourceRequestPathParams { package, target, path } = path_params;
+
     let wcx = &state.wcx;
 
-    let evaluation_info = wcx.evaluation_info();
+    let target_path = format!("{}/{}", package, target.path_str());
+    let Some(tcx) = wcx.target(&package, &target) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target `{}` not found", target_path)));
+    };
+
+    let evaluation_info = tcx.evaluation_info();
 
     let mut body = String::new();
 
     let title = match &path {
-        Some(Path(path)) => &path.to_string_lossy(),
+        Some(path) => &path.to_string_lossy(),
         None => "source",
     };
     base_html(&mut body, title).unwrap();
     write!(body, "<body>").unwrap();
 
-    topbar_html(&mut body, wcx, Some(Tab::Sources)).unwrap();
+    topbar_html(&mut body, wcx, &package, &target, tcx, Some(Tab::Sources)).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
     write!(body, "<nav class=\"sidebar\">").unwrap();
     write!(body, "<ol class=\"file-tree\">").unwrap();
-    for tree_entry in file_tree_entries(wcx.local_source_file_paths()) {
+    for tree_entry in file_tree_entries(tcx.local_source_file_paths()) {
         match tree_entry {
             TreeEntry::Dir(entry_path) => {
                 let Some(dir_name) = entry_path.file_name() else {
@@ -88,13 +115,13 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
                 let Some(file_name) = entry_path.file_name() else {
                     return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("encountered invalid path amongst file tree entries: `{}`", entry_path.display())));
                 };
-                let file_mutations = wcx.file_mutations(entry_path);
+                let file_mutations = tcx.file_mutations(entry_path);
 
                 write!(body, "<li><a class=\"item").unwrap();
-                if let Some(Path(path)) = &path && entry_path == path {
+                if let Some(path) = &path && entry_path == path {
                     write!(body, " selected").unwrap();
                 }
-                write!(body, "\" href=\"/source/{}\">", entry_path.display()).unwrap();
+                write!(body, "\" href=\"/{}/source/{}\">", target_path, entry_path.display()).unwrap();
                 write!(body, "<span class=\"name\">{}</span>", file_name.display()).unwrap();
                 write!(body, "<div class=\"badge\">").unwrap();
                 if let Some(evaluation_info) = evaluation_info {
@@ -119,7 +146,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
 
     write!(body, "<main class=\"main-content\">").unwrap();
 
-    let Some(Path(path)) = path else {
+    let Some(path) = path else {
         // NOTE: Empty main content for root source page.
         write!(body, "</main").unwrap();
         write!(body, "</div>").unwrap();
@@ -132,7 +159,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
         return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not found", path.display())));
     };
 
-    let overlapping_groups_of_mutations_in_file = wcx.overlapping_groups_of_mutations_in_file(&path);
+    let overlapping_groups_of_mutations_in_file = tcx.overlapping_groups_of_mutations_in_file(&path);
 
     let mut total_mutations_count = 0;
     let mut undetected_mutations_count = 0;
@@ -244,7 +271,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
             write!(body, "</tbody>").unwrap();
 
             for &mutation_id in &g.mutations {
-                let Some(mutation) = wcx.mutation(mutation_id) else { continue; };
+                let Some(mutation) = tcx.mutation(mutation_id) else { continue; };
 
                 let mutation_detection_html = match evaluation_info {
                     Some(evaluation_info) => evaluation_info.mutation_detections[mutation_id].badge_html(),
@@ -252,7 +279,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
                 };
 
                 // Write out mutation heading.
-                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">{} <a href=\"/mutations/{}\">mutation {}</a>: {}</td></tr>", mutation_id.0, mutation_detection_html, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">{} <a href=\"/{}/mutations/{}\">mutation {}</a>: {}</td></tr>", mutation_id.0, mutation_detection_html, target_path, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
 
                 // Filter to relevant substitutions that fall within this overlap group.
                 let substs_within_group = mutation.subst_htmls.iter().filter(|subst_html| {
@@ -336,17 +363,22 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, path: Opti
     (StatusCode::OK, Html(body))
 }
 
-async fn handle_mutations_request(State(state): State<Arc<ServerState>>) -> (StatusCode, Html<String>) {
+async fn handle_mutations_request(State(state): State<Arc<ServerState>>, Path((package, target)): Path<(String, TargetSpec)>) -> (StatusCode, Html<String>) {
     let wcx = &state.wcx;
 
-    let evaluation_info = wcx.evaluation_info();
+    let target_path = format!("{}/{}", package, target.path_str());
+    let Some(tcx) = wcx.target(&package, &target) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target `{}` not found", target_path)));
+    };
+
+    let evaluation_info = tcx.evaluation_info();
 
     let mut body = String::new();
 
     base_html(&mut body, "mutations").unwrap();
     write!(body, "<body>").unwrap();
 
-    topbar_html(&mut body, wcx, Some(Tab::Mutations)).unwrap();
+    topbar_html(&mut body, wcx, &package, &target, tcx, Some(Tab::Mutations)).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
@@ -355,7 +387,7 @@ async fn handle_mutations_request(State(state): State<Arc<ServerState>>) -> (Sta
 
     write!(body, "<main class=\"main-content\">").unwrap();
 
-    let total_mutations_count = wcx.mutations_count();
+    let total_mutations_count = tcx.mutations_count();
     let mut undetected_mutations_count = 0;
     let mut detected_mutations_count = 0;
     let mut timed_out_mutations_count = 0;
@@ -401,11 +433,11 @@ async fn handle_mutations_request(State(state): State<Arc<ServerState>>) -> (Sta
 
     write!(body, "<table class=\"page-table\">").unwrap();
     write!(body, "<tbody>").unwrap();
-    for file_path in wcx.local_source_file_paths() {
+    for file_path in tcx.local_source_file_paths() {
         write!(body, "<tr class=\"heading\"><th colspan=\"3\">{}</th></tr>", file_path.display()).unwrap();
 
-        for &mutation_id in wcx.file_mutations(file_path) {
-            let Some(mutation) = wcx.mutation(mutation_id) else { continue; };
+        for &mutation_id in tcx.file_mutations(file_path) {
+            let Some(mutation) = tcx.mutation(mutation_id) else { continue; };
 
             let mutation_detection_html = match evaluation_info {
                 Some(evaluation_info) => evaluation_info.mutation_detections[mutation_id].badge_html(),
@@ -417,9 +449,9 @@ async fn handle_mutations_request(State(state): State<Arc<ServerState>>) -> (Sta
             let (hi_line, hi_col) = mutation.origin_span.end;
 
             write!(body, "<tr id=\"M{}\" class=\"entry\">", mutation_id.0).unwrap();
-            write!(body, "<td class=\"right loc\"><a href=\"/source/{}#M{}\">{}:{} {}:{}</a></td>", source_path_str, mutation_id.0, lo_line, lo_col, hi_line, hi_col).unwrap();
+            write!(body, "<td class=\"right loc\"><a href=\"/{}/source/{}#M{}\">{}:{} {}:{}</a></td>", target_path, source_path_str, mutation_id.0, lo_line, lo_col, hi_line, hi_col).unwrap();
             write!(body, "<td class=\"right right-tight\">{}</td>", mutation_detection_html).unwrap();
-            write!(body, "<td class=\"expand desc\"><span><a href=\"/mutations/{}\">mutation {}</a>: {}</span></td>", mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+            write!(body, "<td class=\"expand desc\"><span><a href=\"/{}/mutations/{}\">mutation {}</a>: {}</span></td>", target_path, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
             write!(body, "</tr>").unwrap();
         }
     }
@@ -435,16 +467,21 @@ async fn handle_mutations_request(State(state): State<Arc<ServerState>>) -> (Sta
     (StatusCode::OK, Html(body))
 }
 
-async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mutation_id): Path<MutationId>) -> (StatusCode, Html<String>) {
+async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path((package, target, mutation_id)): Path<(String, TargetSpec, MutationId)>) -> (StatusCode, Html<String>) {
     let wcx = &state.wcx;
 
-    let Some(mutation) = wcx.mutation(mutation_id) else {
+    let target_path = format!("{}/{}", package, target.path_str());
+    let Some(tcx) = wcx.target(&package, &target) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target `{}` not found", target_path)));
+    };
+
+    let Some(mutation) = tcx.mutation(mutation_id) else {
         return (StatusCode::NOT_FOUND, Html(format!("mutation `{}` not found", mutation_id.0)));
     };
-    let Some(target) = wcx.target(mutation.target_id) else {
+    let Some(mutation_target) = tcx.target(mutation.target_id) else {
         return (StatusCode::NOT_FOUND, Html(format!("target of mutation `{}` not found", mutation_id.0)));
     };
-    let Some(def) = wcx.definition(target.def_id) else {
+    let Some(def) = tcx.definition(mutation_target.def_id) else {
         return (StatusCode::NOT_FOUND, Html(format!("target definition of mutation `{}` not found", mutation_id.0)));
     };
 
@@ -452,15 +489,15 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
         return (StatusCode::NOT_FOUND, Html(format!("source file `{}` not found", mutation.origin_span.path.display())));
     };
 
-    let call_graph = wcx.call_graph();
-    let evaluation_info = wcx.evaluation_info();
+    let call_graph = tcx.call_graph();
+    let evaluation_info = tcx.evaluation_info();
 
     let mut body = String::new();
 
     base_html(&mut body, &format!("mutation {}: {}", mutation_id.0, mutation.display_name)).unwrap();
     write!(body, "<body>").unwrap();
 
-    topbar_html(&mut body, wcx, None).unwrap();
+    topbar_html(&mut body, wcx, &package, &target, tcx, None).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
@@ -477,7 +514,7 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
     write!(body, "<header>").unwrap();
     write!(body, "<h1>{} mutation {}: {}</h1>", mutation_detection_html, mutation_id.0, mutation.display_name_html).unwrap();
     if let Some(def_span) = &def.span {
-        write!(body, " <span>in <a href=\"/source/{}#M{}\">{}</a></span>", def_span.path.display(), mutation_id.0, def_span.path.display()).unwrap();
+        write!(body, " <span>in <a href=\"/{}/source/{}#M{}\">{}</a></span>", target_path, def_span.path.display(), mutation_id.0, def_span.path.display()).unwrap();
     }
     write!(body, "</header>").unwrap();
 
@@ -525,7 +562,7 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
     let mut detected_tests_count = 0;
     let mut timed_out_tests_count = 0;
     let mut crashed_tests_count = 0;
-    for (def_path, _) in &target.reachable_from {
+    for (def_path, _) in &mutation_target.reachable_from {
         match evaluation_info {
             Some(evaluation_info) => {
                 let Some(test_runs) = evaluation_info.test_runs.get(def_path) else { continue; };
@@ -576,22 +613,22 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
 
     write!(body, "<section>").unwrap();
     write!(body, "<table class=\"page-table\">").unwrap();
-    let mut reaching_def_paths = target.reachable_from.keys().collect::<Vec<_>>();
+    let mut reaching_def_paths = mutation_target.reachable_from.keys().collect::<Vec<_>>();
     reaching_def_paths.sort_unstable();
     for def_path in &reaching_def_paths {
-        let Some(test) = wcx.test(def_path) else { continue; };
-        let Some(test_def) = wcx.definition(test.def_id) else { continue; };
+        let Some(test) = tcx.test(def_path) else { continue; };
+        let Some(test_def) = tcx.definition(test.def_id) else { continue; };
 
         let test_mutation_result = match evaluation_info {
             Some(evaluation_info) => evaluation_info.test_mutation_result(mutation_id, def_path).unwrap_or(TestMutationResult::NotRan),
             None => TestMutationResult::NotRan,
         };
 
-        write!(body, "<tr class=\"heading\"><th class=\"right right-tight\">{}</th><th class=\"expand\"><a href=\"/tests/{}\">{}</a></th></tr>", test_mutation_result.badge_html(), def_path, test_def.def_path_html).unwrap();
+        write!(body, "<tr class=\"heading\"><th class=\"right right-tight\">{}</th><th class=\"expand\"><a href=\"/{}/tests/{}\">{}</a></th></tr>", test_mutation_result.badge_html(), target_path, def_path, test_def.def_path_html).unwrap();
 
         let Some(entry_point) = call_graph.entry_points.iter().find(|entry_point| entry_point.def_id == test.def_id) else { continue; };
 
-        let mono_call_traces = entry_point_mono_call_traces(&call_graph, entry_point, target.def_id);
+        let mono_call_traces = entry_point_mono_call_traces(&call_graph, entry_point, mutation_target.def_id);
         let mut def_call_traces = reduce_mono_call_traces(&call_graph, &mono_call_traces);
 
         def_call_traces.sort_unstable_by_key(|call_trace| call_trace.nested_calls.len());
@@ -613,7 +650,7 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
                 mutation_id,
             };
 
-            write!(body, "<tr><td class=\"right right-tight\"><a href=\"/traces/").unwrap();
+            write!(body, "<tr><td class=\"right right-tight\"><a href=\"/{}/traces/", target_path).unwrap();
             trace_spec.write(&mut body);
             write!(body, "\">trace ({})</a>", call_trace.nested_calls.len()).unwrap();
             write!(body, "</td><td class=\"expand\"><span class=\"inline-trace\">").unwrap();
@@ -624,7 +661,7 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
             };
 
             for &def_id in in_between_callees {
-                match wcx.definition(def_id) {
+                match tcx.definition(def_id) {
                     Some(def) => write!(body, "<span class=\"sep\">→</span> {}", def.def_path_html).unwrap(),
                     None => write!(body, "<span class=\"sep\">→</span> <i>unknown</i>").unwrap(),
                 }
@@ -649,21 +686,26 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path(mut
     (StatusCode::OK, Html(body))
 }
 
-async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_spec): Path<String>) -> (StatusCode, Html<String>) {
+async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path((package, target, trace_spec)): Path<(String, TargetSpec, String)>) -> (StatusCode, Html<String>) {
     let wcx = &state.wcx;
+
+    let target_path = format!("{}/{}", package, target.path_str());
+    let Some(tcx) = wcx.target(&package, &target) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target `{}` not found", target_path)));
+    };
 
     let Some(trace_spec) = TraceSpec::parse(&trace_spec) else {
         return (StatusCode::BAD_REQUEST, Html(format!("invalid trace spec: `{}`", trace_spec)));
     };
-    let Some(entry_point_def) = wcx.lookup_definition_by_path(trace_spec.entry_point_def_path) else {
+    let Some(entry_point_def) = tcx.lookup_definition_by_path(trace_spec.entry_point_def_path) else {
         return (StatusCode::NOT_FOUND, Html(format!("definition `{}` not found", trace_spec.entry_point_def_path)));
     };
-    let Some(target_def) = wcx.definition(trace_spec.target()) else {
+    let Some(target_def) = tcx.definition(trace_spec.target()) else {
         return (StatusCode::NOT_FOUND, Html(format!("definition `{:?}` not found", trace_spec.target())));
     };
 
-    let call_graph = wcx.call_graph();
-    let evaluation_info = wcx.evaluation_info();
+    let call_graph = tcx.call_graph();
+    let evaluation_info = tcx.evaluation_info();
 
     let mut body = String::new();
 
@@ -677,7 +719,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
     base_html(&mut body, &title).unwrap();
     write!(body, "<body>").unwrap();
 
-    topbar_html(&mut body, wcx, None).unwrap();
+    topbar_html(&mut body, wcx, &package, &target, tcx, None).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
@@ -697,9 +739,9 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
         1 => write!(body, "1 call").unwrap(),
         count => write!(body, "{} calls", count).unwrap(),
     }
-    write!(body, " deep from <span class=\"inline-code\"><a href=\"/tests/{}\">{}</a></span>", entry_point_def.def_path, entry_point_def.def_path_html).unwrap();
+    write!(body, " deep from <span class=\"inline-code\"><a href=\"/{}/tests/{}\">{}</a></span>", target_path, entry_point_def.def_path, entry_point_def.def_path_html).unwrap();
     write!(body, " to <span class=\"inline-code\">{}</span>", target_def.def_path_html).unwrap();
-    write!(body, " with <a href=\"/mutations/{}\">mutation {}</a></h1>", trace_spec.mutation_id.0, trace_spec.mutation_id.0).unwrap();
+    write!(body, " with <a href=\"/{}/mutations/{}\">mutation {}</a></h1>", target_path, trace_spec.mutation_id.0, trace_spec.mutation_id.0).unwrap();
     write!(body, "</header>").unwrap();
 
     enum TraceSnippetKind<'a> {
@@ -730,7 +772,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
     call_spans.sort_by(|a, b| Ord::cmp(&a.end.0, &b.end.0));
     call_spans.dedup();
 
-    let Some(root_callee_def) = wcx.definition(trace_spec.root_callee()) else { unreachable!(); };
+    let Some(root_callee_def) = tcx.definition(trace_spec.root_callee()) else { unreachable!(); };
 
     trace_snippets.push(TraceSnippet {
         def_id: entry_point_def.def_id,
@@ -764,7 +806,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
     });
 
     for trace_snippet in trace_snippets {
-        let Some(def) = wcx.definition(trace_snippet.def_id) else { continue; };
+        let Some(def) = tcx.definition(trace_snippet.def_id) else { continue; };
 
         write!(body, "<section class=\"trace-snippet\">").unwrap();
 
@@ -772,12 +814,12 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
         write!(body, "<span>").unwrap();
         if let Some(def_span) = &def.span {
             let Some(def_display_start_line) = def.display_start_line() else { unreachable!("definition with span has no display start line") };
-            write!(body, "<a href=\"/source/{}#L{}\">{}</a>: ", def_span.path.display(), def_display_start_line.0, def_span.path.display()).unwrap();
+            write!(body, "<a href=\"/{}/source/{}#L{}\">{}</a>: ", target_path, def_span.path.display(), def_display_start_line.0, def_span.path.display()).unwrap();
         }
         write!(body, "<span class=\"inline-code\">{}</span>", def.def_path_html).unwrap();
         match &trace_snippet.kind {
             &TraceSnippetKind::Calls { callee_def_id, ref call_spans } => {
-                let Some(callee_def) = wcx.definition(callee_def_id) else { continue };
+                let Some(callee_def) = tcx.definition(callee_def_id) else { continue };
 
                 write!(body, " calls ").unwrap();
                 write!(body, "<span class=\"inline-code\">{}</span>", callee_def.def_path_html).unwrap();
@@ -789,11 +831,11 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
                 }
             }
             &TraceSnippetKind::Mutation { mutation_id } => {
-                let Some(mutation) = wcx.mutation(mutation_id) else {
+                let Some(mutation) = tcx.mutation(mutation_id) else {
                     return (StatusCode::NOT_FOUND, Html(format!("mutation `{}` not found", mutation_id.0)));
                 };
 
-                write!(body, " with <a href=\"/mutations/{}\">mutation {}</a>: {}", mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+                write!(body, " with <a href=\"/{}/mutations/{}\">mutation {}</a>: {}", target_path, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
             }
         }
         write!(body, "</span>").unwrap();
@@ -843,7 +885,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
                 }
             }
             &TraceSnippetKind::Mutation { mutation_id } => {
-                let Some(mutation) = wcx.mutation(mutation_id) else {
+                let Some(mutation) = tcx.mutation(mutation_id) else {
                     return (StatusCode::NOT_FOUND, Html(format!("mutation `{}` not found", mutation_id.0)));
                 };
 
@@ -895,19 +937,24 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path(trace_
     (StatusCode::OK, Html(body))
 }
 
-async fn handle_tests_request(State(state): State<Arc<ServerState>>) -> (StatusCode, Html<String>) {
+async fn handle_tests_request(State(state): State<Arc<ServerState>>, Path((package, target)): Path<(String, TargetSpec)>) -> (StatusCode, Html<String>) {
     let wcx = &state.wcx;
 
-    let tests = wcx.tests();
+    let target_path = format!("{}/{}", package, target.path_str());
+    let Some(tcx) = wcx.target(&package, &target) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target `{}` not found", target_path)));
+    };
 
-    let evaluation_info = wcx.evaluation_info();
+    let tests = tcx.tests();
+
+    let evaluation_info = tcx.evaluation_info();
 
     let mut body = String::new();
 
     base_html(&mut body, "tests").unwrap();
     write!(body, "<body>").unwrap();
 
-    topbar_html(&mut body, wcx, Some(Tab::Tests)).unwrap();
+    topbar_html(&mut body, wcx, &package, &target, tcx, Some(Tab::Tests)).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
@@ -920,7 +967,7 @@ async fn handle_tests_request(State(state): State<Arc<ServerState>>) -> (StatusC
     write!(body, "<thead><tr><th>test</th><th class=\"right\">reachable mutations</th><th class=\"right\">ran</th><th class=\"right\">coverage</th><th class=\"right\">undetected</th><th class=\"right\">detected</th><th class=\"right\">timed out</th><th class=\"right\">crashed</th></tr></thead>").unwrap();
     write!(body, "<tbody>").unwrap();
     for test in tests {
-        let Some(def) = wcx.definition(test.def_id) else {
+        let Some(def) = tcx.definition(test.def_id) else {
             return (StatusCode::NOT_FOUND, Html(format!("definition `{:?}` not found", test.def_id)));
         };
 
@@ -931,8 +978,8 @@ async fn handle_tests_request(State(state): State<Arc<ServerState>>) -> (StatusC
         let mut timed_out_mutations_count = 0;
         let mut crashed_mutations_count = 0;
         let test_runs = evaluation_info.and_then(|evaluation_info| evaluation_info.test_runs.get(&def.def_path));
-        for &target_id in wcx.targets_reached_by_test(&def.def_path) {
-            for &mutation_id in wcx.target_mutations(target_id) {
+        for &target_id in tcx.targets_reached_by_test(&def.def_path) {
+            for &mutation_id in tcx.target_mutations(target_id) {
                 match test_runs {
                     Some(test_runs) => {
                         match test_runs.mutation_detections[mutation_id] {
@@ -952,7 +999,7 @@ async fn handle_tests_request(State(state): State<Arc<ServerState>>) -> (StatusC
         }
 
         write!(body, "<tr>").unwrap();
-        write!(body, "<td class=\"expand sticky-content\"><a href=\"/tests/{}\">{}</a></td>", def.def_path, def.def_path_html).unwrap();
+        write!(body, "<td class=\"expand sticky-content\"><a href=\"/{}/tests/{}\">{}</a></td>", target_path, def.def_path, def.def_path_html).unwrap();
         let ran_mutations_count = total_mutations_count - not_ran_mutations_count;
         match (total_mutations_count, ran_mutations_count) {
             (0, _) => {
@@ -990,24 +1037,29 @@ async fn handle_tests_request(State(state): State<Arc<ServerState>>) -> (StatusC
     (StatusCode::OK, Html(body))
 }
 
-async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_name): Path<String>) -> (StatusCode, Html<String>) {
+async fn handle_test_request(State(state): State<Arc<ServerState>>, Path((package, target, test_name)): Path<(String, TargetSpec, String)>) -> (StatusCode, Html<String>) {
     let wcx = &state.wcx;
 
-    let Some(test) = wcx.test(&test_name) else {
+    let target_path = format!("{}/{}", package, target.path_str());
+    let Some(tcx) = wcx.target(&package, &target) else {
+        return (StatusCode::NOT_FOUND, Html(format!("target `{}` not found", target_path)));
+    };
+
+    let Some(test) = tcx.test(&test_name) else {
         return (StatusCode::NOT_FOUND, Html(format!("test `{}` not found", test_name)));
     };
-    let Some(def) = wcx.definition(test.def_id) else {
+    let Some(def) = tcx.definition(test.def_id) else {
         return (StatusCode::NOT_FOUND, Html(format!("definition `{:?}` not found", test.def_id)));
     };
 
-    let evaluation_info = wcx.evaluation_info();
+    let evaluation_info = tcx.evaluation_info();
 
     let mut body = String::new();
 
     base_html(&mut body, &format!("test `{}`", def.def_path)).unwrap();
     write!(body, "<body>").unwrap();
 
-    topbar_html(&mut body, wcx, None).unwrap();
+    topbar_html(&mut body, wcx, &package, &target, tcx, None).unwrap();
 
     write!(body, "<div class=\"page-layout\">").unwrap();
 
@@ -1020,7 +1072,7 @@ async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_na
     write!(body, "<h1>test <span class=\"inline-code\">{}</span></h1>", def.def_path_html).unwrap();
     if let Some(def_span) = &def.span {
         let Some(def_display_start_line) = def.display_start_line() else { unreachable!("definition with span has no display start line") };
-        write!(body, " <span>in <a href=\"/source/{}#L{}\">{}</a></span>", def_span.path.display(), def_display_start_line.0, def_span.path.display()).unwrap();
+        write!(body, " <span>in <a href=\"/{}/source/{}#L{}\">{}</a></span>", target_path, def_span.path.display(), def_display_start_line.0, def_span.path.display()).unwrap();
     }
     write!(body, "</header>").unwrap();
 
@@ -1031,8 +1083,8 @@ async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_na
     let mut timed_out_mutations_count = 0;
     let mut crashed_mutations_count = 0;
     let test_runs = evaluation_info.and_then(|evaluation_info| evaluation_info.test_runs.get(&def.def_path));
-    for &target_id in wcx.targets_reached_by_test(&def.def_path) {
-        for &mutation_id in wcx.target_mutations(target_id) {
+    for &target_id in tcx.targets_reached_by_test(&def.def_path) {
+        for &mutation_id in tcx.target_mutations(target_id) {
             match test_runs {
                 Some(test_runs) => {
                     match test_runs.mutation_detections[mutation_id] {
@@ -1081,13 +1133,13 @@ async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_na
     write!(body, "</section>").unwrap();
 
     let mut reachable_targets_per_file = BTreeMap::<PathBuf, Vec<TargetId>>::new();
-    for &target_id in wcx.targets_reached_by_test(&def.def_path) {
-        let Some(target) = wcx.target(target_id) else { continue; };
-        let Some(def) = wcx.definition(target.def_id) else { continue; };
+    for &target_id in tcx.targets_reached_by_test(&def.def_path) {
+        let Some(target) = tcx.target(target_id) else { continue; };
+        let Some(def) = tcx.definition(target.def_id) else { continue; };
         let Some(def_span) = &def.span else { continue; };
 
         // NOTE: Skip targets for which no mutations were generated for.
-        if wcx.target_mutations(target_id).is_empty() { continue; }
+        if tcx.target_mutations(target_id).is_empty() { continue; }
 
         let file_entry = reachable_targets_per_file.entry(def_span.path.to_owned()).or_default();
         if file_entry.contains(&target_id) { continue; }
@@ -1099,8 +1151,8 @@ async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_na
     for (file_path, reachable_targets) in &reachable_targets_per_file {
         write!(body, "<tr class=\"heading\"><th colspan=\"3\">{}</th></tr>", file_path.display()).unwrap();
 
-        for &mutation_id in wcx.file_mutations(file_path) {
-            let Some(mutation) = wcx.mutation(mutation_id) else { continue; };
+        for &mutation_id in tcx.file_mutations(file_path) {
+            let Some(mutation) = tcx.mutation(mutation_id) else { continue; };
 
             if !reachable_targets.contains(&mutation.target_id) { continue; }
 
@@ -1109,13 +1161,13 @@ async fn handle_test_request(State(state): State<Arc<ServerState>>, Path(test_na
             let (hi_line, hi_col) = mutation.origin_span.end;
 
             write!(body, "<tr id=\"M{}\" class=\"entry\">", mutation_id.0).unwrap();
-            write!(body, "<td class=\"right\"><a href=\"/source/{}#M{}\">{}:{} {}:{}</a></td>", source_path_str, mutation_id.0, lo_line, lo_col, hi_line, hi_col).unwrap();
+            write!(body, "<td class=\"right\"><a href=\"/{}/source/{}#M{}\">{}:{} {}:{}</a></td>", target_path, source_path_str, mutation_id.0, lo_line, lo_col, hi_line, hi_col).unwrap();
             write!(body, "<td class=\"right right-tight\">").unwrap();
             if let Some(evaluation_info) = evaluation_info && let Some(test_mutation_result) = evaluation_info.test_mutation_result(mutation_id, &def.def_path) {
                 write!(body, "{}", test_mutation_result.badge_html()).unwrap();
             }
             write!(body, "</td>").unwrap();
-            write!(body, "<td class=\"expand\"><span><a href=\"/mutations/{}\">mutation {}</a>: {}</span></td>", mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+            write!(body, "<td class=\"expand\"><span><a href=\"/{}/mutations/{}\">mutation {}</a>: {}</span></td>", target_path, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
             write!(body, "</tr>").unwrap();
         }
     }

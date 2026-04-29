@@ -5,6 +5,7 @@ use mutest_json::DefId;
 use mutest_json::call_graph::CallGraph;
 use mutest_json::data_structures::IdxVec;
 use mutest_json::mutations::{MutationId, TargetId};
+use serde::Deserialize;
 
 use crate::evaluation::EvaluationInfo;
 use crate::html::{SourceFileHtml, render_def_path_html};
@@ -12,13 +13,162 @@ use crate::html::mutations::{OverlappingGroupOfMutations, update_overlapping_gro
 use crate::metadata::{Definition, Mutation, Target, Test};
 use crate::source_file::{SourceFile, nudge_span_prefix_lines};
 
-pub struct WebCtxt {
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
+pub enum TargetSpec {
+    Lib,
+    MainBin,
+    Bin(String),
+    Example(String),
+    Test(String),
+}
+
+impl TargetSpec {
+    pub fn path_str(&self) -> String {
+        match self {
+            TargetSpec::Lib => "lib".to_owned(),
+            TargetSpec::MainBin => "bin".to_owned(),
+            TargetSpec::Bin(name) => format!("bin:{}", name),
+            TargetSpec::Example(name) => format!("example:{}", name),
+            TargetSpec::Test(name) => format!("test:{}", name),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TargetSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let string = <&str>::deserialize(deserializer)?;
+
+        match string {
+            "lib" => Ok(TargetSpec::Lib),
+            "bin" => Ok(TargetSpec::MainBin),
+            _ if let Some(name) = string.strip_prefix("bin:") => Ok(TargetSpec::Bin(name.to_owned())),
+            _ if let Some(name) = string.strip_prefix("example:") => Ok(TargetSpec::Example(name.to_owned())),
+            _ if let Some(name) = string.strip_prefix("test:") => Ok(TargetSpec::Test(name.to_owned())),
+            _ => Err(D::Error::custom(format!("invalid target selector `{}`", string))),
+        }
+    }
+}
+
+pub fn workspace_target_display_str(package: &str, target: &TargetSpec) -> String {
+    match target {
+        TargetSpec::Lib => format!("{} (lib)", package),
+        TargetSpec::MainBin => format!("{} (bin)", package),
+        TargetSpec::Bin(name) => format!("{}/{} (bin)", package, name),
+        TargetSpec::Example(name) => format!("{}/{} (example)", package, name),
+        TargetSpec::Test(name) => format!("{}/{} (test)", package, name),
+    }
+}
+
+pub struct PackageCtxt {
+    pub lib: Option<TargetCtxt>,
+    pub bin: Option<TargetCtxt>,
+    pub bins: HashMap<String, TargetCtxt>,
+    pub examples: HashMap<String, TargetCtxt>,
+    pub tests: HashMap<String, TargetCtxt>,
+}
+
+impl PackageCtxt {
+    pub fn empty() -> Self {
+        Self {
+            lib: None,
+            bin: None,
+            bins: Default::default(),
+            examples: Default::default(),
+            tests: Default::default(),
+        }
+    }
+
+    pub fn target(&self, target: &TargetSpec) -> Option<&TargetCtxt> {
+        match target {
+            TargetSpec::Lib => self.lib.as_ref(),
+            TargetSpec::MainBin => self.bin.as_ref(),
+            TargetSpec::Bin(name) => self.bins.get(name),
+            TargetSpec::Example(name) => self.examples.get(name),
+            TargetSpec::Test(name) => self.tests.get(name),
+        }
+    }
+
+    pub fn iter_targets(&self) -> impl Iterator<Item = (TargetSpec, &TargetCtxt)> {
+        self.lib.as_ref().map(|tcx| (TargetSpec::Lib, tcx)).into_iter()
+            .chain(self.bin.as_ref().map(|tcx| (TargetSpec::MainBin, tcx)))
+            .chain(self.bins.iter().map(|(name, tcx)| (TargetSpec::Bin(name.to_owned()), tcx)))
+            .chain(self.examples.iter().map(|(name, tcx)| (TargetSpec::Example(name.to_owned()), tcx)))
+            .chain(self.tests.iter().map(|(name, tcx)| (TargetSpec::Test(name.to_owned()), tcx)))
+    }
+}
+
+pub struct WorkspaceCtxt {
+    packages: HashMap<String, PackageCtxt>,
+    loaded_targets: Vec<(String, TargetSpec)>,
+    loaded_source_files: HashMap<PathBuf, SourceFile>,
+    source_file_htmls: HashMap<PathBuf, SourceFileHtml>,
+}
+
+impl WorkspaceCtxt {
+    pub fn empty() -> Self {
+        Self {
+            packages: Default::default(),
+            loaded_targets: Vec::new(),
+            loaded_source_files: Default::default(),
+            source_file_htmls: Default::default(),
+        }
+    }
+
+    pub(crate) fn register_target(&mut self, package: String, target: TargetSpec, tcx: TargetCtxt) {
+        let target_entry = (package.clone(), target.clone());
+
+        let pcx = self.packages.entry(package).or_insert_with(PackageCtxt::empty);
+        match target {
+            TargetSpec::Lib => { pcx.lib = Some(tcx); }
+            TargetSpec::MainBin => { pcx.bin = Some(tcx); }
+            TargetSpec::Bin(name) => { pcx.bins.insert(name, tcx); }
+            TargetSpec::Example(name) => { pcx.examples.insert(name, tcx); }
+            TargetSpec::Test(name) => { pcx.tests.insert(name, tcx); }
+        }
+
+        // NOTE: Ensure that the targets list is always sorted by always using sorted insertions.
+        match self.loaded_targets.binary_search(&target_entry) {
+            Ok(_) => {}
+            Err(i) => self.loaded_targets.insert(i, target_entry),
+        };
+    }
+
+    pub(crate) fn register_loaded_source_file(&mut self, file_path: &Path, source_file: SourceFile, source_file_html: SourceFileHtml) {
+        self.loaded_source_files.insert(file_path.to_owned(), source_file);
+        self.source_file_htmls.insert(file_path.to_owned(), source_file_html);
+    }
+
+    #[inline]
+    pub fn targets(&self) -> &[(String, TargetSpec)] {
+        &self.loaded_targets
+    }
+
+    #[inline]
+    pub fn target(&self, package: &str, target: &TargetSpec) -> Option<&TargetCtxt> {
+        self.packages.get(package).and_then(|pcx| pcx.target(target))
+    }
+
+    #[inline]
+    pub fn loaded_source_file(&self, path: &Path) -> Option<&SourceFile> {
+        self.loaded_source_files.get(path)
+    }
+
+    #[inline]
+    pub fn source_file_html(&self, path: &Path) -> Option<&SourceFileHtml> {
+        self.source_file_htmls.get(path)
+    }
+}
+
+pub struct TargetCtxt {
     unique_source_file_paths: Vec<PathBuf>,
     local_source_file_paths: Vec<PathBuf>,
     mutations_per_file: HashMap<PathBuf, Vec<MutationId>>,
     mutations_on_overlapping_lines: HashMap<PathBuf, Vec<OverlappingGroupOfMutations>>,
-    loaded_source_files: HashMap<PathBuf, SourceFile>,
-    source_file_htmls: HashMap<PathBuf, SourceFileHtml>,
     definitions: IdxVec<DefId, Definition>,
     tests: BTreeMap<String, Test>,
     call_graph: CallGraph,
@@ -29,13 +179,14 @@ pub struct WebCtxt {
     evaluation_info: Option<EvaluationInfo>,
 }
 
-impl WebCtxt {
+impl TargetCtxt {
     pub fn new(
-        file_paths: &HashSet<&Path>,
+        wcx: &WorkspaceCtxt,
+        file_paths: HashSet<PathBuf>,
         call_graph_metadata: &mutest_json::call_graph::CallGraphInfo,
         mutations_metadata: &mutest_json::mutations::MutationsInfo,
     ) -> Self {
-        let mut unique_source_file_paths = file_paths.into_iter().map(|&p| p.to_owned()).collect::<Vec<_>>();
+        let mut unique_source_file_paths = file_paths.into_iter().collect::<Vec<_>>();
         unique_source_file_paths.sort();
 
         let local_source_file_paths = unique_source_file_paths.iter()
@@ -60,14 +211,18 @@ impl WebCtxt {
 
         let mut definitions = IdxVec::with_capacity(call_graph_metadata.definitions.len());
         for definition in &call_graph_metadata.definitions {
+            let mut nudge_prefix_lines = 0;
+            if let Some(span) = &definition.span && let Some(source_file) = wcx.loaded_source_file(&span.path) {
+                nudge_prefix_lines = nudge_span_prefix_lines(&source_file.lines, span);
+            }
+
             definitions.push(Definition {
                 def_id: definitions.next_index(),
                 name: definition.name.clone(),
                 def_path: definition.path.clone(),
                 def_path_html: render_def_path_html(&definition.path),
                 span: definition.span.clone(),
-                // HACK: This requires sources to compute, and get populated as source files are registered.
-                nudge_prefix_lines: 0,
+                nudge_prefix_lines,
             });
         }
 
@@ -114,8 +269,6 @@ impl WebCtxt {
             local_source_file_paths,
             mutations_per_file,
             mutations_on_overlapping_lines,
-            loaded_source_files: Default::default(),
-            source_file_htmls: Default::default(),
             definitions,
             tests,
             call_graph: call_graph_metadata.call_graph.clone(),
@@ -125,19 +278,6 @@ impl WebCtxt {
             mutations: IdxVec::new(),
             evaluation_info: None,
         }
-    }
-
-    pub(crate) fn register_loaded_source_file(&mut self, file_path: &Path, source_file: SourceFile, source_file_html: SourceFileHtml) {
-        // HACK: Definition nudge prefix lines need sources to be computed, so they get populated as source files are registered.
-        for def in &mut self.definitions {
-            let Some(def_span) = &def.span else { continue; };
-            if def_span.path != file_path { continue; }
-
-            def.nudge_prefix_lines = nudge_span_prefix_lines(&source_file.lines, def_span);
-        }
-
-        self.loaded_source_files.insert(file_path.to_owned(), source_file);
-        self.source_file_htmls.insert(file_path.to_owned(), source_file_html);
     }
 
     pub(crate) fn register_loaded_mutations(&mut self, mutations: IdxVec<MutationId, Mutation>) {
@@ -161,16 +301,6 @@ impl WebCtxt {
     #[inline]
     pub fn file_mutations(&self, path: &Path) -> &[MutationId] {
         self.mutations_per_file.get(path).map(|vec| -> &[_] { vec }).unwrap_or_default()
-    }
-
-    #[inline]
-    pub fn loaded_source_file(&self, path: &Path) -> Option<&SourceFile> {
-        self.loaded_source_files.get(path)
-    }
-
-    #[inline]
-    pub fn source_file_html(&self, path: &Path) -> Option<&SourceFileHtml> {
-        self.source_file_htmls.get(path)
     }
 
     #[inline]

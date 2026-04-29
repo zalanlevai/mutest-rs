@@ -5,6 +5,6 @@ pub struct Options {
 }
 
 pub struct Config {
-    pub json_dir_path: PathBuf,
+    pub json_root_dir_path: PathBuf,
     pub opts: Options,
 }
