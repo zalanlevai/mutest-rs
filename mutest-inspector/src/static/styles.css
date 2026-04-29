@@ -224,13 +224,21 @@ a {
 
     border-bottom: 1px solid var(--border-color);
 
-    & > * {
+    & > :not([popover]) {
         display: flex;
         align-items: center;
         height: 100%;
     }
 
-    & .logo, & .tab {
+    & > .logo, & > .tab, & > button {
+        /* NOTE: Reset for button elements. */
+        background: none;
+        padding: 0;
+        border: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+
         padding-inline: 0.75em;
 
         user-select: none;
@@ -243,6 +251,11 @@ a {
         }
     }
 
+    /* Keep button highlighted when corresponding popover is open. */
+    & > button:has(+ [popover]:popover-open) {
+        background-color: var(--hover-background-color);
+    }
+
     & .logo {
         font-weight: 700;
     }
@@ -250,6 +263,38 @@ a {
     & .tab {
         &.active {
             box-shadow: 0px 1px var(--main-color);
+        }
+    }
+
+    & [popover] {
+        /* NOTE: These are required to be overridden from the default stylesheet for popovers for positioning, see https://github.com/w3c/csswg-drafts/issues/10258. */
+        margin: 0;
+        inset: auto;
+
+        top: anchor(bottom);
+        left: anchor(left);
+
+        background-color: var(--main-background-color);
+        color: var(--main-color);
+        border: 1px solid var(--border-color);
+
+        &:popover-open {
+            display: flex;
+            flex-direction: column;
+        }
+
+        & > .item {
+            width: 100%;
+            padding-inline: 0.75em;
+            padding-block: 0.25em;
+
+            user-select: none;
+
+            text-decoration: none;
+
+            &:hover {
+                background-color: var(--hover-background-color);
+            }
         }
     }
 }
