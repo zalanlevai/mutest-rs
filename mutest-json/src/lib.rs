@@ -30,10 +30,21 @@ pub struct Span {
 #[cfg(feature = "rustc")]
 impl Span {
     pub fn from_rustc_span(sess: &rustc_session::Session, span: rustc_span::Span) -> Option<Self> {
+        static CURRENT_DIR: std::sync::LazyLock<PathBuf> = std::sync::LazyLock::new(|| {
+            std::env::current_dir().expect("cannot read current directory")
+        });
+
         let (Some(source_file), begin_line, begin_col, end_line, end_col) = sess.source_map().span_to_location_info(span) else { return None; };
 
         let rustc_span::FileName::Real(file_name) = &source_file.name else { return None; };
-        let path = file_name.local_path()?.to_owned();
+
+        let mut path = file_name.local_path()?;
+        // Remove workspace directory prefix if the span points to a workspace file.
+        // NOTE: rustc uses absolute paths for any remote crate's spans, including workspace-local ones.
+        if let Ok(local_path) = path.strip_prefix(&*CURRENT_DIR) {
+            path = local_path;
+        }
+        let path = path.to_owned();
 
         Some(Self { path, begin: (begin_line, begin_col), end: (end_line, end_col) })
     }
