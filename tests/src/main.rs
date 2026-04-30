@@ -449,7 +449,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         cmd.args(["-L", AUX_OUT_DIR]);
     }
 
-    let mut mutest_args = vec![];
+    let mut mutest_args = vec!["--no-write-json".to_owned()];
     let mut verifications = directives.iter().filter_map(|d| d.strip_prefix("verify:").map(str::trim))
         .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))
         .peekable();
