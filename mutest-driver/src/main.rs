@@ -334,6 +334,46 @@ pub fn main() {
             print_opts
         };
 
+        let write_opts = 'write_opts: {
+            if mutest_arg_matches.get_flag("no-write-json") { break 'write_opts None; }
+
+            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("json-out-root-dir").cloned()
+                .unwrap_or_else(|| mutest_target_dir_root.clone().unwrap_or(PathBuf::from("target/mutest")).join("json"));
+
+            if let Some(cargo_package_name) = env::var("CARGO_PKG_NAME").ok() {
+                // NOTE: `CARGO_PKG_NAME` always corresponds to the root package name, even for other targets.
+                out_dir.push(cargo_package_name);
+
+                let Some(cargo_crate_name) = env::var("CARGO_CRATE_NAME").ok() else {
+                    panic!("invalid Cargo invocation: missing `CARGO_CRATE_NAME` environment variable");
+                };
+
+                match cargo_target_kind {
+                    None => {}
+
+                    Some(config::CargoTargetKind::Lib) => out_dir.push("lib"),
+                    Some(config::CargoTargetKind::MainBin) => out_dir.push("bin"),
+
+                    Some(config::CargoTargetKind::Bin) => {
+                        out_dir.push("bins");
+                        out_dir.push(cargo_crate_name);
+                    }
+                    Some(config::CargoTargetKind::Example) => {
+                        out_dir.push("examples");
+                        out_dir.push(cargo_crate_name);
+                    }
+                    Some(config::CargoTargetKind::Test) => {
+                        out_dir.push("tests");
+                        out_dir.push(cargo_crate_name);
+                    }
+                }
+
+                fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory for crate at `{}`", out_dir.display()));
+            }
+
+            Some(config::WriteOptions { out_dir })
+        };
+
         let unsafe_targeting = match () {
             _ if mutest_arg_matches.get_flag("safe") => UnsafeTargeting::None,
             _ if mutest_arg_matches.get_flag("cautious") => UnsafeTargeting::OnlyEnclosing(Safety::Unsafe),
@@ -518,48 +558,6 @@ pub fn main() {
                 randomness: batching_randomness,
                 batch_max_mutations_count,
             }))
-        };
-
-        let write_opts = 'write_opts: {
-            let Some(clap::parser::ValueSource::CommandLine) = mutest_arg_matches.value_source("Zwrite-json") else {
-                break 'write_opts None;
-            };
-
-            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("Zwrite-json").cloned()
-                .unwrap_or_else(|| mutest_target_dir_root.clone().unwrap_or(PathBuf::from("target/mutest")).join("json"));
-
-            if let Some(cargo_package_name) = env::var("CARGO_PKG_NAME").ok() {
-                // NOTE: `CARGO_PKG_NAME` always corresponds to the root package name, even for other targets.
-                out_dir.push(cargo_package_name);
-
-                let Some(cargo_crate_name) = env::var("CARGO_CRATE_NAME").ok() else {
-                    panic!("invalid Cargo invocation: missing `CARGO_CRATE_NAME` environment variable");
-                };
-
-                match cargo_target_kind {
-                    None => {}
-
-                    Some(config::CargoTargetKind::Lib) => out_dir.push("lib"),
-                    Some(config::CargoTargetKind::MainBin) => out_dir.push("bin"),
-
-                    Some(config::CargoTargetKind::Bin) => {
-                        out_dir.push("bins");
-                        out_dir.push(cargo_crate_name);
-                    }
-                    Some(config::CargoTargetKind::Example) => {
-                        out_dir.push("examples");
-                        out_dir.push(cargo_crate_name);
-                    }
-                    Some(config::CargoTargetKind::Test) => {
-                        out_dir.push("tests");
-                        out_dir.push(cargo_crate_name);
-                    }
-                }
-
-                fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory for crate at `{}`", out_dir.display()));
-            }
-
-            Some(config::WriteOptions { out_dir })
         };
 
         let verify_opts = {

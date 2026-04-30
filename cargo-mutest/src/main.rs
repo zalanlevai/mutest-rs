@@ -44,9 +44,9 @@ fn test_strip_arg() {
     strip_arg(&mut args, true, None, Some("features"));
     assert_eq!(&[] as &[String], &args[..]);
 
-    let mut args = vec!["--features=all".to_owned(), "--Zwrite-json=target/mutest/json".to_owned(), "--print=code".to_owned()];
+    let mut args = vec!["--features=all".to_owned(), "--json-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()];
     strip_arg(&mut args, true, None, Some("features"));
-    assert_eq!(&["--Zwrite-json=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
+    assert_eq!(&["--json-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
 }
 
 mod run_isolate {
@@ -99,7 +99,7 @@ fn main() {
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
             // Experimental Flags
-            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--Zwrite-json`.").display_order(500))
+            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--json-out-root-dir`.").display_order(500))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
@@ -352,14 +352,14 @@ fn main() {
         cmd.arg("--");
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
-        if let Some(clap::parser::ValueSource::CommandLine) = matches.value_source("Zwrite-json") {
-            let out_dir = matches.get_one::<PathBuf>("Zwrite-json").cloned().unwrap_or_else(|| target_dir.join("json"));
+        if !matches.get_flag("no-write-json") {
+            let out_dir = matches.get_one::<PathBuf>("json-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
             fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory at `{}`", out_dir.display()));
             // NOTE: The out dir path passed to the generated test binary must be canonicalized,
             //       as it will likely be run under a different cwd.
             let out_dir = out_dir.canonicalize().expect("cannot canonicalize out dir path");
             let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
-            cmd.arg(format!("--Zwrite-json={out_dir}"));
+            cmd.arg(format!("--json-out-root-dir={out_dir}"));
         }
         cmd.args(&passed_args);
     }

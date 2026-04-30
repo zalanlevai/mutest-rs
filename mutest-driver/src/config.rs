@@ -164,6 +164,7 @@ pub struct Options<'op, 'm> {
     pub verbosity: u8,
     pub report_timings: bool,
     pub print_opts: PrintOptions,
+    pub write_opts: Option<WriteOptions>,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub call_graph_depth_limit: Option<usize>,
@@ -171,7 +172,6 @@ pub struct Options<'op, 'm> {
     pub mutation_depth: usize,
     pub mutation_parallelism: Option<MutationParallelism>,
 
-    pub write_opts: Option<WriteOptions>,
     pub verify_opts: VerifyOptions,
     pub embedded: bool,
     pub sanitize_macro_expns: bool,

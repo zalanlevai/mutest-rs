@@ -751,7 +751,7 @@ pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, external_test
             detection_matrix: args.contains(&"--print=detection-matrix").then_some(()),
             subsumption_matrix: args.contains(&"--print=subsumption-matrix").then_some(()),
         },
-        write_opts: args.iter().flat_map(|arg| arg.strip_prefix("--Zwrite-json=")).next().map(|out_dir_str| {
+        write_opts: args.iter().flat_map(|arg| arg.strip_prefix("--json-out-root-dir=")).next().map(|out_dir_str| {
             let mut out_dir = PathBuf::from(out_dir_str);
 
             if let Some(cargo_package_name) = meta_mutant.cargo_package_name {
