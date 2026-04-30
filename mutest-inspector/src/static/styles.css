@@ -7,6 +7,8 @@
 
     --main-background-color: #353535;
     --main-color: #ddd;
+    --scrollbar-track-color: #717171;
+    --scrollbar-thumb-color: rgba(32, 34, 37, 0.6);
     --hover-background-color: #676767;
     --select-background-color: #444444;
     --border-color: #4e4e4e;
@@ -53,6 +55,10 @@ html {
 
     font-family: var(--interface-font);
     font-size: 1rem;
+}
+
+* {
+    scrollbar-color: var(--scrollbar-thumb-color) var(--scrollbar-track-color);
 }
 
 body {
