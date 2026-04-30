@@ -109,7 +109,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
                 let Some(dir_name) = entry_path.file_name() else {
                     return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("encountered invalid path amongst file tree entries: `{}`", entry_path.display())));
                 };
-                write!(body, "<li><a class=\"item\"><span class=\"name\">{}</span></a><ol>", dir_name.display()).unwrap();
+                write!(body, "<li><a class=\"item\"><span class=\"name\">{}/</span></a><ol>", dir_name.display()).unwrap();
             }
             TreeEntry::File(entry_path) => {
                 let Some(file_name) = entry_path.file_name() else {

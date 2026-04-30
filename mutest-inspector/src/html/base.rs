@@ -29,24 +29,32 @@ pub(crate) fn topbar_html(body: &mut String, wcx: &WorkspaceCtxt, package: &str,
     write!(body, "<nav class=\"topbar\">")?;
     write!(body, "<a class=\"logo\" href=\"/\">mutest-rs</a>")?;
 
-    write!(body, "<button popovertarget=\"target-selector\">{}</button>", workspace_target_display_str(package, target))?;
+    write!(body, "<button popovertarget=\"target-selector\"><svg class=\"icon\"><use href=\"/static/icons.svg#boxes\"/></svg><span>{}</span></button>", workspace_target_display_str(package, target))?;
     write!(body, "<nav id=\"target-selector\" popover=\"auto\">")?;
     for (option_package, option_target) in wcx.targets() {
-        write!(body, "<a href=\"/{}/{}\" class=\"item\">{}</a>", option_package, option_target.path_str(), workspace_target_display_str(option_package, option_target))?;
+        let icon = match &option_target {
+            TargetSpec::Lib => "package",
+            TargetSpec::MainBin => "binary",
+            TargetSpec::Bin(_) => "binary",
+            TargetSpec::Example(_) => "package-search",
+            TargetSpec::Test(_) => "package-check",
+        };
+
+        write!(body, "<a href=\"/{}/{}\" class=\"item\"><svg class=\"icon\"><use href=\"/static/icons.svg#{}\"/></svg><span>{}</span></a>", option_package, option_target.path_str(), icon, workspace_target_display_str(option_package, option_target))?;
     }
     write!(body, "</nav>")?;
 
     write!(body, "<a class=\"tab")?;
     if active_tab == Some(Tab::Sources) { write!(body, " active")?; }
-    write!(body, "\" href=\"/{}/source\">sources</a>", target_path)?;
+    write!(body, "\" href=\"/{}/source\"><svg class=\"icon\"><use href=\"/static/icons.svg#file-code\"/></svg><span>sources</span></a>", target_path)?;
 
     write!(body, "<a class=\"tab")?;
     if active_tab == Some(Tab::Mutations) { write!(body, " active")?; }
-    write!(body, "\" href=\"/{}/mutations\">mutations <span class=\"badge\">{}</span></a>", target_path, mutations_count)?;
+    write!(body, "\" href=\"/{}/mutations\"><svg class=\"icon\"><use href=\"/static/icons.svg#bug\"/></svg><span>mutations</span><span class=\"badge\">{}</span></a>", target_path, mutations_count)?;
 
     write!(body, "<a class=\"tab")?;
     if active_tab == Some(Tab::Tests) { write!(body, " active")?; }
-    write!(body, "\" href=\"/{}/tests\">tests <span class=\"badge\">{}</span></a>", target_path, tests_count)?;
+    write!(body, "\" href=\"/{}/tests\"><svg class=\"icon\"><use href=\"/static/icons.svg#package-check\"/></svg><span>tests</span><span class=\"badge\">{}</span></a>", target_path, tests_count)?;
 
     write!(body, "</nav>")?;
     Ok(())
