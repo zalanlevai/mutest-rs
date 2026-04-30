@@ -76,6 +76,18 @@ a {
     }
 }
 
+.icon {
+    width: 18px;
+    height: 18px;
+
+    &:has(+ span) {
+        margin-inline-end: 0.3em;
+    }
+    span + & {
+        margin-inline-start: 0.3em;
+    }
+}
+
 .badge {
     display: inline;
     margin-inline: 0.3em;
@@ -286,7 +298,9 @@ a {
         & > .item {
             width: 100%;
             padding-inline: 0.75em;
-            padding-block: 0.25em;
+            padding-block: 0.35em;
+            display: flex;
+            align-items: center;
 
             user-select: none;
 
