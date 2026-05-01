@@ -48,7 +48,18 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", opts.port)).await.expect("cannot bind port");
     println!("listening on 0.0.0.0:{}", opts.port);
-    println!("visit http://127.0.0.1:{}", opts.port);
+
+    let uri = format!("http://127.0.0.1:{}", opts.port);
+    match opts.open {
+        false => println!("visit {uri}"),
+        true => {
+            println!("opening {uri}");
+            if let Err(error) = opener::open_browser(uri) {
+                println!("error opening browser: {error}");
+            }
+        }
+    }
+
     axum::serve(listener, router).await.unwrap();
 }
 

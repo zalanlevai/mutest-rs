@@ -1,3 +1,5 @@
+#![feature(if_let_guard)]
+
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -90,7 +92,7 @@ fn main() {
         .subcommand(clap::Command::new("run")
             .display_order(0)
             .about("Build and run the test harness.")
-            .arg(clap::arg!(-i --inspect "Inspect mutations after evaluation.").display_order(0))
+            .arg(clap::arg!(-i --inspect [INSPECT_OPTS] "Inspect mutations after evaluation. Options may be specified in the form `--inspect=[open][:<PORT>]`.").num_args(0..=1).require_equals(true).display_order(100))
             // Evaluation-related Arguments
             .arg(clap::arg!(--simulate [MUTATION_ID] "Evaluate tests for a single mutation.").value_parser(clap::value_parser!(u32)).conflicts_with_all(["flakes", "exhaustive", "print"]).display_order(110))
             .arg(clap::arg!(--flakes [ITERATIONS_COUNT] "Perform mutation analysis multiple times to find flaky test-mutation pairs.").value_parser(clap::value_parser!(usize)).display_order(111))
@@ -135,13 +137,42 @@ fn main() {
 
     let embedded = matches.get_flag("Zembedded");
 
-    let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args, inspect): (_, &[&str], _, _, _) = match matches.subcommand() {
-        Some(("print", _)) => ("check", &["--profile", "test"], "print", None, false),
-        Some(("build", _)) => ("test", &["--no-run"], "build", None, false),
+    let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
+        Some(("print", _)) => ("check", &["--profile", "test"], "print", None, None),
+        Some(("build", _)) => ("test", &["--no-run"], "build", None, None),
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
 
-            let inspect = matches.get_flag("inspect");
+            let inspect_opts = match matches.value_source("inspect") {
+                Some(clap::parser::ValueSource::CommandLine) if let Some(inspect_opts_str) = matches.get_one::<String>("inspect")=> {
+                    let mut unparsed_str: &str = inspect_opts_str;
+
+                    let mut open = false;
+                    if let Some(rest) = unparsed_str.strip_prefix("open") {
+                        open = true;
+                        unparsed_str = rest;
+                    }
+                    if !unparsed_str.is_empty() && !unparsed_str.starts_with(":") {
+                        color_print::ceprintln!("<red,bold>error</>: invalid inspect options `{}`: must match `[open][:<<PORT>>]`", inspect_opts_str);
+                        process::exit(101);
+                    }
+
+                    let mut port = None;
+                    if let Some(port_str) = unparsed_str.strip_prefix(":") {
+                        port = match port_str.parse::<u16>() {
+                            Ok(v) => Some(v),
+                            Err(_) => {
+                                color_print::ceprintln!("<red,bold>error</>: invalid inspect options `{}`: invalid port number `{}`", inspect_opts_str, port_str);
+                                process::exit(101);
+                            }
+                        };
+                    }
+
+                    Some((open, port))
+                }
+                Some(clap::parser::ValueSource::CommandLine) => Some((false, None)),
+                _ => None,
+            };
 
             if let Some(mutation_id) = matches.get_one::<u32>("simulate") { passed_args.push(format!("--simulate={mutation_id}")); }
             if let Some(iterations_count) = matches.get_one::<usize>("flakes") { passed_args.push(format!("--flakes={iterations_count}")); }
@@ -159,7 +190,7 @@ fn main() {
 
             if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
 
-            ("test", &[], "build", Some(passed_args), inspect)
+            ("test", &[], "build", Some(passed_args), inspect_opts)
         }
         _ => unreachable!(),
     };
@@ -376,9 +407,9 @@ fn main() {
         process::exit(exit_code.unwrap_or(-1));
     }
 
-    if !inspect {
+    let Some((open, port)) = inspect_opts else {
         process::exit(exit_code.unwrap_or(-1));
-    }
+    };
 
     // NOTE: This replicates Cargo's action message styling, including the color and justification.
     color_print::ceprintln!("<green,bold>{:>12}</> inspector", "Running");
@@ -393,6 +424,9 @@ fn main() {
 
     cmd.arg("--json-root-dir");
     cmd.arg(json_root_dir);
+
+    if let Some(port) = port { cmd.arg(format!("--port={port}")); }
+    if open { cmd.arg("--open"); }
 
     let exit_status = cmd
         .spawn().expect("failed to run mutest-inspector")
