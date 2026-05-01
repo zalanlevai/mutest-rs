@@ -542,6 +542,14 @@ section.text {
             text-align: right;
         }
 
+        & .diff-marker {
+            padding-left: 0.75em;
+
+            user-select: none;
+
+            text-align: right;
+        }
+
         & .line-content {
             width: 100%;
             padding-left: 0.75em;
@@ -556,7 +564,7 @@ section.text {
         }
 
         &.original {
-            .line-content {
+            & .line-content, & .diff-marker {
                 background-color: rgba(255, 31, 31, 0.25);
 
                 .hi-mut {
@@ -565,7 +573,7 @@ section.text {
             }
         }
         &.mutated {
-            .line-content {
+            & .line-content, & .diff-marker {
                 background-color: rgba(0, 128, 0, 0.25);
 
                 .hi-mut {
