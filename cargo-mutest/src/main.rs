@@ -90,6 +90,7 @@ fn main() {
         .subcommand(clap::Command::new("run")
             .display_order(0)
             .about("Build and run the test harness.")
+            .arg(clap::arg!(-i --inspect "Inspect mutations after evaluation.").display_order(0))
             // Evaluation-related Arguments
             .arg(clap::arg!(--simulate [MUTATION_ID] "Evaluate tests for a single mutation.").value_parser(clap::value_parser!(u32)).conflicts_with_all(["flakes", "exhaustive", "print"]).display_order(110))
             .arg(clap::arg!(--flakes [ITERATIONS_COUNT] "Perform mutation analysis multiple times to find flaky test-mutation pairs.").value_parser(clap::value_parser!(usize)).display_order(111))
@@ -134,11 +135,13 @@ fn main() {
 
     let embedded = matches.get_flag("Zembedded");
 
-    let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args): (_, &[&str], _, _) = match matches.subcommand() {
-        Some(("print", _)) => ("check", &["--profile", "test"], "print", None),
-        Some(("build", _)) => ("test", &["--no-run"], "build", None),
+    let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args, inspect): (_, &[&str], _, _, _) = match matches.subcommand() {
+        Some(("print", _)) => ("check", &["--profile", "test"], "print", None, false),
+        Some(("build", _)) => ("test", &["--no-run"], "build", None, false),
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
+
+            let inspect = matches.get_flag("inspect");
 
             if let Some(mutation_id) = matches.get_one::<u32>("simulate") { passed_args.push(format!("--simulate={mutation_id}")); }
             if let Some(iterations_count) = matches.get_one::<usize>("flakes") { passed_args.push(format!("--flakes={iterations_count}")); }
@@ -156,7 +159,7 @@ fn main() {
 
             if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
 
-            ("test", &[], "build", Some(passed_args))
+            ("test", &[], "build", Some(passed_args), inspect)
         }
         _ => unreachable!(),
     };
@@ -367,6 +370,33 @@ fn main() {
     let exit_status = cmd
         .spawn().expect("failed to run Cargo")
         .wait().expect("failed to run Cargo");
+
+    let exit_code = exit_status.code();
+    if exit_code != Some(0) && exit_code != Some(101) {
+        process::exit(exit_code.unwrap_or(-1));
+    }
+
+    if !inspect {
+        process::exit(exit_code.unwrap_or(-1));
+    }
+
+    // NOTE: This replicates Cargo's action message styling, including the color and justification.
+    color_print::ceprintln!("<green,bold>{:>12}</> inspector", "Running");
+
+    let json_root_dir = matches.get_one::<PathBuf>("json-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
+
+    let mut path = env::current_exe().expect("current executable path invalid");
+    path.set_file_name("mutest-inspector");
+    if cfg!(windows) { path.set_extension("exe"); }
+
+    let mut cmd = Command::new(path);
+
+    cmd.arg("--json-root-dir");
+    cmd.arg(json_root_dir);
+
+    let exit_status = cmd
+        .spawn().expect("failed to run mutest-inspector")
+        .wait().expect("failed to run mutest-inspector");
 
     process::exit(exit_status.code().unwrap_or(-1));
 }
