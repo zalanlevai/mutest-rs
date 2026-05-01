@@ -29,6 +29,8 @@ tree-sitter-rust = "0.24"
 
 pulldown-cmark-escape = "0.11"
 
+opener = "0.8"
+
 [build-dependencies]
 memory-serve = "2"
 

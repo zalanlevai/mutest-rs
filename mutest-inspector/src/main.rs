@@ -18,6 +18,7 @@ async fn main() {
         })
         .arg(clap::arg!(--"json-root-dir" [JSON_ROOT_DIR] "Path to JSON metadata files from a mutest-rs analysis.").value_parser(clap::value_parser!(PathBuf)).default_value("target/mutest/json"))
         .arg(clap::arg!(--port [PORT] "Port number to serve interface on.").value_parser(clap::value_parser!(u16)).default_value("3000"))
+        .arg(clap::arg!(--open "Open the interface in a browser."))
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
         .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true))
         .get_matches();
@@ -25,11 +26,13 @@ async fn main() {
     let Some(json_root_dir_path) = matches.get_one::<PathBuf>("json-root-dir").cloned() else { unreachable!() };
 
     let port = *matches.get_one::<u16>("port").unwrap();
+    let open = matches.get_flag("open");
 
     let config = Config {
         json_root_dir_path,
         opts: config::Options {
             port,
+            open,
         },
     };
 
