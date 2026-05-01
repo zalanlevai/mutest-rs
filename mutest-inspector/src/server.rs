@@ -230,7 +230,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
 
         if let None = groups_starting_on_current_line.peek() {
             let line_content = source_code_line_content(highlighted_line_html.as_str());
-            write!(body, "<tbody class=\"line\"><tr id=\"L{}\" class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr></tbody>", line_no.0, line_no.0, line_content).unwrap();
+            write!(body, "<tbody class=\"line\"><tr id=\"L{}\" class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr></tbody>", line_no.0, line_no.0, line_content).unwrap();
             continue;
         }
 
@@ -251,7 +251,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
                 },
             );
 
-            write!(body, "<tbody data-group-id=\"{local_group_id}\" class=\"group\"><tr class=\"heading\"><td colspan=\"2\">{}</td></tr>", group_heading).unwrap();
+            write!(body, "<tbody data-group-id=\"{local_group_id}\" class=\"group\"><tr class=\"heading\"><td colspan=\"3\">{}</td></tr>", group_heading).unwrap();
             // Write out original lines of code that this overlapping group of mutations replaces.
             if g.kind == OverlappingGroupKind::Replace {
                 for (line_no, highlighted_line_html) in iter::zip(g.start_line.0..=g.end_line.0, &source_file_html.highlighted_lines_html[g.start_line..=g.end_line]) {
@@ -259,7 +259,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
                         false => highlighted_line_html.as_str(),
                         true => "\n",
                     };
-                    write!(body, "<tr id=\"L{}\" class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_no, line_content).unwrap();
+                    write!(body, "<tr id=\"L{}\" class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr>", line_no, line_no, line_content).unwrap();
                 }
 
                 // Skip remaining source lines covered by the group.
@@ -279,7 +279,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
                 };
 
                 // Write out mutation heading.
-                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"2\">{} <a href=\"/{}/mutations/{}\">mutation {}</a>: {}</td></tr>", mutation_id.0, mutation_detection_html, target_path, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
+                write!(body, "<tbody data-group-id=\"{local_group_id}\" id=\"M{}\" class=\"mutation\"><tr class=\"heading\"><td colspan=\"3\">{} <a href=\"/{}/mutations/{}\">mutation {}</a>: {}</td></tr>", mutation_id.0, mutation_detection_html, target_path, mutation_id.0, mutation_id.0, mutation.display_name_html).unwrap();
 
                 // Filter to relevant substitutions that fall within this overlap group.
                 let substs_within_group = mutation.subst_htmls.iter().filter(|subst_html| {
@@ -295,25 +295,25 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
                         let before_subst_start_line = LineNo(subst_start_line.0 - 1);
                         for (line_no, highlighted_line_html) in iter::zip(g.start_line.0.., &source_file_html.highlighted_lines_html[g.start_line..=before_subst_start_line]) {
                             let line_content = source_code_line_content(highlighted_line_html.as_str());
-                            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
                         }
                     }
                     // Write out the original lines that this mutation subsitution modifies.
                     for (line_no, highlighted_line_html) in iter::zip(subst_start_line.0.., &subst_html.original_lines_html) {
                         let line_content = source_code_line_content(highlighted_line_html.as_str());
-                        write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                        write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"diff-marker\">-</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
                     }
                     // Write out replacement lines.
                     for highlighted_line_html in &subst_html.replacement_lines_html {
                         let line_content = source_code_line_content(highlighted_line_html.as_str());
-                        write!(body, "<tr class=\"line mutated\"><td></td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
+                        write!(body, "<tr class=\"line mutated\"><td></td><td class=\"diff-marker\">+</td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
                     }
                     // Write out suffix lines that are part of the group but are not modified by this particular mutation substitution.
                     if g.kind == OverlappingGroupKind::Replace {
                         let after_subst_start_line = LineNo(subst_end_line.0 + 1);
                         for (line_no, highlighted_line_html) in iter::zip(after_subst_start_line.0.., &source_file_html.highlighted_lines_html[after_subst_start_line..=g.end_line]) {
                             let line_content = source_code_line_content(highlighted_line_html.as_str());
-                            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
                         }
                     }
                 }
@@ -340,7 +340,7 @@ async fn handle_source_request(State(state): State<Arc<ServerState>>, Path(path_
                 false => highlighted_line_html.as_str(),
                 true => "\n",
             };
-            write!(body, "<tbody class=\"line\"><tr id=\"L{}\" class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr></tbody>", line_no.0, line_no.0, line_content).unwrap();
+            write!(body, "<tbody class=\"line\"><tr id=\"L{}\" class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr></tbody>", line_no.0, line_no.0, line_content).unwrap();
         }
 
         let mut insert_after = groups_starting_on_current_line.clone().filter(|(_, g)| g.kind == OverlappingGroupKind::InsertAfter);
@@ -537,17 +537,17 @@ async fn handle_mutation_request(State(state): State<Arc<ServerState>>, Path((pa
         // Write out prefix source lines from end of previous segment (or start of target def).
         for (line_no, highlighted_line_html) in iter::zip(source_start_line.0.., &source_file_html.highlighted_lines_html[source_start_line..subst_start_line]) {
             let line_content = source_code_line_content(highlighted_line_html.as_str());
-            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+            write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
         }
         // Write out the original lines that this mutation subsitution modifies.
         for (line_no, highlighted_line_html) in iter::zip(subst_start_line.0.., &subst_html.original_lines_html) {
             let line_content = source_code_line_content(highlighted_line_html.as_str());
-            write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+            write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"diff-marker\">-</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
         }
         // Write out replacement lines.
         for highlighted_line_html in &subst_html.replacement_lines_html {
             let line_content = source_code_line_content(highlighted_line_html.as_str());
-            write!(body, "<tr class=\"line mutated\"><td></td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
+            write!(body, "<tr class=\"line mutated\"><td></td><td class=\"diff-marker\">+</td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
         }
 
         source_start_line = subst_html.after_source_line_no();
@@ -881,7 +881,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path((packa
                     }
 
                     let line_content = source_code_line_content(highlighted_line_html.as_str());
-                    write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                    write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
                 }
             }
             &TraceSnippetKind::Mutation { mutation_id } => {
@@ -902,7 +902,7 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path((packa
                             highlighted_line_html.to_mut().insert_unbreakable_segment(start_offset, end_offset, "<span class=\"hi-def\">", "</span>");
                         }
                         let line_content = source_code_line_content(highlighted_line_html.as_str());
-                        write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                        write!(body, "<tr class=\"line\"><td class=\"line-no\">{}</td><td class=\"diff-marker\"></td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
                     }
                     // Write out the original lines that this mutation subsitution modifies.
                     for (line_no, highlighted_line_html) in iter::zip(subst_start_line.0.., &subst_html.original_lines_html) {
@@ -912,12 +912,12 @@ async fn handle_trace_request(State(state): State<Arc<ServerState>>, Path((packa
                             highlighted_line_html.to_mut().insert_unbreakable_segment(start_offset, end_offset, "<span class=\"hi-def\">", "</span>");
                         }
                         let line_content = source_code_line_content(highlighted_line_html.as_str());
-                        write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
+                        write!(body, "<tr class=\"line original\"><td class=\"line-no\">{}</td><td class=\"diff-marker\">-</td><td class=\"line-content\">{}</td></tr>", line_no, line_content).unwrap();
                     }
                     // Write out replacement lines.
                     for highlighted_line_html in &subst_html.replacement_lines_html {
                         let line_content = source_code_line_content(highlighted_line_html.as_str());
-                        write!(body, "<tr class=\"line mutated\"><td></td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
+                        write!(body, "<tr class=\"line mutated\"><td></td><td class=\"diff-marker\">+</td><td class=\"line-content\">{}</td></tr>", line_content).unwrap();
                     }
                 }
             }
