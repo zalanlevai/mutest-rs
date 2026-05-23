@@ -312,54 +312,54 @@ fn main() {
     }
 
     // Target selection.
-    let mut any_specific_targets_selected = false;
+    let mut explicit_targetings_count = 0;
     if matches.get_flag("lib") {
-        any_specific_targets_selected = true;
+        explicit_targetings_count += 1;
         cmd.arg("--lib");
         strip_arg(&mut mutest_args, false, None, Some("lib"));
     }
     if let Some(bins) = matches.get_many::<String>("bin") {
-        any_specific_targets_selected = true;
         for bin in bins {
+            explicit_targetings_count += 1;
             cmd.args(["--bin", bin]);
         }
         strip_arg(&mut mutest_args, true, None, Some("bin"));
     }
     if matches.get_flag("bins") {
-        any_specific_targets_selected = true;
+        explicit_targetings_count  += 1;
         cmd.arg("--bins");
         strip_arg(&mut mutest_args, false, None, Some("bins"));
     }
     if let Some(examples) = matches.get_many::<String>("example") {
-        any_specific_targets_selected = true;
         for example in examples {
+            explicit_targetings_count += 1;
             cmd.args(["--example", example]);
         }
         strip_arg(&mut mutest_args, true, None, Some("example"));
     }
     if matches.get_flag("examples") {
-        any_specific_targets_selected = true;
+        explicit_targetings_count += 1;
         cmd.arg("--examples");
         strip_arg(&mut mutest_args, false, None, Some("examples"));
     }
     if let Some(tests) = matches.get_many::<String>("test") {
-        any_specific_targets_selected = true;
         for test in tests {
+            explicit_targetings_count += 1;
             cmd.args(["--test", test]);
         }
         strip_arg(&mut mutest_args, true, None, Some("test"));
     }
     if matches.get_flag("tests") {
-        any_specific_targets_selected = true;
+        explicit_targetings_count += 1;
         cmd.arg("--tests");
         strip_arg(&mut mutest_args, false, None, Some("tests"));
     }
     if matches.get_flag("all-targets") {
-        any_specific_targets_selected = true;
+        explicit_targetings_count += 1;
         cmd.arg("--all-targets");
         strip_arg(&mut mutest_args, false, None, Some("all-targets"));
     }
-    if !any_specific_targets_selected {
+    if explicit_targetings_count == 0 {
         // NOTE: We specifically do not target the following:
         //       * `--bench`/`--benches`: Benchmarks, for two reasons.
         //         First, the `#[bench]` attribute is currently a nigthly-only feature.
@@ -426,7 +426,28 @@ fn main() {
     cmd.arg(json_root_dir);
 
     if let Some(port) = port { cmd.arg(format!("--port={port}")); }
-    if open { cmd.arg("--open"); }
+
+    if open {
+        // NOTE: Only attempt to open a specific target if only one was selected.
+        if let Some(package) = matches.get_one::<String>("package") {
+            if explicit_targetings_count == 1 {
+                match () {
+                    _ if matches.get_flag("lib") => { cmd.arg(format!("--open={}/lib", package)); }
+                    _ if let Some(target_name) = matches.get_one::<String>("bin") => { cmd.arg(format!("--open={}/bin:{}", package, target_name)); }
+                    _ if let Some(target_name) = matches.get_one::<String>("example") => { cmd.arg(format!("--open={}/example:{}", package, target_name)); }
+                    _ if let Some(target_name) = matches.get_one::<String>("test") => { cmd.arg(format!("--open={}/test:{}", package, target_name)); }
+                    // NOTE: Only open the package if no specific target was selected.
+                    //       This includes generic selectors, such as `--bins`, `--examples`, `--tests`, and `--all-targets`.
+                    _ => { cmd.arg(format!("--open={}", package)); }
+                }
+            } else {
+                // NOTE: Only open the package if no specific (none or multiple) target was selected.
+                cmd.arg(format!("--open={}", package));
+            }
+        } else {
+            cmd.arg("--open");
+        }
+    }
 
     let exit_status = cmd
         .spawn().expect("failed to run mutest-inspector")
