@@ -15,7 +15,7 @@ use mutest_json::{DefId, Span};
 use mutest_json::mutations::{MutationId, TargetId};
 
 use crate::call_graph::{TraceSpec, entry_point_mono_call_traces, reduce_mono_call_traces};
-use crate::config::Options;
+use crate::config::{self, Options};
 use crate::ctxt::{TargetSpec, WorkspaceCtxt};
 use crate::evaluation::{TestMutationResult, MutationDetection};
 use crate::html::source_code_line_content;
@@ -28,6 +28,8 @@ pub(crate) struct ServerState {
 }
 
 pub(crate) async fn run(opts: &Options, state: ServerState) {
+    let targets = state.wcx.targets().to_vec();
+
     let state = Arc::new(state);
 
     let router = axum::Router::new()
@@ -49,10 +51,37 @@ pub(crate) async fn run(opts: &Options, state: ServerState) {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", opts.port)).await.expect("cannot bind port");
     println!("listening on 0.0.0.0:{}", opts.port);
 
-    let uri = format!("http://127.0.0.1:{}", opts.port);
-    match opts.open {
-        false => println!("visit {uri}"),
-        true => {
+    let base_uri = format!("http://127.0.0.1:{}", opts.port);
+    match &opts.open {
+        None => println!("visit {base_uri}"),
+        Some(open_target) => {
+            let mut selected_path = "".to_owned();
+            'open_selected_path: {
+                let config::OpenTarget::Specific(package, target) = open_target else { break 'open_selected_path; };
+                let mut package_targets = targets.iter().filter(|(p, _)| p == package).map(|(_, t)| t).peekable();
+
+                let Some(&first_package_target) = package_targets.peek() else {
+                    color_print::ceprintln!("<yellow,bold>warning</>: specified package `{}` has no mutated targets", package);
+                    break 'open_selected_path;
+                };
+
+                let mut selected_target = first_package_target;
+                if let Some(target) = target {
+                    match package_targets.any(|t| t == target) {
+                        true => selected_target = &target,
+                        // Warn, and keep the first package target.
+                        false => {
+                            color_print::ceprintln!("<yellow,bold>warning</>: package `{}` has no specified mutated target `{}`", package, target.path_str());
+                        }
+                    }
+                }
+
+                selected_path = format!("/{}/{}", package, selected_target.path_str());
+            }
+
+            let mut uri = base_uri;
+            uri.push_str(&selected_path);
+
             println!("opening {uri}");
             if let Err(error) = opener::open_browser(uri) {
                 println!("error opening browser: {error}");

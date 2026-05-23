@@ -23,6 +23,17 @@ pub enum TargetSpec {
 }
 
 impl TargetSpec {
+    pub fn from_path_str(string: &str) -> Result<Self, ()> {
+        match string {
+            "lib" => Ok(TargetSpec::Lib),
+            "bin" => Ok(TargetSpec::MainBin),
+            _ if let Some(name) = string.strip_prefix("bin:") => Ok(TargetSpec::Bin(name.to_owned())),
+            _ if let Some(name) = string.strip_prefix("example:") => Ok(TargetSpec::Example(name.to_owned())),
+            _ if let Some(name) = string.strip_prefix("test:") => Ok(TargetSpec::Test(name.to_owned())),
+            _ => Err(()),
+        }
+    }
+
     pub fn path_str(&self) -> String {
         match self {
             TargetSpec::Lib => "lib".to_owned(),
@@ -42,15 +53,7 @@ impl<'de> Deserialize<'de> for TargetSpec {
         use serde::de::Error;
 
         let string = <&str>::deserialize(deserializer)?;
-
-        match string {
-            "lib" => Ok(TargetSpec::Lib),
-            "bin" => Ok(TargetSpec::MainBin),
-            _ if let Some(name) = string.strip_prefix("bin:") => Ok(TargetSpec::Bin(name.to_owned())),
-            _ if let Some(name) = string.strip_prefix("example:") => Ok(TargetSpec::Example(name.to_owned())),
-            _ if let Some(name) = string.strip_prefix("test:") => Ok(TargetSpec::Test(name.to_owned())),
-            _ => Err(D::Error::custom(format!("invalid target selector `{}`", string))),
-        }
+        TargetSpec::from_path_str(string).map_err(|_| D::Error::custom(format!("invalid target selector `{}`", string)))
     }
 }
 

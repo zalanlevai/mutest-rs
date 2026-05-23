@@ -716,6 +716,7 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "clap",
+ "color-print",
  "memory-serve",
  "mutest-json",
  "opener",

@@ -16,6 +16,7 @@ edition = "2024"
 mutest-json = { path = "../mutest-json" }
 
 clap = { version = "4", features = ["cargo"] }
+color-print = "0.3"
 
 serde = "1.0"
 serde_json = "1.0"

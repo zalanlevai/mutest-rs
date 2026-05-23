@@ -1,8 +1,15 @@
 use std::path::PathBuf;
 
+use crate::ctxt::TargetSpec;
+
+pub enum OpenTarget {
+    Workspace,
+    Specific(String, Option<TargetSpec>),
+}
+
 pub struct Options {
     pub port: u16,
-    pub open: bool,
+    pub open: Option<OpenTarget>,
 }
 
 pub struct Config {
