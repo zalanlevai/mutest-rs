@@ -190,7 +190,7 @@ fn main() {
 
             if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
 
-            ("test", &[], "build", Some(passed_args), inspect_opts)
+            ("test", &["--no-fail-fast"], "build", Some(passed_args), inspect_opts)
         }
         _ => unreachable!(),
     };
