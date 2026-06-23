@@ -1,3 +1,4 @@
+use std::env;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
@@ -80,6 +81,7 @@ pub fn raw_output_full<G: EmissionGuarantee>(
     //       However, this would require mutest_runtime to depend on anstream.
     let color_choice = match color_config {
         ColorConfig::Never => ColorChoice::Never,
+        _ if let Ok("1") = env::var("MUTEST_CARGO_EXPLICIT_NO_COLOR").as_deref() => ColorChoice::Never,
         _ => ColorChoice::AlwaysAnsi,
     };
     let dst: Destination = AutoStream::new(Box::new(shared_buffer), color_choice);

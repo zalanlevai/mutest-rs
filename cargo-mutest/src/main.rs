@@ -107,6 +107,7 @@ fn main() {
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
         // Cargo options.
+        .arg(clap::arg!(--color [WHEN] "Output coloring."))
         .next_help_heading("Package Selection")
         .arg(clap::arg!(--workspace "Test all packages in the workspace."))
         .arg(clap::arg!(-p --package [PACKAGE] "Package with the target to analyze."))
@@ -254,6 +255,18 @@ fn main() {
     let mut mutest_args = args.clone();
     let i = mutest_args.iter().position(|arg| matches.subcommand_name().is_some_and(|subcommand| arg == subcommand)).expect("subcommand not found in args");
     mutest_args.splice(i.., [mutest_driver_subcommand.to_owned()]);
+
+    if let Some(color) = matches.get_one::<String>("color") {
+        cmd.args(["--color", color]);
+        strip_arg(&mut mutest_args, true, None, Some("color"));
+        if color == "never" {
+            // HACK: Indicate to mutest-driver that the explicit `--color=never` flag was passed.
+            // NOTE: This is needed because Cargo always captures colored output, and
+            //       the Cargo --color flag only controls whether the coloring is stripped before final output.
+            //       This is also required for users because Cargo's rustc invocations disallow using RUSTFLAGS="--color=never".
+            cmd.env("MUTEST_CARGO_EXPLICIT_NO_COLOR", "1");
+        }
+    }
 
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
 
