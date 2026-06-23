@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Install Rust toolchain specified in rust-toolchain.toml.
       - name: Install Rust toolchain
