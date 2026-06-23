@@ -398,6 +398,9 @@ fn main() {
         cmd.args(&passed_args);
     }
 
+    // NOTE: Disable insta snapshot creation for mutated program tests.
+    cmd.env("INSTA_UPDATE", "no");
+
     let exit_status = cmd
         .spawn().expect("failed to run Cargo")
         .wait().expect("failed to run Cargo");
