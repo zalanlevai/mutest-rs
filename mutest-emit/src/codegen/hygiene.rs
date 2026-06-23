@@ -810,7 +810,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                         //       so we have to use the only remaining accessible workaround,
                                         //       even though it is marked as "quasi-deprecated".
                                         let ty = rustc_hir_analysis::lower_ty(self.tcx, ty_hir);
-                                        let ty::TyKind::Alias(ty::AliasTyKind::Projection, alias_ty) = ty.kind() else { unreachable!() };
+                                        let ty::TyKind::Alias(ty::AliasTyKind::Projection | ty::AliasTyKind::Inherent, alias_ty) = ty.kind() else { unreachable!() };
 
                                         let trait_item_def_id = alias_ty.def_id;
                                         let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
@@ -833,6 +833,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                 let parent_path_segment_res = match &path.segments[..] {
                                     [.., parent_path_segment, _] => self.def_res.node_res(parent_path_segment.id),
+                                    // Qualified self "parent" segment (`<T>::Assoc`).
+                                    _ if let Some(qself) = qself => self.def_res.node_res(qself.ty.id),
                                     _ => None,
                                 };
 
