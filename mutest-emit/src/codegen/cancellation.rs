@@ -18,7 +18,7 @@ pub fn mk_test_thread_cancel_expr(sp: Span) -> Box<ast::Expr> {
         path: path::panic(sp),
         args: Box::new(ast::DelimArgs {
             dspan: ast::tokenstream::DelimSpan::from_single(sp),
-            delim: ast::token::Delimiter::Brace,
+            delim: ast::token::Delimiter::Parenthesis,
             tokens: ast::mk::token_stream(vec![
                 ast::mk::tt_token_alone(sp, ast::TokenKind::lit(ast::token::LitKind::Str, Symbol::intern(panic_message), None)),
             ]),
