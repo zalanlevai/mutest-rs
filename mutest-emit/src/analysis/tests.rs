@@ -289,12 +289,29 @@ pub fn collect_and_mark_embedded_tests(sess: &Session, krate: &mut ast::Crate, d
 }
 
 pub fn is_marked_or_in_cfg_test<'tcx>(tcx: TyCtxt<'tcx>, id: hir::HirId) -> bool {
-    iter::once(id).chain(tcx.hir_parent_id_iter(id)).any(|parent_id| {
-        tcx.hir_attrs(parent_id).iter().any(|attr| {
+    fn is_cfg_test_meta_item(meta_item_inner: &ast::MetaItemInner) -> bool {
+        let ast::MetaItemInner::MetaItem(meta_item) = meta_item_inner else { return false };
+        match &meta_item.kind {
+            ast::MetaItemKind::List(meta_item_list) => {
+                match meta_item.name() {
+                    Some(n) if n == sym::any => meta_item_list.iter().any(|meta_item| is_cfg_test_meta_item(meta_item)),
+                    Some(n) if n == sym::all => meta_item_list.iter().any(|meta_item| is_cfg_test_meta_item(meta_item)),
+                    Some(n) if n == sym::not && let [meta_item] = &meta_item_list[..] => !is_cfg_test_meta_item(meta_item),
+                    _ => false,
+                }
+            }
+            ast::MetaItemKind::Word => meta_item.has_name(sym::test),
+            ast::MetaItemKind::NameValue(_) => false,
+        }
+    }
+
+    iter::once(id).chain(tcx.hir_parent_id_iter(id)).any(|hir_id| {
+        tcx.hir_attrs(hir_id).iter().any(|attr| {
             // NOTE: `cfg(true)` attributes now leave `cfg_trace(true)` attributes behind after expansion.
             //       This is how we can detect the original cfgs in the source code.
             //       See https://github.com/rust-lang/rust/pull/138844.
-            hir::attr::is_list_attr_with_ident(attr, None, sym::cfg_trace, sym::test)
+            if !attr.has_name(sym::cfg_trace) { return false; }
+            attr.meta_item_list().iter().flatten().any(is_cfg_test_meta_item)
         })
     })
 }

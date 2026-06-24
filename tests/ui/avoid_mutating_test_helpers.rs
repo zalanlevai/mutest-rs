@@ -1,7 +1,10 @@
 //@ print-targets
 //@ stdout
 //@ stderr: empty
+//@ rustc-flags: --cfg feature="specific_test" --cfg feature="not_test_utils"
 //@ mutest-flags: -v
+
+#![allow(unexpected_cfgs)]
 
 fn help_program() {}
 
@@ -34,4 +37,26 @@ fn test_standalone() {
     test_standalone_impl();
 
     help_program();
+}
+
+#[cfg(any(test, feature = "test_utils"))]
+mod test_utils {
+    pub fn help_test() {}
+}
+
+#[cfg(all(test, feature = "specific_test"))]
+mod specific_test_utils {
+    pub fn help_test() {}
+}
+
+#[cfg(any(not(test), feature = "not_test_utils"))]
+mod not_test_utils {
+    pub fn help_program() {}
+}
+
+#[test]
+fn test_helpers_behind_complex_cfgs() {
+    test_utils::help_test();
+    specific_test_utils::help_test();
+    not_test_utils::help_program();
 }
