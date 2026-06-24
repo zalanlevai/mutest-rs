@@ -508,6 +508,33 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             return ast::visit::walk_expr(self, expr);
         }
 
+        fn is_let_chain(expr: &ast::Expr) -> bool {
+            match &expr.kind {
+                ast::ExprKind::Binary(_, lhs_expr, rhs_expr) => {
+                    is_let_chain(lhs_expr) || is_let_chain(rhs_expr)
+                }
+                ast::ExprKind::Let(_, _, _, _) => true,
+                _ => false,
+            }
+        }
+
+        // Any mutations of a binary operator in a let chain (e.g., logical_op_and_or_swap, bool_expr_negate)
+        // would break the let chain, so we do not mutate the binary operators in the chain, instead
+        // visiting the individual chained expressions (let chains do not nest).
+        if let ast::ExprKind::Binary(_, _, _) = &expr.kind && is_let_chain(expr) {
+            fn inner_visit_let_chain_bin_expr<'ast, T: ast::visit::Visitor<'ast, Result = ()>>(visitor: &mut T, expr: &'ast ast::Expr) {
+                match &expr.kind {
+                    ast::ExprKind::Binary(_, lhs_expr, rhs_expr) => {
+                        inner_visit_let_chain_bin_expr(visitor, lhs_expr);
+                        inner_visit_let_chain_bin_expr(visitor, rhs_expr);
+                    }
+                    _ => visitor.visit_expr(expr),
+                }
+            }
+
+            return inner_visit_let_chain_bin_expr(self, expr);
+        }
+
         register_mutations!(self, MutCtxt {
             opts: self.opts,
             tcx: self.tcx,
