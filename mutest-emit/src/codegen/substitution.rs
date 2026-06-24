@@ -18,30 +18,7 @@ pub fn conflicting_substs(a: &SubstDef, b: &SubstDef) -> bool {
     }
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct SubstLocId(SubstLoc);
-
-impl SubstLoc {
-    pub fn into_subst_loc_id(&self) -> SubstLocId {
-        SubstLocId(*self)
-    }
-}
-
-impl SubstLocId {
-    pub fn into_symbol_name(&self) -> String {
-        match self.0 {
-            SubstLoc::InsertBefore(node_id, _) => format!("subst_bef_{}", node_id),
-            SubstLoc::InsertAfter(node_id, _) => format!("subst_aft_{}", node_id),
-            SubstLoc::Replace(node_id, _) => format!("subst_rep_{}", node_id),
-        }
-    }
-
-    pub fn into_symbol(&self) -> Symbol {
-        Symbol::intern(&self.into_symbol_name())
-    }
-}
-
-fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, default: Option<Box<ast::Expr>>, substs: Vec<(MutId, Box<ast::Expr>)>) -> Box<ast::Expr> {
+fn mk_subst_match_expr(sp: Span, subst_loc_idx: usize, default: Option<Box<ast::Expr>>, substs: Vec<(MutId, Box<ast::Expr>)>) -> Box<ast::Expr> {
     let mut arms = substs.into_iter()
         .map(|(mut_id, subst)| {
             // Some(subst) if subst.mutation.id == crate::mutest_generated::mutations::$mut_id.id => $subst,
@@ -80,7 +57,7 @@ fn mk_subst_match_expr(sp: Span, _subst_loc: SubstLoc, subst_loc_idx: usize, def
     ast::mk::expr_paren(sp, ast::mk::expr_match(sp, subst_lookup_expr, arms))
 }
 
-pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usize, original: Option<Box<ast::Expr>>, substs: Vec<(MutId, &Subst)>) -> Box<ast::Expr> {
+pub fn expand_subst_match_expr(sp: Span, subst_loc_idx: usize, original: Option<Box<ast::Expr>>, substs: Vec<(MutId, &Subst)>) -> Box<ast::Expr> {
     let subst_exprs = substs.into_iter()
         .map(|(mut_id, subst)| {
             let subst_expr = match subst {
@@ -93,10 +70,10 @@ pub fn expand_subst_match_expr(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usi
         })
         .collect::<Vec<_>>();
 
-    mk_subst_match_expr(sp, subst_loc, subst_loc_idx, original, subst_exprs)
+    mk_subst_match_expr(sp, subst_loc_idx, original, subst_exprs)
 }
 
-pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usize, original: Option<ast::Stmt>, substs: Vec<(MutId, &Subst)>) -> Vec<ast::Stmt> {
+pub fn expand_subst_match_stmt(sp: Span, subst_loc_idx: usize, original: Option<ast::Stmt>, substs: Vec<(MutId, &Subst)>) -> Vec<ast::Stmt> {
     let mut binding_substs: Vec<(MutId, (Ident, ast::Mutability, Option<Box<ast::Ty>>, Box<ast::Expr>, Option<Box<ast::Expr>>))> = vec![];
     let mut non_binding_substs: Vec<(MutId, &Subst)> = vec![];
 
@@ -116,7 +93,7 @@ pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usi
         // assigning the value of the previous binding with the same identifier to the new binding
         // (and copying all of the properties of the original binding): `let $ident = $ident`.
         let default_expr = default_expr.unwrap_or_else(|| ast::mk::expr_ident(sp, ident));
-        let subst_match_expr = mk_subst_match_expr(sp, subst_loc, subst_loc_idx, Some(default_expr), vec![(mut_id, expr)]);
+        let subst_match_expr = mk_subst_match_expr(sp, subst_loc_idx, Some(default_expr), vec![(mut_id, expr)]);
 
         let mutbl = matches!(mutbl, ast::Mutability::Mut);
         stmts.push(ast::mk::stmt_let(sp, mutbl, ident, ty, subst_match_expr));
@@ -124,7 +101,7 @@ pub fn expand_subst_match_stmt(sp: Span, subst_loc: SubstLoc, subst_loc_idx: usi
 
     if !non_binding_substs.is_empty() {
         let original_expr = original.map(|v| ast::mk::expr_block(ast::mk::block(sp, thin_vec![v])));
-        stmts.push(ast::mk::stmt_expr(expand_subst_match_expr(sp, subst_loc, subst_loc_idx, original_expr, non_binding_substs)));
+        stmts.push(ast::mk::stmt_expr(expand_subst_match_expr(sp, subst_loc_idx, original_expr, non_binding_substs)));
     }
 
     stmts
@@ -166,7 +143,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
                 let subst_loc_idx = self.indexed_subst_locs.len();
                 self.indexed_subst_locs.push(insert_before_loc);
 
-                let replacement_stmts = expand_subst_match_stmt(self.def_site, insert_before_loc, subst_loc_idx, None, insertions_before);
+                let replacement_stmts = expand_subst_match_stmt(self.def_site, subst_loc_idx, None, insertions_before);
                 let replacement_stmts_count = replacement_stmts.len();
 
                 block.stmts.splice(i..i, replacement_stmts);
@@ -179,7 +156,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
                 let subst_loc_idx = self.indexed_subst_locs.len();
                 self.indexed_subst_locs.push(replacement_loc);
 
-                let replacement_stmts = expand_subst_match_stmt(self.def_site, insert_before_loc, subst_loc_idx, None, replacements);
+                let replacement_stmts = expand_subst_match_stmt(self.def_site, subst_loc_idx, None, replacements);
                 let replacement_stmts_count = replacement_stmts.len();
 
                 block.stmts.splice(i..i, replacement_stmts);
@@ -192,7 +169,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
                 let subst_loc_idx = self.indexed_subst_locs.len();
                 self.indexed_subst_locs.push(insert_after_loc);
 
-                let replacement_stmts = expand_subst_match_stmt(self.def_site, insert_after_loc, subst_loc_idx, None, insertions_after);
+                let replacement_stmts = expand_subst_match_stmt(self.def_site, subst_loc_idx, None, insertions_after);
                 let replacement_stmts_count = replacement_stmts.len();
                 i += replacement_stmts_count;
 
@@ -231,7 +208,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for SubstWriter<'tcx, 'op> {
             let subst_loc_idx = self.indexed_subst_locs.len();
             self.indexed_subst_locs.push(replacement_loc);
 
-            *expr = *expand_subst_match_expr(expr.span, replacement_loc, subst_loc_idx, Some(Box::new(expr.clone())), replacements);
+            *expr = *expand_subst_match_expr(expr.span, subst_loc_idx, Some(Box::new(expr.clone())), replacements);
         }
 
         if let Some(_insertions_after) = self.substitutions.remove(&SubstLoc::InsertAfter(expr.id, expr.span)) {
