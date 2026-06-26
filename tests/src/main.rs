@@ -344,7 +344,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         let mut edition = None;
         for aux_directive in &aux_directives {
             match aux_directive.as_str() {
-                _ if let Some(edition_str) = directive.strip_prefix("edition:").map(str::trim) => {
+                _ if let Some(edition_str) = aux_directive.strip_prefix("edition:").map(str::trim) => {
                     if let Some(_previous_edition) = edition {
                         results.ignored_tests_count += 1;
                         log_test(&name, TestResult::Ignored, Some("invalid directives: multiple editions"));
@@ -355,7 +355,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
                 _ => {
                     results.ignored_tests_count += 1;
-                    log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{directive}`")));
+                    log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{aux_directive}`")));
                     return;
                 }
             }
