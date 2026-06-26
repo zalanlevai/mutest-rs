@@ -191,7 +191,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             let t_test_discovery_start = Instant::now();
             let tests = opts.crate_kind.provides_tests()
                 .then(|| match opts.embedded {
-                    false => mutest_emit::analysis::tests::collect_tests(&generated_crate_ast, &def_res),
+                    false => mutest_emit::analysis::tests::collect_tests(tcx, &generated_crate_ast, &def_res),
                     true => mutest_emit::analysis::tests::collect_and_mark_embedded_tests(sess, &mut generated_crate_ast, &def_res),
                 })
                 .unwrap_or_default();

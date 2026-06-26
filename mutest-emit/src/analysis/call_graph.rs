@@ -12,7 +12,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::analysis::res;
-use crate::analysis::tests::{self, Test};
+use crate::analysis::tests::{self, Test, TestKind};
 use crate::analysis::ty::{self, TyCtxt};
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
@@ -131,9 +131,14 @@ pub struct EntryPointAssoc {
 #[derive(Copy, Clone, Debug)]
 pub struct LocalEntryPoint {
     pub local_def_id: hir::LocalDefId,
+    pub body_local_def_id: Option<hir::LocalDefId>,
 }
 
 impl LocalEntryPoint {
+    pub fn body_local_def_id(&self) -> hir::LocalDefId {
+        self.body_local_def_id.unwrap_or(self.local_def_id)
+    }
+
     pub fn path_str<'tcx>(&self, tcx: TyCtxt<'tcx>) -> String {
         res::def_id_path(tcx, self.local_def_id.to_def_id()).iter()
             .skip(1) // Skip crate name in entry point path strings.
@@ -346,7 +351,10 @@ impl<'a> EntryPoints<'a> {
             EntryPoints::Tests(tests) => {
                 let iter = tests.iter()
                     .filter(|test| !test.ignore)
-                    .map(|test| LocalEntryPoint { local_def_id: test.def_id });
+                    .map(|test| match &test.kind {
+                        &TestKind::Test => LocalEntryPoint { local_def_id: test.def_id, body_local_def_id: None },
+                        &TestKind::QuickCheck { original_def_id } => LocalEntryPoint { local_def_id: test.def_id, body_local_def_id: Some(original_def_id) },
+                    });
                 Box::new(iter)
             },
             EntryPoints::External => Box::new(iter::empty()),
@@ -559,7 +567,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
     let mut previously_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
 
     for entry_point in entry_points.iter() {
-        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(entry_point.local_def_id.to_def_id()));
+        let body_mir = tcx.instance_mir(ty::InstanceKind::Item(entry_point.body_local_def_id().to_def_id()));
 
         // NOTE: We expect entry points to be non-polymorphic (i.e. no type or const generic) functions.
         //       This is because we cannot build a complete call graph with uninstantiated type and const parameters.
@@ -915,7 +923,8 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
                 _ => None,
             };
             let mut call_trace = CallTrace { root: entry_point, nested_calls: smallvec![call.callee] };
-            let entry_point = LocalEntryPoint { local_def_id: entry_point };
+            // HACK: We can discard any def body overrides for entry points, as we have already collected all call information from them.
+            let entry_point = LocalEntryPoint { local_def_id: entry_point, body_local_def_id: None };
             record_nested_targets(tcx, def_res, krate, &test_def_ids, &callee_lookup_cache, entry_point, targeting, unsafety, &mut call_trace, &mut targets, trace_length_limit);
         }
     }

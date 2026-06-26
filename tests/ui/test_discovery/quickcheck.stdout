@@ -1,0 +1,15 @@
+
+@@@ tests @@@
+
+test quickcheck_attr_macro_test
+test quickcheck_decl_macro_test
+
+tests: 2 total; 0 ignored
+
+@@@ targets @@@
+
+tests -(0)-> mutable_fn at tests/ui/test_discovery/quickcheck.rs:13:1: 13:37 (#0)
+  (0) quickcheck_attr_macro_test
+  (0) quickcheck_decl_macro_test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)

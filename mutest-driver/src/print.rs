@@ -463,7 +463,8 @@ pub fn print_mutations<'tcx>(tcx: TyCtxt<'tcx>, mutations: &[Mut], mutation_batc
         );
 
         if let TargetReachability::DirectEntry = mutation.target.reachability {
-            let entry_point = LocalEntryPoint { local_def_id: mutation.target.def_id().expect_local() };
+            // NOTE: The entry point's original body override, if any, can be discarded here, as it is no longer used.
+            let entry_point = LocalEntryPoint { local_def_id: mutation.target.def_id().expect_local(), body_local_def_id: None };
 
             if nested { print!("  "); }
             println!("  <- {entry_point} (direct entry point)",

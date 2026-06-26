@@ -10,13 +10,19 @@ use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
-use crate::codegen::symbols::{DUMMY_SP, FileNameDisplayPreference, Ident, Symbol, path, sym};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileNameDisplayPreference, Ident, MacroKind, Symbol, path, sym};
+
+pub enum TestKind {
+    Test,
+    QuickCheck { original_def_id: hir::LocalDefId },
+}
 
 pub struct Test {
     pub path: Vec<Ident>,
     pub descriptor: Box<ast::Item>,
     pub item: Box<ast::Item>,
     pub def_id: hir::LocalDefId,
+    pub kind: TestKind,
     pub ignore: bool,
 }
 
@@ -58,7 +64,7 @@ fn is_test_case(item: &ast::Item) -> bool {
     item.attrs.iter().any(|attr| attr.has_name(sym::rustc_test_marker))
 }
 
-fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident], items: &[Box<ast::Item>]) -> Vec<Test> {
+fn extract_expanded_tests<'tcx>(tcx: TyCtxt<'tcx>, def_res: &ast_lowering::DefResolutions, path: &[Ident], items: &[Box<ast::Item>]) -> Vec<Test> {
     let mut tests = vec![];
 
     let mut item_iterator = items.iter();
@@ -74,6 +80,29 @@ fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident]
 
         let Some(ident) = test_case.kind.ident() else { panic!("encountered test case without ident"); };
 
+        let mut kind = TestKind::Test;
+        let expn_data = test_item.span.ctxt().outer_expn_data();
+        let expn_macro_crate_name = expn_data.macro_def_id.map(|def_id| tcx.crate_name(def_id.krate).as_str().to_owned());
+        match (expn_macro_crate_name.as_deref(), expn_data.kind) {
+            (Some("quickcheck"), ExpnKind::Macro(MacroKind::Bang, _)) => {
+                if let ast::ItemKind::Fn(fn_item) = &test_item.kind && let Some(body) = &fn_item.body {
+                    if let [original_fn_item_stmt, _] = &body.stmts[..] && let ast::StmtKind::Item(original_fn_item) = &original_fn_item_stmt.kind {
+                        let Some(original_def_id) = def_res.node_id_to_def_id.get(&original_fn_item.id).copied() else { unreachable!(); };
+                        kind = TestKind::QuickCheck { original_def_id };
+                    }
+                }
+            }
+            (Some("quickcheck_macros"), ExpnKind::Macro(MacroKind::Attr, _)) => {
+                if let ast::ItemKind::Fn(fn_item) = &test_item.kind && let Some(body) = &fn_item.body {
+                    if let [original_fn_item_stmt, _] = &body.stmts[..] && let ast::StmtKind::Item(original_fn_item) = &original_fn_item_stmt.kind {
+                        let Some(original_def_id) = def_res.node_id_to_def_id.get(&original_fn_item.id).copied() else { unreachable!(); };
+                        kind = TestKind::QuickCheck { original_def_id };
+                    }
+                }
+            }
+            _ => {}
+        }
+
         let ignore = test_item.attrs.iter().any(|attr| attr.has_name(sym::ignore));
 
         tests.push(Test {
@@ -81,6 +110,7 @@ fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident]
             descriptor: test_case.to_owned(),
             item: test_item.to_owned(),
             def_id,
+            kind,
             ignore,
         });
     }
@@ -88,15 +118,16 @@ fn extract_expanded_tests(def_res: &ast_lowering::DefResolutions, path: &[Ident]
     tests
 }
 
-struct TestCollector<'op> {
+struct TestCollector<'tcx, 'op> {
+    tcx: TyCtxt<'tcx>,
+    def_res: &'op ast_lowering::DefResolutions,
     current_path: Vec<Ident>,
     tests: Vec<Test>,
-    def_res: &'op ast_lowering::DefResolutions,
 }
 
-impl<'ast, 'op> ast::visit::Visitor<'ast> for TestCollector<'op> {
+impl<'tcx, 'ast, 'op> ast::visit::Visitor<'ast> for TestCollector<'tcx, 'op> {
     fn visit_crate(&mut self, krate: &'ast ast::Crate) {
-        let mut tests = extract_expanded_tests(self.def_res, &self.current_path, &krate.items);
+        let mut tests = extract_expanded_tests(self.tcx, self.def_res, &self.current_path, &krate.items);
         self.tests.append(&mut tests);
 
         ast::visit::walk_crate(self, krate);
@@ -108,7 +139,7 @@ impl<'ast, 'op> ast::visit::Visitor<'ast> for TestCollector<'op> {
 
             if let Some(ident) = ident { self.current_path.push(ident); }
 
-            let mut tests = extract_expanded_tests(self.def_res, &self.current_path, &items);
+            let mut tests = extract_expanded_tests(self.tcx, self.def_res, &self.current_path, &items);
             self.tests.append(&mut tests);
 
             ast::visit::walk_item(self, item);
@@ -118,8 +149,8 @@ impl<'ast, 'op> ast::visit::Visitor<'ast> for TestCollector<'op> {
     }
 }
 
-pub fn collect_tests(krate: &ast::Crate, def_res: &ast_lowering::DefResolutions) -> Vec<Test> {
-    let mut collector = TestCollector { current_path: vec![], tests: vec![], def_res };
+pub fn collect_tests<'tcx>(tcx: TyCtxt<'tcx>, krate: &ast::Crate, def_res: &ast_lowering::DefResolutions) -> Vec<Test> {
+    let mut collector = TestCollector { tcx, def_res, current_path: vec![], tests: vec![] };
     collector.visit_crate(krate);
 
     collector.tests
@@ -237,6 +268,7 @@ fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_loweri
             descriptor,
             item: test_item,
             def_id,
+            kind: TestKind::Test,
             ignore,
         });
 
