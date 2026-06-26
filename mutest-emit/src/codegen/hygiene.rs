@@ -1,7 +1,6 @@
 use std::iter;
 use std::mem;
 use std::ops::DerefMut;
-use std::panic;
 use std::sync::Arc;
 
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
@@ -1807,36 +1806,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
 
     let cstore = CStore::from_tcx(tcx);
 
-    // HACK: The only way to enumerate the definitions of an external crate though the public API is
-    //       by enumerating the def indices up to `CStore::num_def_ids_untracked`.
-    //       See https://github.com/rust-lang/rust/pull/85889.
-    let crate_def_indices = |cnum: hir::CrateNum| {
-        const BASE_DEF_IDX: usize = hir::CRATE_DEF_INDEX.as_usize();
-        let max_def_idx = cstore.num_def_ids_untracked(cnum);
-
-        (BASE_DEF_IDX..max_def_idx).map(hir::DefIndex::from_usize)
-    };
-
     // Find all loaded proc macro syntax extensions.
-    tcx.crates(()).iter()
-        // Ensure that we are only looking at crates with `CrateKind::ProcMacro`.
-        .filter(|&&cnum| tcx.dep_kind(cnum).macros_only())
-        .flat_map(|&cnum| crate_def_indices(cnum).map(move |index| hir::DefId { krate: cnum, index }))
-        .filter(|&def_id| {
-            // HACK: Not all def indices are encoded for proc macro crates, only the macro definitions themselves.
-            //       To avoid crashes due to missing def index lookups, we must only generate "valid" indices,
-            //       however, there is no stable mechanism for this.
-            //       Instead, we use a def kind query to trigger a crate metadata lookup, and
-            //       catch the panic, if it occurs.
-            //       We also disable printing of panic messages with an empty hook.
-            //       See https://github.com/rust-lang/rust/pull/76897.
-            let builtin_panic_hook = panic::take_hook();
-            panic::set_hook(Box::new(|_panic_info| {}));
-            let Ok(def_kind) = panic::catch_unwind(panic::AssertUnwindSafe(|| cstore.def_kind_untracked(def_id))) else { return false; };
-            panic::set_hook(builtin_panic_hook);
-
-            matches!(def_kind, hir::DefKind::Macro(_))
-        })
+    cstore.all_proc_macro_def_ids()
         .filter_map(|def_id| {
             match cstore.load_macro_untracked(def_id, tcx) {
                 LoadedMacro::ProcMacro(syntax_extension) => Some(syntax_extension),
