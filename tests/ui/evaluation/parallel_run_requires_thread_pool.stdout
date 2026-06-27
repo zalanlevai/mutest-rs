@@ -1,0 +1,3 @@
+profiling reference test run
+
+dynamic, parallel scheduling of mutations requires a thread pool: rerun with `--use-thread-pool`

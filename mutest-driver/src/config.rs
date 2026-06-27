@@ -149,6 +149,7 @@ pub struct MutationBatchingOptions {
 #[derive(Clone, Debug)]
 pub enum MutationParallelism {
     Batching(MutationBatchingOptions),
+    DynamicScheduling,
 }
 
 #[derive(Clone, Debug)]

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::fmt::{self, Debug};
+use std::io;
 use std::iter;
 use std::path::PathBuf;
 use std::process;
@@ -543,7 +544,7 @@ impl MutationAnalysisResults {
     }
 }
 
-fn run_mutation_analysis<S: SubstMap>(
+fn run_mutation_analysis<S: SubstMap + Sync>(
     opts: &Options,
     tests: &[test_runner::Test],
     external_tests_extra: Option<&'static ExternalTestsExtra>,
@@ -663,6 +664,124 @@ fn run_mutation_analysis<S: SubstMap>(
                 }
             }
         }
+        MutationParallelism::DynamicallyScheduled(mutants, mutation_conflicts) => {
+            let Some(thread_pool) = &thread_pool else {
+                println!("dynamic, parallel scheduling of mutations requires a thread pool: rerun with `--use-thread-pool`");
+                process::exit(ERROR_EXIT_CODE);
+            };
+            let max_thread_count = thread_pool.max_thread_count();
+
+            let mut remaining_mutants = mutants.iter().collect::<Vec<_>>();
+
+            struct RunningMutant<S: SubstMap + 'static> {
+                mutant: &'static StandaloneMutantMeta<S>,
+                join_handle: thread::JoinHandle<MutationTestResults>,
+            }
+
+            let mut running_mutants = HashMap::<u32, RunningMutant<S>>::with_capacity(max_thread_count);
+
+            let mut newly_scheduled_mutants = Vec::<&'static StandaloneMutantMeta<S>>::with_capacity(max_thread_count);
+            while !running_mutants.is_empty() || !remaining_mutants.is_empty() {
+                let active_thread_count = thread_pool.active_count();
+
+                while active_thread_count + newly_scheduled_mutants.len() < max_thread_count && !remaining_mutants.is_empty() {
+                    let Some(mutant) = remaining_mutants.extract_if(.., |mutant| {
+                        let mutation_id = mutant.mutation.id;
+                        for newly_scheduled_mutant in &newly_scheduled_mutants {
+                            if mutation_conflicts.conflicting_mutations(mutation_id, newly_scheduled_mutant.mutation.id) { return false; }
+                        }
+                        for running_mutant in running_mutants.values() {
+                            if mutation_conflicts.conflicting_mutations(mutation_id, running_mutant.mutant.mutation.id) { return false; }
+                        }
+                        true
+                    }) .next() else { break; };
+
+                    newly_scheduled_mutants.push(&mutant);
+                }
+
+                if !newly_scheduled_mutants.is_empty() {
+                    // Activate substitutions for running mutants, and the mutants we are about to schedule.
+                    let mut substitutions = S::empty();
+                    let mutant_substitutions = running_mutants.values()
+                        .map(|running_mutation| &running_mutation.mutant.substitutions)
+                        .chain(newly_scheduled_mutants.iter().map(|mutant| &mutant.substitutions));
+                    for s in mutant_substitutions {
+                        substitutions.overlay(s);
+                    }
+                    unsafe { meta_mutant.active_mutant_handle.replace(Some(substitutions)); }
+
+                    for mutant in newly_scheduled_mutants.drain(..) {
+                        println!("applying mutation:");
+                        print!("- ");
+                        if opts.verbosity >= 1 {
+                            print!("{}: ", mutant.mutation.id);
+                        }
+                        println!("{unsafe_marker}[{op_name}] {display_name} at {display_location}",
+                            unsafe_marker = match mutant.mutation.safety {
+                                MutationSafety::Safe => "",
+                                MutationSafety::Tainted => "(tainted) ",
+                                MutationSafety::Unsafe => "(unsafe) ",
+                            },
+                            op_name = mutant.mutation.op_name,
+                            display_name = mutant.mutation.display_name,
+                            display_location = mutant.mutation.display_location,
+                        );
+                        println!();
+
+                        let mut tests = clone_tests(tests.iter().filter(|test| is_reachable_test(mutant.mutation, &test.desc, external_tests_extra)));
+                        if let config::TestOrdering::MutationDistance = opts.test_ordering {
+                            prioritize_tests_by_distance(&mut tests, external_tests_extra, &[mutant.mutation]);
+                        }
+
+                        let job_exhaustive = opts.exhaustive;
+                        let job_mutation_isolation = opts.mutation_isolation;
+                        let job_thread_pool = Some(thread_pool.clone());
+                        let job_eval_stream_writer = eval_stream_writer.clone();
+                        let job_lingering_test_monitoring_thread = lingering_test_monitoring_thread.clone();
+                        let job_verbosity = opts.verbosity;
+                        let job = move || {
+                            let (mut run_results, lingering_tests) = run_tests(tests, external_tests_extra, Mutant::Mutation(mutant), job_exhaustive, job_mutation_isolation, job_thread_pool, job_eval_stream_writer, job_verbosity);
+                            job_lingering_test_monitoring_thread.submit_lingering_tests(lingering_tests);
+
+                            let Some(result) = run_results.remove(&mutant.mutation.id) else { unreachable!() };
+                            result
+                        };
+
+                        let thread = thread::Builder::new().name(format!("mutation {}", mutant.mutation.id));
+                        let handle = match thread.spawn(job) {
+                            Ok(handle) => handle,
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => panic!("reached thread limit"),
+                            Err(e) => panic!("failed to spawn control thread for mutation harness: {e}"),
+                        };
+
+                        running_mutants.insert(mutant.mutation.id, RunningMutant { mutant, join_handle: handle });
+                    }
+                }
+
+                let mut any_removed = false;
+                for (_, completed_mutant) in running_mutants.extract_if(|_, running_mutant| running_mutant.join_handle.is_finished()) {
+                    any_removed = true;
+
+                    let mutation = completed_mutant.mutant.mutation;
+
+                    let Ok(mutation_result) = completed_mutant.join_handle.join() else { unreachable!() };
+                    if let MutationTestResult::Undetected = mutation_result.result {
+                        print!("{}", mutation.undetected_diagnostic);
+                    }
+                    results.record_mutation_results(mutation, mutation_result);
+                }
+
+                if any_removed {
+                    // Remove active substitutions for just-completed mutations by
+                    // activating substitutions only for the remaining running mutations.
+                    let mut substitutions = S::empty();
+                    for running_mutant in running_mutants.values() {
+                        substitutions.overlay(&running_mutant.mutant.substitutions);
+                    }
+                    unsafe { meta_mutant.active_mutant_handle.replace(Some(substitutions)); }
+                }
+            }
+        }
     }
 
     results.duration = t_start.elapsed();
@@ -731,7 +850,7 @@ fn print_mutation_analysis_epilogue(results: &MutationAnalysisResults, verbosity
     );
 }
 
-pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, external_tests_extra: Option<&'static ExternalTestsExtra>, meta_mutant: &'static MetaMutant<impl SubstMap>) {
+pub fn mutest_main(args: &[&str], tests: Vec<test::TestDescAndFn>, external_tests_extra: Option<&'static ExternalTestsExtra>, meta_mutant: &'static MetaMutant<impl SubstMap + Sync>) {
     let mode = match () {
         _ if let Some(flakes_arg) = args.iter().flat_map(|arg| arg.strip_prefix("--flakes=")).next() => {
             let Some(iterations_count) = flakes_arg.parse::<usize>().ok() else {
@@ -1111,7 +1230,7 @@ fn mutest_simulate_main<S: SubstMap>(args: &[&str], tests: Vec<test::TestDescAnd
     }
 }
 
-pub fn mutest_main_static(test_suite: TestSuite, meta_mutant: &'static MetaMutant<impl SubstMap>) {
+pub fn mutest_main_static(test_suite: TestSuite, meta_mutant: &'static MetaMutant<impl SubstMap + Sync>) {
     if let Ok(test_name) = env::var(test_runner::TEST_SUBPROCESS_INVOCATION) {
         // SAFETY: No other thread is running.
         unsafe { env::remove_var(test_runner::TEST_SUBPROCESS_INVOCATION) };

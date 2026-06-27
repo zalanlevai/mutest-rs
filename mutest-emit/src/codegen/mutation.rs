@@ -691,6 +691,7 @@ pub fn validate_mutations<'trg, 'm>(mutations: &'m [Mut<'trg, 'm>]) -> Result<()
 #[derive(Copy, Clone)]
 pub enum MutationParallelism<'trg, 'm> {
     Batched(&'m [MutationBatch<'trg, 'm>]),
+    DynamicallyScheduled(&'m MutationConflictGraph<'m>),
 }
 
 pub fn conflicting_targets(a: &Target, b: &Target) -> bool {
@@ -707,6 +708,10 @@ pub struct MutationConflictGraph<'m> {
 }
 
 impl<'m> MutationConflictGraph<'m> {
+    pub fn total_mutations_count(&self) -> usize {
+        self.n_mutations as usize
+    }
+
     pub fn is_unsafe(&self, v: MutId) -> bool {
         self.unsafes.contains(&v)
     }
