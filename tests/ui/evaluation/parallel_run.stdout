@@ -1,0 +1,43 @@
+[arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/parallel_run.rs:9:15: 9:21
+  <-(0)- test
+
+[arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/evaluation/parallel_run.rs:9:23: 9:29
+  <-(0)- test
+
+[math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/evaluation/parallel_run.rs:10:5: 10:10
+  <-(0)- test
+
+[math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/evaluation/parallel_run.rs:10:5: 10:10
+  <-(0)- test
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)
+
+---
+
+profiling reference test run
+
+using thread pool of size 2 for running tests
+
+applying mutation:
+- [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` at tests/ui/evaluation/parallel_run.rs:9:15: 9:21
+
+ran 1 out of 1 test
+
+applying mutation:
+- [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` at tests/ui/evaluation/parallel_run.rs:9:23: 9:29
+
+ran 1 out of 1 test
+
+applying mutation:
+- [math_op_add_mul_swap] swap operator `+` for `*` at tests/ui/evaluation/parallel_run.rs:10:5: 10:10
+
+ran 1 out of 1 test
+
+applying mutation:
+- [math_op_add_sub_swap] swap operator `+` for `-` at tests/ui/evaluation/parallel_run.rs:10:5: 10:10
+
+ran 1 out of 1 test
+
+mutations: 100.00%. 4 detected (0 timed out; 0 crashed); 0 undetected; 4 total
+     safe: 100.00%. 4 detected (0 timed out; 0 crashed); 0 undetected; 4 total
+   unsafe: none. 0 detected (0 timed out; 0 crashed); 0 undetected; 0 total
