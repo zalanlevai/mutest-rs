@@ -462,6 +462,11 @@ pub fn main() {
         let mutation_parallelism = 'mutation_parallelism: {
             let mutation_parallelism_config = package_config.as_ref().and_then(|c| c.mutation_parallelism.as_ref());
 
+            // Dynamic mutation scheduling enabled through either CLI flag or Cargo package config.
+            if mutest_arg_matches.get_flag("parallel-mutants") || matches!(mutation_parallelism_config, Some(cargo_package_config::MutationParallelism::DynamicScheduling)) {
+                break 'mutation_parallelism Some(config::MutationParallelism::DynamicScheduling);
+            }
+
             use mutest_driver_cli::mutant_batch_algorithm as opts;
             let batching_algorithm_arg = mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str);
 
@@ -473,6 +478,8 @@ pub fn main() {
                         cargo_package_config::MutationParallelism::None => break 'mutation_parallelism None,
                         // Mutation batching is explicitly enabled through Cargo package config.
                         cargo_package_config::MutationParallelism::Batching { .. } => {}
+                        // NOTE: Already handled as a short-circuiting code path above.
+                        cargo_package_config::MutationParallelism::DynamicScheduling => unreachable!(),
                     }
                 }
 

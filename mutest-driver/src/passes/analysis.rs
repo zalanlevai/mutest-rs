@@ -524,6 +524,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let mutation_batches = match &opts.mutation_parallelism {
                 None => None,
+                Some(config::MutationParallelism::DynamicScheduling) => None,
 
                 Some(config::MutationParallelism::Batching(mutation_batching_opts)) => {
                     let t_mutation_batching_start = Instant::now();
@@ -586,6 +587,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 Some(config::MutationParallelism::Batching(_)) => {
                     let Some(mutation_batches) = &mutation_batches else { unreachable!() };
                     Some(mutest_emit::codegen::mutation::MutationParallelism::Batched(mutation_batches))
+                }
+                Some(config::MutationParallelism::DynamicScheduling) => {
+                    Some(mutest_emit::codegen::mutation::MutationParallelism::DynamicallyScheduled(&mutation_conflict_graph))
                 }
             };
 

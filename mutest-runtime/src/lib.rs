@@ -1,11 +1,15 @@
 #![feature(deadline_api)]
 #![feature(decl_macro)]
+#![feature(generic_const_exprs)]
 #![feature(if_let_guard)]
 #![feature(iter_array_chunks)]
 #![feature(thread_id_value)]
 
 #![feature(test)]
 #![feature(internal_output_capture)]
+
+#![allow(incomplete_features)]
+
 extern crate test;
 
 // Injected dependencies:
@@ -19,6 +23,7 @@ pub mod test_runner;
 pub mod thread_pool;
 
 pub mod data_structures;
+pub use data_structures::StaticBitMatrix;
 
 pub mod detections;
 pub mod flakiness;

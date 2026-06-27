@@ -170,6 +170,7 @@ pub enum MutationParallelism {
         batching_algorithm: Option<MutationBatchingAlgorithm>,
         batching_seed: Option<String>,
     },
+    DynamicScheduling,
 }
 
 #[derive(Debug, Deserialize)]

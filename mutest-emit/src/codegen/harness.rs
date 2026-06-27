@@ -9,7 +9,7 @@ use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::expansion::TcxExpansionExt;
-use crate::codegen::mutation::{Mut, MutationBatch, MutationParallelism, SubstLoc, UnsafeTargeting};
+use crate::codegen::mutation::{Mut, MutationBatch, MutationConflictGraph, MutationParallelism, SubstLoc, UnsafeTargeting};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, kw, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
@@ -219,7 +219,7 @@ pub fn bake_mutant<'trg, 'm>(sp: Span, mutant: Mutant<'trg, 'm>, subst_locs: &[S
 
 fn mk_mutants_slice_const<'trg, 'm>(sp: Span, mutations: &'m [Mut<'trg, 'm>], mutation_parallelism: Option<MutationParallelism<'trg, 'm>>, subst_locs: &[SubstLoc]) -> Box<ast::Item> {
     let (mutant_meta_ty, mutants) = match mutation_parallelism {
-        None => {
+        None | Some(MutationParallelism::DynamicallyScheduled(_)) => {
             // mutest_runtime::StandaloneMutantMeta<SubstMap>
             let mutant_meta_ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp,
                 ast::mk::path_local(path::StandaloneMutantMeta(sp)),
@@ -293,6 +293,44 @@ fn mk_active_mutant_handle_static(sp: Span) -> Box<ast::Item> {
     ast::mk::item_static(sp, vis, mutbl, ident, ty, expr)
 }
 
+pub fn bake_mutation_conflicts(sp: Span, mutation_conflict_graph: &MutationConflictGraph) -> Box<ast::Expr> {
+    let pair_exprs = mutation_conflict_graph.iter_conflicts_excluding_unsafe()
+        .map(|(a, b)| {
+            let a_expr = ast::mk::expr_u32(sp, a.index());
+            let b_expr = ast::mk::expr_u32(sp, b.index());
+            ast::mk::expr_tuple(sp, thin_vec![a_expr, b_expr])
+        })
+        .collect::<ThinVec<_>>();
+    let pairs_expr = ast::mk::expr_slice(sp, pair_exprs);
+    ast::mk::expr_call_path(sp, ast::mk::path_local(path::static_bit_matrix_from_symmetric_pairs(sp)), thin_vec![pairs_expr])
+}
+
+fn mk_mutation_conflict_matrix_const<'trg, 'm>(sp: Span, mutation_conflict_graph: &MutationConflictGraph) -> Box<ast::Item> {
+    let matrix_size_expr = ast::mk::expr_u32(sp, mutation_conflict_graph.total_mutations_count() as u32 + 1);
+
+    // const MUTATION_CONFLICT_MATRIX: mutest_runtime::StaticBitMatrix<{ N + 1 }> = mutest_runtime::StaticBitMatrix::from_symmetric_pairs(&[ ... ]);
+    let vis = ast::mk::vis_default(sp);
+    let ident = Ident::new(sym::MUTATION_CONFLICT_MATRIX, sp);
+    let ty = ast::mk::ty_path(None, ast::mk::pathx_args(sp,
+        ast::mk::path_local(path::StaticBitMatrix(sp)),
+        vec![],
+        vec![ast::GenericArg::Const(ast::mk::anon_const(sp, matrix_size_expr.kind))],
+    ));
+    let expr = bake_mutation_conflicts(sp, mutation_conflict_graph);
+    ast::mk::item_const(sp, vis, ident, ty, expr)
+}
+
+fn mk_mutation_conflicts_const<'trg, 'm>(sp: Span) -> Box<ast::Item> {
+    // const MUTATION_CONFLICTS: mutest_runtime::MutationConflictsMeta = MutationConflictsMeta::from_static(&MUTATION_CONFLICT_MATRIX);
+    let vis = ast::mk::vis_default(sp);
+    let ident = Ident::new(sym::MUTATION_CONFLICTS, sp);
+    let ty = ast::mk::ty_path(None, ast::mk::path_local(path::MutationConflictsMeta(sp)));
+    let expr = ast::mk::expr_call_path(sp, ast::mk::path_local(path::mutation_conflicts_meta_from_static(sp)), thin_vec![
+        ast::mk::expr_ref(sp, ast::mk::expr_path(path::MUTATION_CONFLICT_MATRIX(sp))),
+    ]);
+    ast::mk::item_const(sp, vis, ident, ty, expr)
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum CargoTargetKind {
     Lib,
@@ -364,6 +402,12 @@ fn mk_meta_mutant_struct_static<'tcx, 'trg, 'm>(sp: Span, tcx: TyCtxt<'tcx>, car
                 Some(MutationParallelism::Batched(_mutation_batches)) => {
                     ast::mk::expr_call_path(sp, ast::mk::path_local(path::MutationParallelismBatched(sp)), thin_vec![
                         ast::mk::expr_path(path::MUTANTS(sp)),
+                    ])
+                }
+                Some(MutationParallelism::DynamicallyScheduled(_mutation_conflict_graph)) => {
+                    ast::mk::expr_call_path(sp, ast::mk::path_local(path::MutationParallelismDynamicallyScheduled(sp)), thin_vec![
+                        ast::mk::expr_path(path::MUTANTS(sp)),
+                        ast::mk::expr_ref(sp, ast::mk::expr_path(path::MUTATION_CONFLICTS(sp))),
                     ])
                 }
             }
@@ -531,6 +575,16 @@ pub fn generate_harness<'tcx, 'ent, 'trg, 'm>(
                 mk_active_mutant_handle_static(def_site),
                 mk_mutations_mod(def_site, tcx, entry_points, mutations, unsafe_targeting),
                 mk_mutants_slice_const(def_site, mutations, mutation_parallelism, subst_locs),
+            ]);
+
+            if let Some(MutationParallelism::DynamicallyScheduled(mutation_conflict_graph)) = mutation_parallelism {
+                mutest_generated_mod_items.extend([
+                    mk_mutation_conflict_matrix_const(def_site, mutation_conflict_graph),
+                    mk_mutation_conflicts_const(def_site),
+                ]);
+            }
+
+            mutest_generated_mod_items.extend([
                 mk_meta_mutant_struct_static(def_site, tcx, cargo_metadata, mutations, mutation_parallelism),
                 mk_harness_fn(def_site, embedded, None),
             ]);

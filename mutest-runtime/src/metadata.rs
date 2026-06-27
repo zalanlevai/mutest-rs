@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::data_structures::static_bit_matrix::{self, StaticBitMatrix, StaticBitMatrixRef};
 use crate::harness::ActiveMutantHandle;
 
 pub macro static_map($($input:tt)*) {
@@ -56,6 +57,10 @@ pub fn test_reachability(mutation: &MutationMeta, test_path: &str, external_test
 pub type SubstLocIdx = usize;
 
 pub trait SubstMap: Sized + Clone {
+    fn empty() -> Self;
+
+    fn overlay(&mut self, other: &Self);
+
     fn subst_at(&self, subst_loc_idx: SubstLocIdx) -> Option<SubstMeta>;
 
     /// # Safety
@@ -65,6 +70,18 @@ pub trait SubstMap: Sized + Clone {
 }
 
 impl<const N: usize> SubstMap for [Option<SubstMeta>; N] {
+    fn empty() -> Self {
+        [None; N]
+    }
+
+    fn overlay(&mut self, other: &Self) {
+        for (i, other_subst) in other.iter().enumerate() {
+            if let Some(_) = other_subst {
+                self[i] = *other_subst;
+            }
+        }
+    }
+
     #[inline]
     fn subst_at(&self, subst_loc_idx: SubstLocIdx) -> Option<SubstMeta> {
         self[subst_loc_idx]
@@ -132,6 +149,28 @@ impl MutationMeta {
 }
 
 #[derive(Debug)]
+pub struct MutationConflictsMeta {
+    conflicts: StaticBitMatrixRef<'static>,
+}
+
+impl MutationConflictsMeta {
+    // HACK: Clone bound added because of an issue with `feature(generic_const_exprs)`
+    //       when the suggested empty bounds are evaluated across crate-boundaries,
+    //       see https://github.com/rust-lang/rust/issues/145069#issuecomment-3754163634.
+    #[expect(private_bounds)]
+    pub const fn from_static<const N: u32>(data: &'static StaticBitMatrix<N>) -> Self
+    where
+        [(); static_bit_matrix::words_count(N)]: Clone,
+    {
+        Self { conflicts: data.as_ref() }
+    }
+
+    pub fn conflicting_mutations(&self, a: u32, b: u32) -> bool {
+        self.conflicts.contains(a, b)
+    }
+}
+
+#[derive(Debug)]
 pub struct StandaloneMutantMeta<S: SubstMap + 'static> {
     pub mutation: &'static MutationMeta,
     pub substitutions: &'static S,
@@ -163,6 +202,7 @@ impl<S: SubstMap + 'static> Mutant<S> {
 pub enum MutationParallelism<S: SubstMap + 'static> {
     None(&'static [StandaloneMutantMeta<S>]),
     Batched(&'static [BatchedMutantMeta<S>]),
+    DynamicallyScheduled(&'static [StandaloneMutantMeta<S>], &'static MutationConflictsMeta),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -190,6 +230,7 @@ impl<S: SubstMap + 'static> MetaMutant<S> {
         match self.mutation_parallelism {
             MutationParallelism::None(mutants) => Box::new(mutants.iter().map(|mutant| Mutant::Mutation(mutant))),
             MutationParallelism::Batched(mutants) => Box::new(mutants.iter().map(|mutant| Mutant::Batch(mutant))),
+            MutationParallelism::DynamicallyScheduled(mutants, _) => Box::new(mutants.iter().map(|mutant| Mutant::Mutation(mutant))),
         }
     }
 

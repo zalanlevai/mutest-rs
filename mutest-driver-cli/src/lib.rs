@@ -143,6 +143,7 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"call-graph-depth-limit" [CALL_GRAPH_DEPTH_LIMIT] "Limit depth of call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(--"call-graph-trace-length-limit" [CALL_GRAPH_TRACE_LENGTH_LIMIT] "Limit maximum length of analyzed call traces during call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(150))
+        .arg(clap::arg!(--"parallel-mutants" "Enable the parallel evaluation of mutations using dynamic mutation scheduling.").display_order(198))
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to optionally batch mutations into parallel groups.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE).display_order(199))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single batch.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(199))
         .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching.").display_order(199))
