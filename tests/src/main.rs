@@ -299,7 +299,19 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
             _ if directive.starts_with("rustc-flags:") => {}
             _ if directive.starts_with("verify:") => {}
             _ if directive.starts_with("mutation-operators:") => {}
+            _ if directive.starts_with("build-env:") => {
+                if !directive.contains('=') {
+                    log_test(&name, TestResult::Ignored, Some("invalid directive: each environment variable must be specified one `build-env: KEY=value` at a time"));
+                    return;
+                }
+            }
             _ if directive.starts_with("mutest-flags:") => {}
+            _ if directive.starts_with("run-env:") => {
+                if !directive.contains('=') {
+                    log_test(&name, TestResult::Ignored, Some("invalid directive: each environment variable must be specified one `run-env: KEY=value` at a time"));
+                    return;
+                }
+            }
             _ if directive.starts_with("run-flags:") => {}
 
             _ => {
@@ -353,6 +365,13 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
                     edition = Some(edition_str);
                 }
 
+                _ if directive.starts_with("build-env:") => {
+                    if !directive.contains('=') {
+                        log_test(&name, TestResult::Ignored, Some("invalid directive: each environment variable must be specified one `build-env: KEY=value` at a time"));
+                        return;
+                    }
+                }
+
                 _ => {
                     results.ignored_tests_count += 1;
                     log_test(&name, TestResult::Ignored, Some(&format!("unknown directive: `{aux_directive}`")));
@@ -378,6 +397,15 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         cmd.args(["-L", windows_lib.as_str()]);
 
         cmd.args(["-L", AUX_OUT_DIR]);
+
+        let build_env = aux_directives.iter().filter_map(|d| d.strip_prefix("build-env:").map(str::trim))
+            .flat_map(|env| {
+                let (key, val) = env.split_once("=")?;
+                Some((key.trim(), val.trim()))
+            });
+        for (key, val) in build_env {
+            cmd.env(key, val);
+        }
 
         // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.
         for (var, _) in env::vars() {
@@ -440,6 +468,15 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
     #[cfg(windows)]
     cmd.args(["-L", windows_lib.as_str()]);
+
+    let build_env = directives.iter().filter_map(|d| d.strip_prefix("build-env:").map(str::trim))
+        .flat_map(|env| {
+            let (key, val) = env.split_once("=")?;
+            Some((key.trim(), val.trim()))
+        });
+    for (key, val) in build_env {
+        cmd.env(key, val);
+    }
 
     let rustc_flags = directives.iter().filter_map(|d| d.strip_prefix("rustc-flags:").map(str::trim))
         .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
@@ -514,6 +551,15 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     if exec_build_artifact {
         let build_artifact_path = Path::new(BUILD_OUT_DIR).join(test_crate_name);
         let mut cmd = Command::new(&build_artifact_path);
+
+        let run_env = directives.iter().filter_map(|d| d.strip_prefix("run-env:").map(str::trim))
+            .flat_map(|env| {
+                let (key, val) = env.split_once("=")?;
+                Some((key.trim(), val.trim()))
+            });
+        for (key, val) in run_env {
+            cmd.env(key, val);
+        }
 
         let run_flags = directives.iter().filter_map(|d| d.strip_prefix("run-flags:").map(str::trim))
             .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
