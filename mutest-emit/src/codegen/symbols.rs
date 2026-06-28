@@ -161,7 +161,7 @@ pub mod path {
         mutest_main_static (::mutest_runtime::mutest_main_static),
         StandaloneMutantMeta (::mutest_runtime::StandaloneMutantMeta),
         StaticBitMatrix (::mutest_runtime::StaticBitMatrix),
-        static_bit_matrix_from_symmetric_pairs (::mutest_runtime::StaticBitMatrix::from_symmetric_pairs),
+        static_bit_matrix_from_raw_words (::mutest_runtime::StaticBitMatrix::from_raw_words),
         static_map (::mutest_runtime::static_map),
         SubstMap (crate::mutest_generated::SubstMap),
         SubstMapTrait (::mutest_runtime::SubstMap),
