@@ -294,15 +294,33 @@ fn mk_active_mutant_handle_static(sp: Span) -> Box<ast::Item> {
 }
 
 pub fn bake_mutation_conflicts(sp: Span, mutation_conflict_graph: &MutationConflictGraph) -> Box<ast::Expr> {
-    let pair_exprs = mutation_conflict_graph.iter_conflicts_excluding_unsafe()
-        .map(|(a, b)| {
-            let a_expr = ast::mk::expr_u32(sp, a.index());
-            let b_expr = ast::mk::expr_u32(sp, b.index());
-            ast::mk::expr_tuple(sp, thin_vec![a_expr, b_expr])
-        })
-        .collect::<ThinVec<_>>();
-    let pairs_expr = ast::mk::expr_slice(sp, pair_exprs);
-    ast::mk::expr_call_path(sp, ast::mk::path_local(path::static_bit_matrix_from_symmetric_pairs(sp)), thin_vec![pairs_expr])
+    let n = mutation_conflict_graph.total_mutations_count() + 1;
+    const WORD_BYTES: usize = size_of::<u64>();
+    const WORD_BITS: usize = WORD_BYTES * 8;
+    let words_per_row = n.div_ceil(WORD_BITS);
+
+    let mut words = vec![0_u64; n * words_per_row];
+    for (a, b) in mutation_conflict_graph.iter_conflicts_excluding_unsafe() {
+        let a = a.index() as usize;
+        let b = b.index() as usize;
+
+        let mut set_bit_in_words = |row: usize, column: usize| {
+            let row_first_word_idx = row * words_per_row;
+            let word_idx_offset = column / WORD_BITS;
+            let word_mask = 1 << (column % WORD_BITS);
+            let word = &mut words[row_first_word_idx + word_idx_offset];
+            *word |= word_mask;
+        };
+
+        set_bit_in_words(a, b);
+        set_bit_in_words(b, a);
+    }
+
+    let word_exprs = words.into_iter().map(|word| ast::mk::expr_lit(sp, ast::token::LitKind::Integer, Symbol::intern(&word.to_string()), None)).collect::<ThinVec<_>>();
+    let words_expr = ast::mk::expr_slice(sp, word_exprs);
+
+    // StaticBitMatrix::from_raw_words(&[ ... ])
+    ast::mk::expr_call_path(sp, ast::mk::path_local(path::static_bit_matrix_from_raw_words(sp)), thin_vec![words_expr])
 }
 
 fn mk_mutation_conflict_matrix_const<'trg, 'm>(sp: Span, mutation_conflict_graph: &MutationConflictGraph) -> Box<ast::Item> {

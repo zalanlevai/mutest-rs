@@ -43,6 +43,10 @@ where
         matrix
     }
 
+    pub const fn from_raw_words(words: &[Word]) -> Self {
+        Self { words: *words.as_array().unwrap() }
+    }
+
     pub const fn set(&mut self, row: u32, column: u32) {
         assert!(row < N && column < N);
         let row = row as usize;
