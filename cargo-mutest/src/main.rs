@@ -137,6 +137,7 @@ fn main() {
         .get_matches_from(&args);
 
     let embedded = matches.get_flag("Zembedded");
+    let parallel_mutants = matches.get_flag("parallel-mutants");
 
     let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
         Some(("print", _)) => ("check", &["--profile", "test"], "print", None, None),
@@ -182,7 +183,8 @@ fn main() {
 
             if !embedded {
                 if let Some(isolation_mode) = matches.get_one::<String>("isolate") { passed_args.push(format!("--isolate={isolation_mode}")); }
-                if matches.get_flag("use-thread-pool") { passed_args.push("--use-thread-pool".to_owned()); }
+                // NOTE: `--parallel-mutants` requires the test thread pool, so we automatically set it.
+                if matches.get_flag("use-thread-pool") || parallel_mutants { passed_args.push("--use-thread-pool".to_owned()); }
             }
 
             let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();
