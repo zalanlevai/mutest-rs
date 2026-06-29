@@ -395,7 +395,7 @@ fn main() {
     if cfg!(windows) { path.set_extension("exe"); }
     cmd.env("RUSTC_WORKSPACE_WRAPPER", path);
 
-    cmd.env("MUTEST_ARGS", mutest_args.join(" "));
+    cmd.env("MUTEST_ENCODED_ARGS", mutest_args.join("\x1F"));
 
     if let Some(passed_args) = passed_args {
         cmd.arg("--");
