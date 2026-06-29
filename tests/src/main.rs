@@ -172,6 +172,62 @@ fn parse_directives(path: &Path) -> Vec<String> {
     directives
 }
 
+fn parse_args(args_str: &str) -> Vec<&str> {
+    let mut args = vec![];
+
+    let mut char_indices_iter = args_str.char_indices();
+    while let Some((c_idx, c)) = char_indices_iter.next() {
+        // NOTE: Skip past multiple consecutive whitespace separators between args.
+        if c.is_whitespace() { continue; }
+
+        let (start_idx, end_idx) = match c {
+            '"' => {
+                let start_idx = char_indices_iter.offset();
+                let end_idx = 'end_idx: {
+                    while let Some((c_idx, c)) = char_indices_iter.next() {
+                        if c != '"' { continue; }
+                        match char_indices_iter.clone().next() {
+                            None => { break 'end_idx c_idx; }
+                            Some((_, next_c)) if next_c.is_whitespace() => {
+                                // NOTE: Skip past the whitespace character after `"`.
+                                let _ = char_indices_iter.next();
+                                break 'end_idx c_idx;
+                            }
+                            _ => { continue; }
+                        }
+                    }
+                    // NOTE: This is the fallback value if `"` is not closed by the end of the args list.
+                    args_str.len()
+                };
+                (start_idx, end_idx)
+            }
+            _ => {
+                let end_idx = 'end_idx: {
+                    while let Some((c_idx, c)) = char_indices_iter.next() {
+                        if c.is_whitespace() { break 'end_idx c_idx; }
+                    }
+                    args_str.len()
+                };
+                (c_idx, end_idx)
+            }
+        };
+
+        args.push(&args_str[start_idx..end_idx]);
+    }
+
+    args
+}
+
+#[test]
+fn test_parse_args() {
+    assert_eq!(["foo", "bar", "baz"], parse_args("foo bar baz")[..]);
+    assert_eq!(["foo", "bar", "baz"], parse_args("foo   bar   baz")[..]);
+    assert_eq!(["foo", "bar baz", "abc"], parse_args("foo \"bar baz\" abc")[..]);
+    assert_eq!(["foo", "bar=\"baz\"", "abc"], parse_args("foo \"bar=\"baz\"\" abc")[..]);
+    assert_eq!(["foo", "bar baz"], parse_args("foo \"bar baz\"")[..]);
+    assert_eq!(["foo", "bar baz"], parse_args("foo \"bar baz")[..]);
+}
+
 fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, results: &mut TestRunResults) {
     if !path.is_file() { return; }
     if !path.extension().is_some_and(|v| v == "rs") { return; }
@@ -478,8 +534,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         cmd.env(key, val);
     }
 
-    let rustc_flags = directives.iter().filter_map(|d| d.strip_prefix("rustc-flags:").map(str::trim))
-        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
+    let rustc_flags = directives.iter().filter_map(|d| d.strip_prefix("rustc-flags:").map(str::trim)).flat_map(parse_args);
     cmd.args(rustc_flags);
 
     if aux {
@@ -506,7 +561,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         mutest_args.push(mutest_prints.into_iter().intersperse(",").collect::<String>());
     }
     directives.iter().filter_map(|d| d.strip_prefix("mutest-flags:").map(str::trim))
-        .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
+        .flat_map(|flags| parse_args(flags).into_iter().map(str::to_owned))
         .collect_into(&mut mutest_args);
     mutest_args.push(mutest_subcommand.to_owned());
     cmd.env("MUTEST_ENCODED_ARGS".to_owned(), mutest_args.join("\x1F"));
@@ -561,8 +616,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
             cmd.env(key, val);
         }
 
-        let run_flags = directives.iter().filter_map(|d| d.strip_prefix("run-flags:").map(str::trim))
-            .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()));
+        let run_flags = directives.iter().filter_map(|d| d.strip_prefix("run-flags:").map(str::trim)).flat_map(parse_args);
         cmd.args(run_flags);
 
         // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.
