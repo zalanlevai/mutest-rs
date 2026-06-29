@@ -1,0 +1,51 @@
+built call graph with depth of 2
+reached 100.00% of functions from tests (2 out of 2 functions)
+filtered to 50.00% of functions (1 out of 2 functions)
+
+@@@ targets @@@
+
+tests -(0)-> mutable_fn at tests/ui/mutation/filter/mutate_exprs_partially_in_file_line_ranges.rs:11:1: 11:38 (#0)
+  (0) test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+generated 5 mutations in 50.00% of functions (1 out of 2 functions)
+found 10 conflicts (10 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+1: [bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/filter/mutate_exprs_partially_in_file_line_ranges.rs:12:5: 15:6
+  <-(0)- test
+
+2: [call_delete] delete call to `other_mutable_fn` and replace it with `Default::default()` in mutable_fn at tests/ui/mutation/filter/mutate_exprs_partially_in_file_line_ranges.rs:12:5: 15:6
+  <-(0)- test
+
+3: [call_value_default_shadow] ignore return value of call to `other_mutable_fn` by shadowing it with `Default::default()` in mutable_fn at tests/ui/mutation/filter/mutate_exprs_partially_in_file_line_ranges.rs:12:5: 15:6
+  <-(0)- test
+
+4: [bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/filter/mutate_exprs_partially_in_file_line_ranges.rs:13:9: 13:15
+  <-(0)- test
+
+5: [eq_op_invert] invert equality operator `==` to `!=` in mutable_fn at tests/ui/mutation/filter/mutate_exprs_partially_in_file_line_ranges.rs:13:9: 13:15
+  <-(0)- test
+
+       arg_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate: 40.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+              call_delete: 20.00%. 1 mutations; 1 safe; 0 unsafe (0 tainted)
+call_value_default_shadow: 20.00%. 1 mutations; 1 safe; 0 unsafe (0 tainted)
+      continue_break_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert: 20.00%. 1 mutations; 1 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+5 mutations; 5 safe; 0 unsafe (0 tainted)

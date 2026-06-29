@@ -7,7 +7,7 @@ use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::OptLevel;
-use rustc_span::ErrorGuaranteed;
+use rustc_span::{ErrorGuaranteed, FileName};
 use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
 use mutest_emit::analysis::call_graph::{EntryPointAssocs, EntryPoints, Targeting, TargetReachability};
@@ -292,6 +292,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     let t_target_analysis_start = Instant::now();
 
                     let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, entry_points, targeting, call_graph_depth_limit, call_graph_trace_length_limit);
+                    let reachable_fns_count = reachable_fns.len();
                     let mut json_definitions = Default::default();
                     if let Some(write_opts) = &opts.write_opts {
                         let t_write_start = Instant::now();
@@ -304,8 +305,8 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         );
 
                         println!("reached {reached_pct:.2}% of functions from tests ({reached} out of {total} functions)",
-                            reached_pct = reachable_fns.len() as f64 / all_mutable_fns_count as f64 * 100_f64,
-                            reached = reachable_fns.len(),
+                            reached_pct = reachable_fns_count as f64 / all_mutable_fns_count as f64 * 100_f64,
+                            reached = reachable_fns_count,
                             total = all_mutable_fns_count,
                         );
 
@@ -350,12 +351,46 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                         if opts.verbosity >= 1 { println!(); }
                     }
 
-                    let targets = reachable_fns.into_iter()
+                    let mut targets = reachable_fns.into_iter()
                         .filter(|f| match f.reachability {
                             TargetReachability::DirectEntry => true,
                             TargetReachability::NestedCallee { distance } => distance < opts.mutation_depth,
                         })
                         .collect::<Vec<_>>();
+
+                    // Target-level filtering of mutations.
+                    // NOTE: The rest of the intra-target filtering happens later.
+                    if !opts.mutation_filters.is_empty() {
+                        targets.retain(|target| opts.mutation_filters.iter().any(|filter| match filter {
+                            config::MutationFilter::File(path, line_range) => {
+                                let target_span = tcx.def_span(target.def_id());
+                                let FileName::Real(target_file_name) = sess.source_map().span_to_filename(target_span) else { return false; };
+                                if target_file_name.local_path() != Some(path) { return false; }
+
+                                if let Some((start_line_no, end_line_no)) = *line_range && let Some(target_local_def_id) = target.def_id().as_local() {
+                                    let target_span_with_body = tcx.hir_span_with_body(tcx.local_def_id_to_hir_id(target_local_def_id));
+                                    let lo_loc = sess.source_map().lookup_char_pos(target_span_with_body.lo());
+                                    let hi_loc = sess.source_map().lookup_char_pos(target_span_with_body.hi());
+
+                                    let end_line_no = end_line_no.unwrap_or(start_line_no);
+                                    if !(lo_loc.line <= end_line_no && start_line_no <= hi_loc.line) { return false; }
+                                }
+
+                                true
+                            }
+                            config::MutationFilter::Def(def_path_str) => {
+                                tcx.def_path_str(target.def_id()) == *def_path_str
+                            }
+                        }));
+
+                        if opts.verbosity >= 1 {
+                            println!("filtered to {filtered_pct:.2}% of functions ({filtered} out of {total} functions)",
+                                filtered_pct = targets.len() as f64 / reachable_fns_count as f64 * 100_f64,
+                                filtered = targets.len(),
+                                total = reachable_fns_count,
+                            );
+                        }
+                    }
 
                     pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
 
@@ -447,7 +482,29 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             }
 
             let t_mutation_generation_start = Instant::now();
-            let mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
+            let mut mutations = mutest_emit::codegen::mutation::apply_mutation_operators(tcx, &crate_res, &def_res, &body_res, &generated_crate_ast, &targets, &opts.operators, opts.unsafe_targeting, &sess_opts);
+            if !opts.mutation_filters.is_empty() {
+                // NOTE: Targets are already filtered, so this only applies intra-target filtering.
+                mutations.retain(|mutation| opts.mutation_filters.iter().any(|filter| {
+                    match filter {
+                        config::MutationFilter::File(path, line_range) => {
+                            let (Some(source_file), lo_line, _, hi_line, _) = sess.source_map().span_to_location_info(mutation.span) else { return false; };
+                            let FileName::Real(file_name) = &source_file.name else { return false; };
+                            file_name.local_path() == Some(path) && match *line_range {
+                                None => true,
+                                Some((line_no, None)) => lo_line <= line_no && line_no <= hi_line,
+                                Some((start_line_no, Some(end_line_no))) => lo_line <= end_line_no && start_line_no <= hi_line,
+                            }
+                        }
+                        config::MutationFilter::Def(def_path_str) => {
+                            tcx.def_path_str(mutation.target.def_id()) == *def_path_str
+                        }
+                    }
+                }));
+
+                // NOTE: Mutations have to be reindexed after filtering for sequential ID assumptions to hold.
+                mutest_emit::codegen::mutation::reindex_mutations(&mut mutations);
+            }
             if opts.verbosity >= 1 {
                 let mutated_fns = mutations.iter().map(|m| m.target.def_id()).collect::<FxHashSet<_>>();
                 let mutated_fns_count = mutated_fns.len();

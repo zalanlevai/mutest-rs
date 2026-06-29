@@ -143,6 +143,13 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"call-graph-depth-limit" [CALL_GRAPH_DEPTH_LIMIT] "Limit depth of call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(--"call-graph-trace-length-limit" [CALL_GRAPH_TRACE_LENGTH_LIMIT] "Limit maximum length of analyzed call traces during call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(150))
+        .arg(clap::arg!(--"filter-mutations" [MUTATION_FILTERS]).value_delimiter(',').display_order(150)
+            .help("\
+                Filter mutations to only the ones specified by any of the filters. Multiple may be specified, seperated by commas. The following filters are available:\n\
+                * `def:<ITEM_PATH_TO_DEF>`: Only mutate the specified definition. The full canonical item path must be specified (e.g., `def:foo::bar::baz`, `def:Struct::function`, `def:<Struct as Trait>::function`).\n\
+                * `file:<PATH_TO_FILE>[:<LINE>[:<END_LINE>]]`: Only mutate the specified file, or the specified part of the file (e.g., `file:src/lib.rs`, `file:src/lib.rs:21`, `file:src/lib.rs:21:25`).
+            ")
+        )
         .arg(clap::arg!(--"parallel-mutants" "Enable the parallel evaluation of mutations using dynamic mutation scheduling.").display_order(198))
         .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to optionally batch mutations into parallel groups.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE).display_order(199))
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single batch.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(199))

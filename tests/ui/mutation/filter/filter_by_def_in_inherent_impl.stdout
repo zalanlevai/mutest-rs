@@ -1,0 +1,48 @@
+built call graph with depth of 3
+reached 66.67% of functions from tests (2 out of 3 functions)
+filtered to 50.00% of functions (1 out of 2 functions)
+
+@@@ targets @@@
+
+tests -(0)-> Vec2::len at tests/ui/mutation/filter/filter_by_def_in_inherent_impl.rs:15:5: 15:24 (#0)
+  (0) test_vec2
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+generated 4 mutations in 33.33% of functions (1 out of 3 functions)
+found 6 conflicts (6 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+1: [call_delete] delete call to `std::f64::<impl f64>::sqrt` and replace it with `Default::default()` in Vec2::len at tests/ui/mutation/filter/filter_by_def_in_inherent_impl.rs:16:9: 16:34
+  <-(0)- test_vec2
+
+2: [call_value_default_shadow] ignore return value of call to `std::f64::<impl f64>::sqrt` by shadowing it with `Default::default()` in Vec2::len at tests/ui/mutation/filter/filter_by_def_in_inherent_impl.rs:16:9: 16:34
+  <-(0)- test_vec2
+
+3: [call_delete] delete call to `Vec2::dot` and replace it with `Default::default()` in Vec2::len at tests/ui/mutation/filter/filter_by_def_in_inherent_impl.rs:16:19: 16:33
+  <-(0)- test_vec2
+
+4: [call_value_default_shadow] ignore return value of call to `Vec2::dot` by shadowing it with `Default::default()` in Vec2::len at tests/ui/mutation/filter/filter_by_def_in_inherent_impl.rs:16:19: 16:33
+  <-(0)- test_vec2
+
+       arg_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+              call_delete: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+call_value_default_shadow: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+      continue_break_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)

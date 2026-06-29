@@ -83,6 +83,7 @@ pub fn compile_specialized_mutant_crate(
             call_graph_depth_limit: config.opts.call_graph_depth_limit,
             call_graph_trace_length_limit: config.opts.call_graph_trace_length_limit,
             mutation_depth: config.opts.mutation_depth,
+            mutation_filters: config.opts.mutation_filters.clone(),
             mutation_parallelism: config.opts.mutation_parallelism.clone(),
 
             write_opts: config.opts.write_opts.clone(),
