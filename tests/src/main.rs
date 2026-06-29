@@ -509,7 +509,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         .flat_map(|flags| flags.split(" ").filter(|flag| !flag.is_empty()).map(str::to_owned))
         .collect_into(&mut mutest_args);
     mutest_args.push(mutest_subcommand.to_owned());
-    cmd.env("MUTEST_ARGS".to_owned(), mutest_args.join(" "));
+    cmd.env("MUTEST_ENCODED_ARGS".to_owned(), mutest_args.join("\x1F"));
 
     // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.
     for (var, _) in env::vars() {

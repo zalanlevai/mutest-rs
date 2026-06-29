@@ -202,12 +202,14 @@ pub fn main() {
         || args.iter().position(|arg| arg == "--crate-type").is_some_and(|i| args.get(i + 1).is_some_and(|v| v == "bin"));
 
     let mutest_args = (!rustc_wrapper)
-        .then_some(args.iter().skip(1).map(ToOwned::to_owned).collect::<Vec<_>>().join(" "))
-        .or_else(|| env::var("MUTEST_ARGS").ok());
+        .then_some(args.iter().skip(1).map(ToOwned::to_owned).collect::<Vec<_>>())
+        .or_else(|| env::var("MUTEST_ENCODED_ARGS").ok().map(|args| args.split('\x1F').map(ToOwned::to_owned).collect::<Vec<_>>()))
+        .or_else(|| env::var("MUTEST_ARGS").ok().map(|args| args.split(' ').map(ToOwned::to_owned).collect::<Vec<_>>()));
+    let mutest_args_str = mutest_args.as_ref().map(|mutest_args| mutest_args.join(" "));
 
     if normal_rustc || !primary_package || (bin_target && !test_target) {
         process::exit(rustc_driver::catch_with_exit_code(|| {
-            rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args })
+            rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str })
         }));
     }
 
@@ -215,7 +217,7 @@ pub fn main() {
         .no_binary_name(true)
         // Target-related Arguments
         .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER).display_order(200))
-        .get_matches_from(mutest_args.as_deref().unwrap_or_default().split(" "));
+        .get_matches_from(mutest_args.unwrap_or_default());
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let compiler_config = mutest_driver::passes::parse_compiler_args(&args).expect("no compiler configuration was generated");
@@ -628,7 +630,7 @@ pub fn main() {
 
         let config = Config {
             compiler_config,
-            invocation_fingerprint: mutest_args,
+            invocation_fingerprint: mutest_args_str,
             mutest_target_dir_root,
             mutest_search_path,
             opts: config::Options {
