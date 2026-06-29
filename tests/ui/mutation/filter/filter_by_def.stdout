@@ -1,0 +1,48 @@
+built call graph with depth of 2
+reached 66.67% of functions from tests (2 out of 3 functions)
+filtered to 50.00% of functions (1 out of 2 functions)
+
+@@@ targets @@@
+
+tests -(0)-> inner::mutable_fn at tests/ui/mutation/filter/filter_by_def.rs:16:5: 16:41 (#0)
+  (0) inner::test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+generated 4 mutations in 33.33% of functions (1 out of 3 functions)
+found 6 conflicts (6 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+1: [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in inner::mutable_fn at tests/ui/mutation/filter/filter_by_def.rs:16:19: 16:25
+  <-(0)- inner::test
+
+2: [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in inner::mutable_fn at tests/ui/mutation/filter/filter_by_def.rs:16:27: 16:33
+  <-(0)- inner::test
+
+3: [math_op_add_mul_swap] swap operator `+` for `*` in inner::mutable_fn at tests/ui/mutation/filter/filter_by_def.rs:17:9: 17:14
+  <-(0)- inner::test
+
+4: [math_op_add_sub_swap] swap operator `+` for `-` in inner::mutable_fn at tests/ui/mutation/filter/filter_by_def.rs:17:9: 17:14
+  <-(0)- inner::test
+
+       arg_default_shadow: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+              call_delete:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+call_value_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      continue_break_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap: 25.00%. 1 mutations; 1 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap: 25.00%. 1 mutations; 1 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)

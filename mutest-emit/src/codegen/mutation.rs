@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::iter;
 use std::marker::PhantomData;
 
 use rustc_hash::{FxHashSet, FxHashMap};
@@ -666,6 +667,12 @@ pub fn apply_mutation_operators<'ast, 'tcx, 'trg, 'm>(
     }
 
     collector.mutations
+}
+
+pub fn reindex_mutations<'trg, 'm>(mutations: &mut [Mut<'trg, 'm>]) {
+    for (id, mutation) in iter::zip(1.., mutations) {
+        mutation.id = MutId(id);
+    }
 }
 
 pub enum MutationError<'trg, 'm> {

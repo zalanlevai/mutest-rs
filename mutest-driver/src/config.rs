@@ -157,6 +157,14 @@ pub struct VerifyOptions {
     pub ast_lowering: bool,
 }
 
+#[derive(Clone, Debug)]
+pub enum MutationFilter {
+    /// `file:path/to/src.rs` or `file:path/to/src.rs:15` or `file:path/to/src.rs:15:17`.
+    File(PathBuf, Option<(usize, Option<usize>)>),
+    /// `def:path::to::function` or `def:<impl path::to::Trait for path::to::Type>::function`, using fully-qualified (without root crate) Rust item paths.
+    Def(String),
+}
+
 pub struct Options<'op, 'm> {
     pub crate_kind: CrateKind,
     pub cargo_target_kind: Option<CargoTargetKind>,
@@ -171,6 +179,7 @@ pub struct Options<'op, 'm> {
     pub call_graph_depth_limit: Option<usize>,
     pub call_graph_trace_length_limit: Option<usize>,
     pub mutation_depth: usize,
+    pub mutation_filters: Vec<MutationFilter>,
     pub mutation_parallelism: Option<MutationParallelism>,
 
     pub verify_opts: VerifyOptions,

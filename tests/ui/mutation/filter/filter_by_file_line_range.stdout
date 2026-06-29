@@ -1,0 +1,48 @@
+built call graph with depth of 2
+reached 100.00% of functions from tests (2 out of 2 functions)
+filtered to 50.00% of functions (1 out of 2 functions)
+
+@@@ targets @@@
+
+tests -(0)-> mutable_fn at tests/ui/mutation/filter/filter_by_file_line_range.rs:7:1: 7:37 (#0)
+  (0) test
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+generated 4 mutations in 50.00% of functions (1 out of 2 functions)
+found 6 conflicts (6 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+1: [bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/filter/filter_by_file_line_range.rs:8:8: 8:14
+  <-(0)- test
+
+2: [eq_op_invert] invert equality operator `==` to `!=` in mutable_fn at tests/ui/mutation/filter/filter_by_file_line_range.rs:8:8: 8:14
+  <-(0)- test
+
+3: [bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/filter/filter_by_file_line_range.rs:9:8: 9:14
+  <-(0)- test
+
+4: [eq_op_invert] invert equality operator `==` to `!=` in mutable_fn at tests/ui/mutation/filter/filter_by_file_line_range.rs:9:8: 9:14
+  <-(0)- test
+
+       arg_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+              call_delete:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+call_value_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      continue_break_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)

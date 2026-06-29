@@ -1,0 +1,33 @@
+built call graph with depth of 2
+reached 100.00% of functions from tests (1 out of 1 functions)
+filtered to 0.00% of functions (0 out of 1 functions)
+
+@@@ targets @@@
+
+targets: 0 total; 0 safe; 0 unsafe (0 tainted)
+
+generated 0 mutations in 0.00% of functions (0 out of 1 functions)
+found 0 conflicts (0 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+       arg_default_shadow:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+              call_delete:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+call_value_default_shadow:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      continue_break_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:   NaN%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+0 mutations; 0 safe; 0 unsafe (0 tainted)

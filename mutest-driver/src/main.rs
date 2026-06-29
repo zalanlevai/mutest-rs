@@ -459,6 +459,41 @@ pub fn main() {
             call_graph_trace_length_limit = None;
         }
 
+        let mutation_filters = mutest_arg_matches.get_many::<String>("filter-mutations").into_iter().flatten()
+            .map(|filter| {
+                match () {
+                    _ if let Some(def_path_str) = filter.strip_prefix("def:") => {
+                        config::MutationFilter::Def(def_path_str.to_owned())
+                    }
+                    _ if let Some(file_spec) = filter.strip_prefix("file:") => {
+                        let mut file_path_str = file_spec;
+                        let mut line_range_str = None;
+                        if let Some((file_spec_rest, line_no_str_part)) = file_spec.rsplit_once(':') {
+                            if let Some((file_path_str_part, start_line_no_str_part)) = file_spec_rest.rsplit_once(':') {
+                                file_path_str = file_path_str_part;
+                                line_range_str = Some((start_line_no_str_part, Some(line_no_str_part)));
+                            } else {
+                                file_path_str = file_spec_rest;
+                                line_range_str = Some((line_no_str_part, None));
+                            }
+                        }
+
+                        let line_range = line_range_str.map(|(line_no_str, end_line_no_str)| -> Result<_, std::num::ParseIntError> {
+                            let line_no = line_no_str.parse::<usize>()?;
+                            let end_line_no = end_line_no_str.map(|end_line_no_str| end_line_no_str.parse::<usize>()).transpose()?;
+                            Ok((line_no, end_line_no))
+                        }).transpose();
+                        let line_range = match line_range {
+                            Ok(line_range) => line_range,
+                            Err(_error) => early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")),
+                        };
+                        config::MutationFilter::File(PathBuf::from(file_path_str), line_range)
+                    }
+                    _ => early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")),
+                }
+            })
+            .collect::<Vec<_>>();
+
         let mutation_parallelism = 'mutation_parallelism: {
             let mutation_parallelism_config = package_config.as_ref().and_then(|c| c.mutation_parallelism.as_ref());
 
@@ -609,6 +644,7 @@ pub fn main() {
                 call_graph_depth_limit,
                 call_graph_trace_length_limit,
                 mutation_depth,
+                mutation_filters,
                 mutation_parallelism,
 
                 write_opts,

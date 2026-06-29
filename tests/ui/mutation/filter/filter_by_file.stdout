@@ -1,0 +1,63 @@
+built call graph with depth of 2
+reached 100.00% of functions from tests (2 out of 2 functions)
+filtered to 100.00% of functions (2 out of 2 functions)
+
+@@@ targets @@@
+
+tests -(0)-> mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:7:1: 7:37 (#0)
+  (0) test
+
+tests -(0)-> other_mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:11:1: 11:43 (#0)
+  (0) test
+
+targets: 2 total; 2 safe; 0 unsafe (0 tainted)
+
+generated 8 mutations in 100.00% of functions (2 out of 2 functions)
+found 28 conflicts (28 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+1: [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:7:15: 7:21
+  <-(0)- test
+
+2: [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:7:23: 7:29
+  <-(0)- test
+
+3: [math_op_add_mul_swap] swap operator `+` for `*` in mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:8:5: 8:10
+  <-(0)- test
+
+4: [math_op_add_sub_swap] swap operator `+` for `-` in mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:8:5: 8:10
+  <-(0)- test
+
+5: [arg_default_shadow] ignore `a` argument by shadowing it with `Default::default()` in other_mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:11:21: 11:27
+  <-(0)- test
+
+6: [arg_default_shadow] ignore `b` argument by shadowing it with `Default::default()` in other_mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:11:29: 11:35
+  <-(0)- test
+
+7: [math_op_add_mul_swap] swap operator `+` for `*` in other_mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:12:5: 12:10
+  <-(0)- test
+
+8: [math_op_add_sub_swap] swap operator `+` for `-` in other_mutable_fn at tests/ui/mutation/filter/filter_by_file.rs:12:5: 12:10
+  <-(0)- test
+
+       arg_default_shadow: 50.00%. 4 mutations; 4 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+              call_delete:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+call_value_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      continue_break_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap: 25.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap: 25.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+8 mutations; 8 safe; 0 unsafe (0 tainted)
