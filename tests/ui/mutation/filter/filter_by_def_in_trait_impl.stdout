@@ -1,0 +1,48 @@
+built call graph with depth of 2
+reached 60.00% of functions from tests (3 out of 5 functions)
+filtered to 33.33% of functions (1 out of 3 functions)
+
+@@@ targets @@@
+
+tests -(0)-> <Vec2 as std::ops::Add>::add at tests/ui/mutation/filter/filter_by_def_in_trait_impl.rs:15:5: 15:38 (#0)
+  (0) test_vec2
+
+targets: 1 total; 1 safe; 0 unsafe (0 tainted)
+
+generated 4 mutations in 20.00% of functions (1 out of 5 functions)
+found 6 conflicts (6 excluding unsafe mutations), 0 compatibilities
+
+@@@ mutations @@@
+
+1: [math_op_add_mul_swap] swap operator `+` for `*` in <Vec2 as std::ops::Add>::add at tests/ui/mutation/filter/filter_by_def_in_trait_impl.rs:16:14: 16:30
+  <-(0)- test_vec2
+
+2: [math_op_add_sub_swap] swap operator `+` for `-` in <Vec2 as std::ops::Add>::add at tests/ui/mutation/filter/filter_by_def_in_trait_impl.rs:16:14: 16:30
+  <-(0)- test_vec2
+
+3: [math_op_add_mul_swap] swap operator `+` for `*` in <Vec2 as std::ops::Add>::add at tests/ui/mutation/filter/filter_by_def_in_trait_impl.rs:16:32: 16:48
+  <-(0)- test_vec2
+
+4: [math_op_add_sub_swap] swap operator `+` for `-` in <Vec2 as std::ops::Add>::add at tests/ui/mutation/filter/filter_by_def_in_trait_impl.rs:16:32: 16:48
+  <-(0)- test_vec2
+
+       arg_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+       bit_op_or_xor_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    bit_op_shift_dir_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      bit_op_xor_and_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         bool_expr_negate:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+              call_delete:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+call_value_default_shadow:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+      continue_break_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+             eq_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+   logical_op_and_or_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_add_mul_swap: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+     math_op_add_sub_swap: 50.00%. 2 mutations; 2 safe; 0 unsafe (0 tainted)
+     math_op_div_rem_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     math_op_mul_div_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+         range_limit_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+    relational_op_eq_swap:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+     relational_op_invert:  0.00%. 0 mutations; 0 safe; 0 unsafe (0 tainted)
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)
