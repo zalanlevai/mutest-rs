@@ -131,8 +131,10 @@ fn main() {
         .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
         .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts.").value_parser(clap::value_parser!(PathBuf)))
         .next_help_heading("Manifest Options")
-        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
+        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to `Cargo.toml`."))
+        .arg(clap::arg!(--locked "Assert that `Cargo.lock` will remain unchanged."))
         .arg(clap::arg!(--offline "Run without accessing the network."))
+        .arg(clap::arg!(--frozen "Equivalent to specifying both `--locked` and `--offline`."))
         .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest run -h</>` to display additional options that can be specified for the running test harness."))
         .after_long_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest help run</>` to display additional options that can be specified for the running test harness."))
         .get_matches_from(&args);
@@ -390,9 +392,17 @@ fn main() {
         cmd.args(["--lib", "--bins", "--examples", "--tests"]);
     }
 
+    if matches.get_flag("locked") {
+        cmd.arg("--locked");
+        strip_arg(&mut mutest_args, false, None, Some("locked"));
+    }
     if matches.get_flag("offline") {
         cmd.arg("--offline");
         strip_arg(&mut mutest_args, false, None, Some("offline"));
+    }
+    if matches.get_flag("frozen") {
+        cmd.arg("--frozen");
+        strip_arg(&mut mutest_args, false, None, Some("frozen"));
     }
 
     let mut path = env::current_exe().expect("current executable path invalid");
