@@ -72,11 +72,11 @@ pub mod mutant_batch_greedy_ordering_heuristic {
 pub mod print {
     crate::opts! { ALL, pub(crate) possible_values where
         TESTS = "tests"; ["Print list of test cases."]
-        TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
         CALL_GRAPH = "call-graph"; ["Print call graph of test cases."]
-        CONFLICT_GRAPH = "conflict-graph"; ["Print mutation conflict graph."]
-        COMPATIBILITY_GRAPH = "compatibility-graph"; ["Print mutation compatibility graph (i.e. the complement graph of the conflict graph)."]
+        TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
         MUTATIONS = "mutations"; ["Print list of generated mutations, optionally grouped into mutation batches."]
+        CONFLICT_GRAPH = "conflict-graph"; ["Print mutation conflict graph."]
+        COMPATIBILITY_GRAPH = "compatibility-graph"; ["Print mutation compatibility graph (i.e., the complement graph of the conflict graph)."]
         CODE = "code"; ["Print the generated code of the test harness."]
     }
 }
