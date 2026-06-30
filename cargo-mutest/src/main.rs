@@ -109,8 +109,9 @@ fn main() {
         // Cargo options.
         .arg(clap::arg!(--color [WHEN] "Output coloring."))
         .next_help_heading("Package Selection")
+        .arg(clap::arg!(-p --package [PACKAGE] "Test the specified packages.").action(clap::ArgAction::Append))
         .arg(clap::arg!(--workspace "Test all packages in the workspace."))
-        .arg(clap::arg!(-p --package [PACKAGE] "Package with the target to analyze."))
+        .arg(clap::arg!(--exclude [PACKAGE] "Exclude packages from testing.").action(clap::ArgAction::Append))
         .next_help_heading("Target Selection")
         .arg(clap::arg!(--lib "Test only this package's library unit tests."))
         .arg(clap::arg!(--bin [BINARY] "Test only the specified binary. This flag may be specified multiple times.").action(clap::ArgAction::Append))
@@ -279,13 +280,17 @@ fn main() {
     }
 
     // Package selection.
+    if let Some(packages) = matches.get_many::<String>("package") {
+        for package in packages { cmd.args(["--package", package]); }
+        strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
+    }
     if matches.get_flag("workspace") {
         cmd.arg("--workspace");
         strip_arg(&mut mutest_args, false, None, Some("workspace"));
     }
-    if let Some(package) = matches.get_one::<String>("package") {
-        cmd.args(["--package", package]);
-        strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
+    if let Some(packages) = matches.get_many::<String>("exclude") {
+        for package in packages { cmd.args(["--exclude", package]); }
+        strip_arg(&mut mutest_args, true, None, Some("exclude"));
     }
 
     // Feature selection.
@@ -447,7 +452,8 @@ fn main() {
 
     if open {
         // NOTE: Only attempt to open a specific target if only one was selected.
-        if let Some(package) = matches.get_one::<String>("package") {
+        let mut packages_iter = matches.get_many::<String>("package").into_iter().flatten();
+        if let Some(package) = packages_iter.next() && let None = packages_iter.next() {
             if explicit_targetings_count == 1 {
                 match () {
                     _ if matches.get_flag("lib") => { cmd.arg(format!("--open={}/lib", package)); }
