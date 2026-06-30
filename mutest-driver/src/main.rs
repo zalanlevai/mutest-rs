@@ -289,10 +289,10 @@ pub fn main() {
             let mut print_opts = config::PrintOptions {
                 print_headers: print_names.len() > 1,
                 tests: None,
-                mutation_targets: None,
                 call_graph: None,
-                conflict_graph: None,
+                mutation_targets: None,
                 mutations: None,
+                conflict_graph: None,
                 code: None,
             };
 
@@ -309,7 +309,6 @@ pub fn main() {
             for print_name in print_names {
                 match print_name {
                     opts::TESTS => print_opts.tests = Some(()),
-                    opts::TARGETS => print_opts.mutation_targets = Some(()),
                     opts::CALL_GRAPH => {
                         let entry_point_filters = mutest_arg_matches.get_many::<String>("call-graph-filter-entry-points").map(|s| s.map(|f| f.trim().to_owned()).collect::<Vec<_>>()).unwrap_or_default();
                         let non_local_call_view = {
@@ -322,12 +321,13 @@ pub fn main() {
                         };
                         print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, entry_point_filters, non_local_call_view });
                     }
+                    opts::TARGETS => print_opts.mutation_targets = Some(()),
+                    opts::MUTATIONS => print_opts.mutations = Some(()),
                     opts::CONFLICT_GRAPH | opts::COMPATIBILITY_GRAPH => {
                         let compatibility_graph = matches!(print_name, opts::COMPATIBILITY_GRAPH);
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
                         print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format: graph_format });
                     }
-                    opts::MUTATIONS => print_opts.mutations = Some(()),
                     opts::CODE => print_opts.code = Some(()),
                     _ => unreachable!("invalid print information name: `{print_name}`"),
                 }
