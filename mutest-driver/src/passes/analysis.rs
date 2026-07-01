@@ -23,7 +23,7 @@ use crate::passes::external_mutant::{ExternalTargets, StableTarget};
 use crate::passes::external_mutant::crate_const_storage;
 use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationRequest;
 use crate::print::{print_call_graph, print_mutations, print_mutation_graph, print_targets, print_tests};
-use crate::write::{write_call_graph, write_mutations, write_tests, write_timings};
+use crate::write::{write_call_graph, write_mutations, write_tests};
 
 pub struct AnalysisPassResult {
     pub duration: Duration,
@@ -197,20 +197,16 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 .unwrap_or_default();
             pass_result.test_discovery_duration = t_test_discovery_start.elapsed();
 
-            if let Some(write_opts) = &opts.write_opts && opts.crate_kind.provides_tests() {
+            if opts.outputs.contains(&config::OutputKind::Metadata) && opts.crate_kind.provides_tests() {
                 let t_write_start = Instant::now();
-                write_tests(write_opts, tcx, &tests, pass_result.test_discovery_duration);
+                write_tests(&opts.write_opts, tcx, &tests, pass_result.test_discovery_duration);
                 pass_result.write_duration += t_write_start.elapsed();
             }
 
             if let Some(_) = opts.print_opts.tests.take() && opts.crate_kind.provides_tests() {
                 if opts.print_opts.print_headers { println!("\n@@@ tests @@@\n"); }
                 print_tests(&tests);
-                if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
-                    if let Some(write_opts) = &opts.write_opts {
-                        pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
-                    }
+                if opts.outputs.last().copied() == Some(config::OutputKind::PrintInfo) && opts.print_opts.is_empty() {
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (write {write:.2?})",
                             total = t_start.elapsed(),
@@ -294,9 +290,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     let (call_graph, mut reachable_fns) = mutest_emit::analysis::call_graph::reachable_fns(tcx, &def_res, &generated_crate_ast, entry_points, targeting, call_graph_depth_limit, call_graph_trace_length_limit);
                     let reachable_fns_count = reachable_fns.len();
                     let mut json_definitions = Default::default();
-                    if let Some(write_opts) = &opts.write_opts {
+                    if opts.outputs.contains(&config::OutputKind::Metadata) {
                         let t_write_start = Instant::now();
-                        json_definitions = write_call_graph(write_opts, tcx, all_mutable_fns_count, entry_points, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
+                        json_definitions = write_call_graph(&opts.write_opts, tcx, all_mutable_fns_count, entry_points, &call_graph, &reachable_fns, t_target_analysis_start.elapsed());
                         pass_result.write_duration += t_write_start.elapsed();
                     }
                     if opts.verbosity >= 1 {
@@ -333,12 +329,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     if let Some(config::CallGraphOptions { format, entry_point_filters, non_local_call_view }) = opts.print_opts.call_graph.take() {
                         if opts.print_opts.print_headers { println!("\n@@@ call graph @@@\n"); }
                         print_call_graph(tcx, entry_points, &call_graph, &reachable_fns, format, &entry_point_filters, non_local_call_view);
-                        if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
-                            if let Some(write_opts) = &opts.write_opts {
-                                pass_result.duration = t_start.elapsed();
-                                pass_result.target_analysis_duration = t_target_analysis_start.elapsed();
-                                write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
-                            }
+                        if opts.outputs.last().copied() == Some(config::OutputKind::PrintInfo) && opts.print_opts.is_empty() {
                             if opts.report_timings {
                                 println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
                                     total = t_start.elapsed(),
@@ -397,11 +388,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     if let Some(_) = opts.print_opts.mutation_targets.take() {
                         if opts.print_opts.print_headers { println!("\n@@@ targets @@@\n"); }
                         print_targets(tcx, &opts.crate_kind, &targets, opts.unsafe_targeting);
-                        if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
-                            if let Some(write_opts) = &opts.write_opts {
-                                pass_result.duration = t_start.elapsed();
-                                write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
-                            }
+                        if opts.outputs.last().copied() == Some(config::OutputKind::PrintInfo) && opts.print_opts.is_empty() {
                             if opts.report_timings {
                                 println!("\nfinished in {total:.2?} (targets {targets:.2?}; write {write:.2?})",
                                     total = t_start.elapsed(),
@@ -561,11 +548,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     (true, false) => print_mutation_graph(&mutation_conflict_graph, mutations.iter(), mutation_conflict_graph.iter_compatibilities(), format),
                     (true, true) => print_mutation_graph(&mutation_conflict_graph, mutations_excluding_unsafe, mutation_conflict_graph.iter_compatibilities(), format),
                 }
-                if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
-                    if let Some(write_opts) = &opts.write_opts {
-                        pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
-                    }
+                if opts.outputs.last().copied() == Some(config::OutputKind::PrintInfo) && opts.print_opts.is_empty() {
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; conflicts {conflicts:.2?}; write {write:.2?})",
                             total = t_start.elapsed(),
@@ -650,20 +633,16 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 }
             };
 
-            if let Some(write_opts) = &opts.write_opts {
+            if opts.outputs.contains(&config::OutputKind::Metadata) {
                 let t_write_start = Instant::now();
-                write_mutations(write_opts, tcx, all_mutable_fns_count, &json_definitions, &targets, &mutations, opts.unsafe_targeting, &mutation_conflict_graph, mutation_parallelism, t_mutation_generation_start.elapsed());
+                write_mutations(&opts.write_opts, tcx, all_mutable_fns_count, &json_definitions, &targets, &mutations, opts.unsafe_targeting, &mutation_conflict_graph, mutation_parallelism, t_mutation_generation_start.elapsed());
                 pass_result.write_duration += t_write_start.elapsed();
             }
 
             if let Some(_) = opts.print_opts.mutations.take() {
                 if opts.print_opts.print_headers { println!("\n@@@ mutations @@@\n"); }
                 print_mutations(tcx, &mutations, mutation_batches.as_deref(), opts.unsafe_targeting, opts.verbosity);
-                if let config::Mode::Print = opts.mode && opts.print_opts.is_empty() {
-                    if let Some(write_opts) = &opts.write_opts {
-                        pass_result.duration = t_start.elapsed();
-                        write_timings(write_opts, t_start.elapsed(), &pass_result, None, None);
-                    }
+                if opts.outputs.last().copied() == Some(config::OutputKind::PrintInfo) && opts.print_opts.is_empty() {
                     if opts.report_timings {
                         println!("\nfinished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; write {write:.2?})",
                             total = t_start.elapsed(),

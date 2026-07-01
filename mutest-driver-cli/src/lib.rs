@@ -112,8 +112,6 @@ pub fn command() -> clap::Command {
         .name("mutest-rs")
         .version(VERSION_STR)
         .propagate_version(true)
-        .subcommand_required(true)
-        .arg_required_else_help(true)
         .disable_help_flag(true)
         .disable_version_flag(true)
         .styles({
@@ -124,15 +122,6 @@ pub fn command() -> clap::Command {
                 .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))).bold())
                 .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))))
         })
-        // Subcommands
-        .subcommand(clap::Command::new("print")
-            .display_order(2)
-            .about("Print information about analysis, without building.")
-        )
-        .subcommand(clap::Command::new("build")
-            .display_order(1)
-            .about("Build the test harness.")
-        )
         // Mutation-related Arguments
         .arg(clap::arg!(--safe "Avoid mutating code in contexts which contain `unsafe` blocks. [default]").display_order(111))
         .arg(clap::arg!(--cautious "Produce unsafe mutations in contexts which contain `unsafe` blocks.").display_order(112))
@@ -166,7 +155,6 @@ pub fn command() -> clap::Command {
         .arg(clap::arg!(--"call-graph-filter-entry-points" [ENTRY_POINTS] "Filter entry points to display the call graph for. Multiple may be specified, separated by commas.").value_delimiter(',').display_order(103))
         // Metadata-related Arguments
         .arg(clap::arg!(--"json-out-root-dir" [JSON_ROOT_DIR] "Write JSON metadata files into the specified output directory. By default, JSON metadata files are written to `target/mutest/json`.").value_parser(clap::value_parser!(PathBuf)).display_order(105))
-        .arg(clap::arg!(--"no-write-json" "Do not write JSON metadata files.").display_order(105))
         // Experimental Flags
         .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
         .arg(clap::arg!(--Zembedded "Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime.").display_order(500))

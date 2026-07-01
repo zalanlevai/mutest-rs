@@ -69,10 +69,7 @@ pub fn run(mut config: Config) -> CompilerResult<RunResult> {
         if config.opts.print_opts.print_headers { println!("\n@@@ code @@@\n"); }
         println!("{}", analysis_pass.generated_crate_code);
         if config.opts.print_opts.print_headers { println!(); }
-        if let config::Mode::Print = config.opts.mode && config.opts.print_opts.is_empty() {
-            if let Some(write_opts) = &config.opts.write_opts {
-                write_timings(write_opts, t_start.elapsed(), &analysis_pass, None, None);
-            }
+        if config.opts.outputs.last().copied() == Some(config::OutputKind::PrintInfo) && config.opts.print_opts.is_empty() {
             if config.opts.report_timings {
                 println!("finished in {total:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; codegen {codegen:.2?}; write {write:.2?})",
                     total = analysis_pass.duration,
@@ -98,21 +95,30 @@ pub fn run(mut config: Config) -> CompilerResult<RunResult> {
         specialized_external_mutant_crate = Some((crate_name, pass_result));
     }
 
-    let compilation_pass = passes::compilation::run(&config, &analysis_pass, specialized_external_mutant_crate.as_ref())?;
+    let compilation_pass = config.opts.outputs.contains(&config::OutputKind::TestBin).then(|| {
+        passes::compilation::run(&config, &analysis_pass, specialized_external_mutant_crate.as_ref())
+    }).transpose()?;
 
     if config.opts.report_timings {
-        if let Some(write_opts) = &config.opts.write_opts {
+        if config.opts.outputs.contains(&config::OutputKind::Metadata) {
             let specialized_external_mutant_pass = specialized_external_mutant_crate.as_ref().map(|(_, pass)| pass);
-            write_timings(write_opts, t_start.elapsed(), &analysis_pass, specialized_external_mutant_pass, Some(&compilation_pass));
+            write_timings(&config.opts.write_opts, t_start.elapsed(), &analysis_pass, specialized_external_mutant_pass, compilation_pass.as_ref());
         }
-        println!("finished in {total:.2?}",
-            total = t_start.elapsed(),
-        );
+
+        match &compilation_pass {
+            None => print!("finished in "),
+            Some(_) => {
+                println!("finished in {total:.2?}",
+                    total = t_start.elapsed(),
+                );
+                print!("analysis took ");
+            }
+        }
 
         match &specialized_external_mutant_crate {
             Some((_, specialized_external_mutant_pass)) => {
                 let Some(specialized_external_mutant_analysis_pass) = &specialized_external_mutant_pass.nested_run_result.analysis_pass else { unreachable!() };
-                println!("analysis took {analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?}; write {write:.2?})",
+                println!("{analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?}; write {write:.2?})",
                     analysis = analysis_pass.duration + specialized_external_mutant_analysis_pass.duration,
                     targets = analysis_pass.test_discovery_duration + analysis_pass.target_analysis_duration,
                     mutations = specialized_external_mutant_analysis_pass.mutation_generation_duration,
@@ -123,7 +129,7 @@ pub fn run(mut config: Config) -> CompilerResult<RunResult> {
                 );
             }
             None => {
-                println!("analysis took {analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?}; write {write:.2?})",
+                println!("{analysis:.2?} (targets {targets:.2?}; mutations {mutations:.2?}; batching {batching:.2?}; hygiene {hygiene:.2?}; codegen {codegen:.2?}; write {write:.2?})",
                     analysis = analysis_pass.duration,
                     targets = analysis_pass.test_discovery_duration + analysis_pass.target_analysis_duration,
                     mutations = analysis_pass.mutation_generation_duration,
@@ -135,25 +141,27 @@ pub fn run(mut config: Config) -> CompilerResult<RunResult> {
             }
         };
 
-        match &specialized_external_mutant_crate {
-            Some((_, specialized_external_mutant_pass)) => {
-                let Some(specialized_external_mutant_compilation_pass) = &specialized_external_mutant_pass.nested_run_result.compilation_pass else { unreachable!() };
-                println!("compilations took {total:.2?} (mutant {mutant:.2?}, tests {tests:.2?})",
-                    total = specialized_external_mutant_compilation_pass.duration + compilation_pass.duration,
-                    mutant = specialized_external_mutant_compilation_pass.duration,
-                    tests = compilation_pass.duration,
-                );
-            }
-            None => {
-                println!("compilation took {compilation:.2?}",
-                    compilation = compilation_pass.duration,
-                );
+        if let Some(compilation_pass) = &compilation_pass {
+            match &specialized_external_mutant_crate {
+                Some((_, specialized_external_mutant_pass)) => {
+                    let Some(specialized_external_mutant_compilation_pass) = &specialized_external_mutant_pass.nested_run_result.compilation_pass else { unreachable!() };
+                    println!("compilations took {total:.2?} (mutant {mutant:.2?}, tests {tests:.2?})",
+                        total = specialized_external_mutant_compilation_pass.duration + compilation_pass.duration,
+                        mutant = specialized_external_mutant_compilation_pass.duration,
+                        tests = compilation_pass.duration,
+                    );
+                }
+                None => {
+                    println!("compilation took {compilation:.2?}",
+                        compilation = compilation_pass.duration,
+                    );
+                }
             }
         }
     }
 
     run_result.analysis_pass = Some(analysis_pass);
     run_result.specialized_external_mutant_pass = specialized_external_mutant_crate.map(|(_, pass)| pass);
-    run_result.compilation_pass = Some(compilation_pass);
+    run_result.compilation_pass = compilation_pass;
     Ok(run_result)
 }
