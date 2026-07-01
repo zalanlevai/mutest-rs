@@ -113,6 +113,7 @@ fn main() {
         .subcommand(clap::Command::new("print")
             .about("Print information about analysis, without building.")
         )
+        .next_help_heading("Options")
         .arg(clap::arg!(--"no-emit-metadata" "Do not write JSON metadata files."))
         // Cargo options.
         .arg(clap::arg!(--color [WHEN] "Output coloring."))

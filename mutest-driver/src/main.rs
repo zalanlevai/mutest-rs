@@ -224,8 +224,9 @@ pub fn main() {
 
     let mutest_arg_matches = mutest_driver_cli::command()
         .no_binary_name(true)
+        .next_help_heading("Options")
         // Target-related Arguments
-        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER).display_order(200))
+        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER))
         .arg(clap::arg!(--emit [OUTPUT] "Outputs to emit for the crate, separated by commas. Compilation stops as soon as all emission goals have been met.").value_delimiter(',').value_parser(emit::possible_values()).default_value("all"))
         .get_matches_from(mutest_args.unwrap_or_default());
 
