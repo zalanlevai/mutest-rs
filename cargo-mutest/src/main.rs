@@ -46,9 +46,9 @@ fn test_strip_arg() {
     strip_arg(&mut args, true, None, Some("features"));
     assert_eq!(&[] as &[String], &args[..]);
 
-    let mut args = vec!["--features=all".to_owned(), "--json-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()];
+    let mut args = vec!["--features=all".to_owned(), "--metadata-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()];
     strip_arg(&mut args, true, None, Some("features"));
-    assert_eq!(&["--json-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
+    assert_eq!(&["--metadata-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
 }
 
 mod run_isolate {
@@ -103,7 +103,7 @@ fn main() {
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
             // Experimental Flags
-            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--json-out-root-dir`.").display_order(500))
+            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.").display_order(500))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
@@ -113,7 +113,7 @@ fn main() {
         .subcommand(clap::Command::new("print")
             .about("Print information about analysis, without building.")
         )
-        .arg(clap::arg!(--"no-write-json" "Do not write JSON metadata files."))
+        .arg(clap::arg!(--"no-emit-metadata" "Do not write JSON metadata files."))
         // Cargo options.
         .arg(clap::arg!(--color [WHEN] "Output coloring."))
         .next_help_heading("Package Selection")
@@ -418,8 +418,8 @@ fn main() {
     if cfg!(windows) { path.set_extension("exe"); }
     cmd.env("RUSTC_WORKSPACE_WRAPPER", path);
 
-    if matches.get_flag("no-write-json") {
-        strip_arg(&mut mutest_args, false, None, Some("no-write-json"));
+    if matches.get_flag("no-emit-metadata") {
+        strip_arg(&mut mutest_args, false, None, Some("no-emit-metadata"));
     } else {
         mutest_driver_outputs.push("metadata");
     }
@@ -431,14 +431,14 @@ fn main() {
         cmd.arg("--");
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
-        if !matches.get_flag("no-write-json") {
-            let out_dir = matches.get_one::<PathBuf>("json-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
+        if !matches.get_flag("no-emit-metadata") {
+            let out_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
             fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory at `{}`", out_dir.display()));
             // NOTE: The out dir path passed to the generated test binary must be canonicalized,
             //       as it will likely be run under a different cwd.
             let out_dir = out_dir.canonicalize().expect("cannot canonicalize out dir path");
             let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
-            cmd.arg(format!("--json-out-root-dir={out_dir}"));
+            cmd.arg(format!("--metadata-out-root-dir={out_dir}"));
         }
         cmd.args(&passed_args);
     }
@@ -462,7 +462,7 @@ fn main() {
     // NOTE: This replicates Cargo's action message styling, including the color and justification.
     color_print::ceprintln!("<green,bold>{:>12}</> inspector", "Running");
 
-    let json_root_dir = matches.get_one::<PathBuf>("json-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
+    let metadata_root_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
 
     let mut path = env::current_exe().expect("current executable path invalid");
     path.set_file_name("mutest-inspector");
@@ -470,8 +470,8 @@ fn main() {
 
     let mut cmd = Command::new(path);
 
-    cmd.arg("--json-root-dir");
-    cmd.arg(json_root_dir);
+    cmd.arg("--metadata-root-dir");
+    cmd.arg(metadata_root_dir);
 
     if let Some(port) = port { cmd.arg(format!("--port={port}")); }
 

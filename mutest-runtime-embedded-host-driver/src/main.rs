@@ -43,9 +43,9 @@ fn main() {
         .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
         .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').action(clap::ArgAction::Append).value_parser(print::possible_values()).display_order(101))
         // Metadata-related Arguments
-        .arg(clap::arg!(--"json-out-root-dir" [OUT_DIR] "Write JSON metadata files into the specified output directory.").value_parser(clap::value_parser!(PathBuf)).display_order(105))
+        .arg(clap::arg!(--"metadata-out-root-dir" [OUT_DIR] "Write JSON metadata files into the specified output directory.").value_parser(clap::value_parser!(PathBuf)).display_order(105))
         // Experimental Flags
-        .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--json-out-root-dir`.").display_order(500))
+        .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.").display_order(500))
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized,
         //        so the about text does not match that of the help flags.
@@ -92,7 +92,7 @@ fn main() {
     };
 
     let write_opts = 'write_opts: {
-        let Some(out_dir) = matches.get_one::<PathBuf>("json-out-root-dir").cloned() else {
+        let Some(out_dir) = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned() else {
             break 'write_opts None;
         };
         // TODO: Determine specific package target out dir path from the test bin being tested.
