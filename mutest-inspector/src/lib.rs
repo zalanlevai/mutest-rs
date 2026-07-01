@@ -33,17 +33,17 @@ use crate::syntax_highlight::SyntaxHighlighter;
 struct TargetMetadataDir {
     package: String,
     target: TargetSpec,
-    json_dir_path: PathBuf,
+    metadata_dir_path: PathBuf,
 }
 
-fn register_target_metadata_dir_if_exists(targets: &mut Vec<TargetMetadataDir>, package: &str, target: TargetSpec, json_dir_path: PathBuf) {
-    let mutations_json_file_path = json_dir_path.join("mutations.json");
+fn register_target_metadata_dir_if_exists(targets: &mut Vec<TargetMetadataDir>, package: &str, target: TargetSpec, metadata_dir_path: PathBuf) {
+    let mutations_json_file_path = metadata_dir_path.join("mutations.json");
     if !fs::exists(&mutations_json_file_path).expect(&format!("cannot read mutations metadata file `{}`", mutations_json_file_path.display())) { return; }
 
     targets.push(TargetMetadataDir {
         package: package.to_owned(),
         target,
-        json_dir_path,
+        metadata_dir_path,
     });
 }
 
@@ -65,11 +65,11 @@ fn register_nested_target_metadata_dirs(targets: &mut Vec<TargetMetadataDir>, pa
     }
 }
 
-fn discover_target_metadata_dirs_in_json_root_dir(json_root_dir_path: &Path) -> Vec<TargetMetadataDir> {
+fn discover_target_metadata_dirs_in_json_root_dir(metadata_root_dir_path: &Path) -> Vec<TargetMetadataDir> {
     let mut target_metadata_dirs = Vec::new();
 
-    for entry in fs::read_dir(json_root_dir_path).expect(&format!("cannot read json root directory `{}`", json_root_dir_path.display())) {
-        let entry = entry.expect(&format!("cannot read entry in json root directory `{}`", json_root_dir_path.display()));
+    for entry in fs::read_dir(metadata_root_dir_path).expect(&format!("cannot read metadata root directory `{}`", metadata_root_dir_path.display())) {
+        let entry = entry.expect(&format!("cannot read entry in json root directory `{}`", metadata_root_dir_path.display()));
         let json_package_dir_path = entry.path();
         if !json_package_dir_path.is_dir() { continue; }
 
@@ -97,15 +97,15 @@ struct TargetMetadata {
 }
 
 fn load_target_metadata(target_metadata_dir: TargetMetadataDir) -> TargetMetadata {
-    let call_graph_metadata_file_path = target_metadata_dir.json_dir_path.join("call_graph.json");
+    let call_graph_metadata_file_path = target_metadata_dir.metadata_dir_path.join("call_graph.json");
     let call_graph_metadata_file_str = fs::read_to_string(&call_graph_metadata_file_path).expect(&format!("cannot read call graph metadata file `{}`", call_graph_metadata_file_path.display()));
     let call_graph_metadata = serde_json::from_str::<mutest_json::call_graph::CallGraphInfo>(&call_graph_metadata_file_str).expect("cannot parse call graph metadata file");
 
-    let mutations_metadata_file_path = target_metadata_dir.json_dir_path.join("mutations.json");
+    let mutations_metadata_file_path = target_metadata_dir.metadata_dir_path.join("mutations.json");
     let mutations_metadata_file_str = fs::read_to_string(&mutations_metadata_file_path).expect(&format!("cannot read mutations metadata file `{}`", mutations_metadata_file_path.display()));
     let mutations_metadata = serde_json::from_str::<mutest_json::mutations::MutationsInfo>(&mutations_metadata_file_str).expect("cannot parse mutations metadata file");
 
-    let evaluation_metadata_file_path = target_metadata_dir.json_dir_path.join("evaluation.json");
+    let evaluation_metadata_file_path = target_metadata_dir.metadata_dir_path.join("evaluation.json");
     let evaluation_metadata_file_str = match fs::read_to_string(&evaluation_metadata_file_path) {
         Ok(v) => Some(v),
         Err(err) if let io::ErrorKind::NotFound = err.kind() => None,
@@ -134,10 +134,10 @@ fn load_target_metadata(target_metadata_dir: TargetMetadataDir) -> TargetMetadat
 pub async fn run(config: Config) {
     let t_start = Instant::now();
 
-    let target_metadata_dirs = discover_target_metadata_dirs_in_json_root_dir(&config.json_root_dir_path);
+    let target_metadata_dirs = discover_target_metadata_dirs_in_json_root_dir(&config.metadata_root_dir_path);
 
     if target_metadata_dirs.is_empty() {
-        println!("could not discover any targets in `{}`", config.json_root_dir_path.display());
+        println!("could not discover any targets in `{}`", config.metadata_root_dir_path.display());
         process::exit(1);
     }
 

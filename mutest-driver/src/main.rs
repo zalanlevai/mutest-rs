@@ -359,7 +359,7 @@ pub fn main() {
         };
 
         let write_opts = {
-            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("json-out-root-dir").cloned()
+            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("metadata-out-root-dir").cloned()
                 .unwrap_or_else(|| mutest_target_dir_root.clone().unwrap_or(PathBuf::from("target/mutest")).join("json"));
 
             if let Some(cargo_package_name) = env::var("CARGO_PKG_NAME").ok() {
