@@ -279,56 +279,51 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     let mut mutest_prints = BTreeSet::new();
     let mut exec_build_artifact = false;
     let mut expect_run_fail = false;
-    let mut mutest_subcommand: Option<&str> = None;
+    let mut mutest_outputs: Vec<&str> = vec!["info"];
     for directive in &directives {
         match directive.as_str() {
             action_directive @ ("print-tests" | "print-call-graph" | "print-targets" | "print-mutations" | "print-code" | "build" | "build: fail" | "run" | "run: fail") => {
-                // NOTE: The invariant here is that the moment any action directive resulting in the `build` subcommand is used,
+                // NOTE: The invariant here is that the moment any action directive resulting in the `test-bin` output is used,
                 //       then no other action directive of any kind can be specified afterwards.
                 //       This ensures the following:
                 //         1. `print-*` action directives must appear before any other action directive, e.g. `build`, and
                 //         2. the `build`, `build: fail`, `run`, `run: fail` action directives are mutually exclusive.
-                if let Some(previous_subcommand) = mutest_subcommand && previous_subcommand != "print" {
+                if mutest_outputs.contains(&"test-bin") {
                     results.ignored_tests_count += 1;
                     log_test(&name, TestResult::Ignored, Some("invalid action directives"));
                     return;
                 }
                 match action_directive {
                     "build" => {
-                        mutest_subcommand = Some("build");
+                        mutest_outputs.push("test-bin");
                     }
                     "build: fail" => {
                         expect_build_fail = true;
-                        mutest_subcommand = Some("build");
+                        mutest_outputs.push("test-bin");
                     }
                     "run" => {
                         exec_build_artifact = true;
-                        mutest_subcommand = Some("build")
+                        mutest_outputs.push("test-bin");
                     }
                     "run: fail" => {
                         exec_build_artifact = true;
                         expect_run_fail = true;
-                        mutest_subcommand = Some("build")
+                        mutest_outputs.push("test-bin");
                     }
                     "print-tests" => {
                         mutest_prints.insert("tests");
-                        mutest_subcommand.get_or_insert("print");
                     }
                     "print-call-graph" => {
                         mutest_prints.insert("call-graph");
-                        mutest_subcommand.get_or_insert("print");
                     }
                     "print-targets" => {
                         mutest_prints.insert("targets");
-                        mutest_subcommand.get_or_insert("print");
                     }
                     "print-mutations" => {
                         mutest_prints.insert("mutations");
-                        mutest_subcommand.get_or_insert("print");
                     }
                     "print-code" => {
                         mutest_prints.insert("code");
-                        mutest_subcommand.get_or_insert("print");
                     }
                     _ => unreachable!(),
                 };
@@ -380,7 +375,6 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
     // Set defaults.
     let edition = edition.unwrap_or("2018");
-    let mutest_subcommand = mutest_subcommand.unwrap_or("build");
 
     // HACK: We invoke mutest-driver directly, rather than through Cargo, which means
     //       we have to add `windows.lib` to the linker search path manually.
@@ -541,7 +535,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         cmd.args(["-L", AUX_OUT_DIR]);
     }
 
-    let mut mutest_args = vec!["--no-write-json".to_owned()];
+    let mut mutest_args = vec![format!("--emit={}", mutest_outputs.join(","))];
     let mut verifications = directives.iter().filter_map(|d| d.strip_prefix("verify:").map(str::trim))
         .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))
         .peekable();
@@ -563,7 +557,6 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     directives.iter().filter_map(|d| d.strip_prefix("mutest-flags:").map(str::trim))
         .flat_map(|flags| parse_args(flags).into_iter().map(str::to_owned))
         .collect_into(&mut mutest_args);
-    mutest_args.push(mutest_subcommand.to_owned());
     cmd.env("MUTEST_ENCODED_ARGS".to_owned(), mutest_args.join("\x1F"));
 
     // NOTE: Avoid passing on the `CARGO_*` environment variables from the test runner.

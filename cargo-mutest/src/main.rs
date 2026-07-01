@@ -88,9 +88,10 @@ fn main() {
         .bin_name("cargo mutest")
         .no_binary_name(true)
         .about("Mutation testing tools for Rust")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
         // Subcommands
         .subcommand(clap::Command::new("run")
-            .display_order(0)
             .about("Build and run the test harness.")
             .arg(clap::arg!(-i --inspect [INSPECT_OPTS] "Inspect mutations after evaluation. Options may be specified in the form `--inspect=[open][:<PORT>]`.").num_args(0..=1).require_equals(true).display_order(100))
             // Evaluation-related Arguments
@@ -106,6 +107,13 @@ fn main() {
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
+        .subcommand(clap::Command::new("build")
+            .about("Build the test harness.")
+        )
+        .subcommand(clap::Command::new("print")
+            .about("Print information about analysis, without building.")
+        )
+        .arg(clap::arg!(--"no-write-json" "Do not write JSON metadata files."))
         // Cargo options.
         .arg(clap::arg!(--color [WHEN] "Output coloring."))
         .next_help_heading("Package Selection")
@@ -142,9 +150,9 @@ fn main() {
     let embedded = matches.get_flag("Zembedded");
     let parallel_mutants = matches.get_flag("parallel-mutants");
 
-    let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
-        Some(("print", _)) => ("check", &["--profile", "test"], "print", None, None),
-        Some(("build", _)) => ("test", &["--no-run"], "build", None, None),
+    let (cargo_subcommand, cargo_args, mut mutest_driver_outputs, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
+        Some(("print", _)) => ("check", &["--profile", "test"], vec!["info"], None, None),
+        Some(("build", _)) => ("test", &["--no-run"], vec!["info", "test-bin"], None, None),
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
 
@@ -196,7 +204,7 @@ fn main() {
 
             if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
 
-            ("test", &["--no-fail-fast"], "build", Some(passed_args), inspect_opts)
+            ("test", &["--no-fail-fast"], vec!["info", "test-bin"], Some(passed_args), inspect_opts)
         }
         _ => unreachable!(),
     };
@@ -259,7 +267,7 @@ fn main() {
 
     let mut mutest_args = args.clone();
     let i = mutest_args.iter().position(|arg| matches.subcommand_name().is_some_and(|subcommand| arg == subcommand)).expect("subcommand not found in args");
-    mutest_args.splice(i.., [mutest_driver_subcommand.to_owned()]);
+    mutest_args.splice(i.., []);
 
     if let Some(color) = matches.get_one::<String>("color") {
         cmd.args(["--color", color]);
@@ -409,6 +417,13 @@ fn main() {
     path.set_file_name("mutest-driver");
     if cfg!(windows) { path.set_extension("exe"); }
     cmd.env("RUSTC_WORKSPACE_WRAPPER", path);
+
+    if matches.get_flag("no-write-json") {
+        strip_arg(&mut mutest_args, false, None, Some("no-write-json"));
+    } else {
+        mutest_driver_outputs.push("metadata");
+    }
+    mutest_args.push(format!("--emit={}", mutest_driver_outputs.join(",")));
 
     cmd.env("MUTEST_ENCODED_ARGS", mutest_args.join("\x1F"));
 
