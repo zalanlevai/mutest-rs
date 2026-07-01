@@ -9,6 +9,7 @@ extern crate rustc_interface;
 extern crate rustc_session;
 extern crate rustc_span;
 
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -164,6 +165,14 @@ mod crate_kind {
     }
 }
 
+mod emit {
+    mutest_driver_cli::opts! { ALL, pub(crate) possible_values where
+        INFO = "info"; ["Printed information requested via `--print`."]
+        METADATA = "metadata"; ["JSON mutation metadata."]
+        TEST_BIN = "test-bin"; ["Test binary."]
+    }
+}
+
 pub fn main() {
     let mut args = env::args().collect::<Vec<_>>();
 
@@ -214,9 +223,13 @@ pub fn main() {
     }
 
     let mutest_arg_matches = mutest_driver_cli::command()
+        .name("mutest-driver")
         .no_binary_name(true)
+        .about("Build a mutated crate using a rustc-compatible interface.")
+        .next_help_heading("Options")
         // Target-related Arguments
-        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER).display_order(200))
+        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER))
+        .arg(clap::arg!(--emit [OUTPUT] "Outputs to emit for the crate, separated by commas. Compilation stops as soon as all emission goals have been met.").value_delimiter(',').value_parser(emit::possible_values()).default_value("all"))
         .get_matches_from(mutest_args.unwrap_or_default());
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
@@ -271,10 +284,22 @@ pub fn main() {
             }
         };
 
-        let mode = match mutest_arg_matches.subcommand() {
-            Some(("print", _)) => config::Mode::Print,
-            Some(("build", _)) => config::Mode::Build,
-            _ => unreachable!(),
+        let outputs = {
+            use crate::emit as opts;
+
+            let mut emit_names = mutest_arg_matches.get_many::<String>("emit").map(|print| print.map(String::as_str).collect::<FxHashSet<_>>()).unwrap_or_default();
+            if emit_names.contains("all") { emit_names = FxHashSet::from_iter(opts::ALL.into_iter().map(|s| *s)); }
+
+            emit_names.into_iter()
+                .map(|emit_name| {
+                    match emit_name {
+                        opts::INFO => config::OutputKind::PrintInfo,
+                        opts::METADATA => config::OutputKind::Metadata,
+                        opts::TEST_BIN => config::OutputKind::TestBin,
+                        _ => unreachable!("invalid emit name: `{emit_name}`"),
+                    }
+                })
+                .collect::<BTreeSet<_>>()
         };
 
         let verbosity = mutest_arg_matches.get_count("verbose");
@@ -289,10 +314,10 @@ pub fn main() {
             let mut print_opts = config::PrintOptions {
                 print_headers: print_names.len() > 1,
                 tests: None,
-                mutation_targets: None,
                 call_graph: None,
-                conflict_graph: None,
+                mutation_targets: None,
                 mutations: None,
+                conflict_graph: None,
                 code: None,
             };
 
@@ -309,7 +334,6 @@ pub fn main() {
             for print_name in print_names {
                 match print_name {
                     opts::TESTS => print_opts.tests = Some(()),
-                    opts::TARGETS => print_opts.mutation_targets = Some(()),
                     opts::CALL_GRAPH => {
                         let entry_point_filters = mutest_arg_matches.get_many::<String>("call-graph-filter-entry-points").map(|s| s.map(|f| f.trim().to_owned()).collect::<Vec<_>>()).unwrap_or_default();
                         let non_local_call_view = {
@@ -322,12 +346,13 @@ pub fn main() {
                         };
                         print_opts.call_graph = Some(config::CallGraphOptions { format: graph_format, entry_point_filters, non_local_call_view });
                     }
+                    opts::TARGETS => print_opts.mutation_targets = Some(()),
+                    opts::MUTATIONS => print_opts.mutations = Some(()),
                     opts::CONFLICT_GRAPH | opts::COMPATIBILITY_GRAPH => {
                         let compatibility_graph = matches!(print_name, opts::COMPATIBILITY_GRAPH);
                         let exclude_unsafe = mutest_arg_matches.get_flag("graph-exclude-unsafe");
                         print_opts.conflict_graph = Some(config::ConflictGraphOptions { compatibility_graph, exclude_unsafe, format: graph_format });
                     }
-                    opts::MUTATIONS => print_opts.mutations = Some(()),
                     opts::CODE => print_opts.code = Some(()),
                     _ => unreachable!("invalid print information name: `{print_name}`"),
                 }
@@ -336,10 +361,8 @@ pub fn main() {
             print_opts
         };
 
-        let write_opts = 'write_opts: {
-            if mutest_arg_matches.get_flag("no-write-json") { break 'write_opts None; }
-
-            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("json-out-root-dir").cloned()
+        let write_opts = {
+            let mut out_dir = mutest_arg_matches.get_one::<PathBuf>("metadata-out-root-dir").cloned()
                 .unwrap_or_else(|| mutest_target_dir_root.clone().unwrap_or(PathBuf::from("target/mutest")).join("json"));
 
             if let Some(cargo_package_name) = env::var("CARGO_PKG_NAME").ok() {
@@ -373,7 +396,7 @@ pub fn main() {
                 fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory for crate at `{}`", out_dir.display()));
             }
 
-            Some(config::WriteOptions { out_dir })
+            config::WriteOptions { out_dir }
         };
 
         let unsafe_targeting = match () {
@@ -637,7 +660,7 @@ pub fn main() {
                 crate_kind,
                 cargo_target_kind,
 
-                mode,
+                outputs,
                 verbosity,
                 report_timings,
                 print_opts,

@@ -192,8 +192,10 @@ pub fn inject_runtime_crate_and_deps(config: &Config, compiler_config: &mut Comp
         }
     }
 
-    if let Some((visible_crate_name, specialized_external_mutant_crate_compilation)) = specialized_external_mutant_crate {
-        let mut file_path = specialized_external_mutant_crate_compilation.outputs.path(OutputType::Metadata).as_path().to_owned();
+    if let Some((visible_crate_name, specialized_external_mutant_crate_compilation)) = specialized_external_mutant_crate
+        && let Some(specialized_external_mutant_crate_outputs) = &specialized_external_mutant_crate_compilation.outputs
+    {
+        let mut file_path = specialized_external_mutant_crate_outputs.path(OutputType::Metadata).as_path().to_owned();
         file_path.set_extension("rlib");
 
         let Some(extern_entry) = externs.get_mut(visible_crate_name) else {

@@ -46,9 +46,9 @@ fn test_strip_arg() {
     strip_arg(&mut args, true, None, Some("features"));
     assert_eq!(&[] as &[String], &args[..]);
 
-    let mut args = vec!["--features=all".to_owned(), "--json-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()];
+    let mut args = vec!["--features=all".to_owned(), "--metadata-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()];
     strip_arg(&mut args, true, None, Some("features"));
-    assert_eq!(&["--json-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
+    assert_eq!(&["--metadata-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
 }
 
 mod run_isolate {
@@ -88,9 +88,10 @@ fn main() {
         .bin_name("cargo mutest")
         .no_binary_name(true)
         .about("Mutation testing tools for Rust")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
         // Subcommands
         .subcommand(clap::Command::new("run")
-            .display_order(0)
             .about("Build and run the test harness.")
             .arg(clap::arg!(-i --inspect [INSPECT_OPTS] "Inspect mutations after evaluation. Options may be specified in the form `--inspect=[open][:<PORT>]`.").num_args(0..=1).require_equals(true).display_order(100))
             // Evaluation-related Arguments
@@ -102,15 +103,24 @@ fn main() {
             // Printing-related Arguments
             .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
             // Experimental Flags
-            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--json-out-root-dir`.").display_order(500))
+            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.").display_order(500))
             // Passed arguments
             .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
         )
+        .subcommand(clap::Command::new("build")
+            .about("Build the test harness.")
+        )
+        .subcommand(clap::Command::new("print")
+            .about("Print information about analysis, without building.")
+        )
+        .next_help_heading("Options")
+        .arg(clap::arg!(--"no-emit-metadata" "Do not write JSON metadata files."))
         // Cargo options.
         .arg(clap::arg!(--color [WHEN] "Output coloring."))
         .next_help_heading("Package Selection")
+        .arg(clap::arg!(-p --package [PACKAGE] "Test the specified packages.").action(clap::ArgAction::Append))
         .arg(clap::arg!(--workspace "Test all packages in the workspace."))
-        .arg(clap::arg!(-p --package [PACKAGE] "Package with the target to analyze."))
+        .arg(clap::arg!(--exclude [PACKAGE] "Exclude packages from testing.").action(clap::ArgAction::Append))
         .next_help_heading("Target Selection")
         .arg(clap::arg!(--lib "Test only this package's library unit tests."))
         .arg(clap::arg!(--bin [BINARY] "Test only the specified binary. This flag may be specified multiple times.").action(clap::ArgAction::Append))
@@ -130,8 +140,10 @@ fn main() {
         .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
         .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts.").value_parser(clap::value_parser!(PathBuf)))
         .next_help_heading("Manifest Options")
-        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to Cargo.toml."))
+        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to `Cargo.toml`."))
+        .arg(clap::arg!(--locked "Assert that `Cargo.lock` will remain unchanged."))
         .arg(clap::arg!(--offline "Run without accessing the network."))
+        .arg(clap::arg!(--frozen "Equivalent to specifying both `--locked` and `--offline`."))
         .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest run -h</>` to display additional options that can be specified for the running test harness."))
         .after_long_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest help run</>` to display additional options that can be specified for the running test harness."))
         .get_matches_from(&args);
@@ -139,9 +151,9 @@ fn main() {
     let embedded = matches.get_flag("Zembedded");
     let parallel_mutants = matches.get_flag("parallel-mutants");
 
-    let (cargo_subcommand, cargo_args, mutest_driver_subcommand, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
-        Some(("print", _)) => ("check", &["--profile", "test"], "print", None, None),
-        Some(("build", _)) => ("test", &["--no-run"], "build", None, None),
+    let (cargo_subcommand, cargo_args, mut mutest_driver_outputs, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
+        Some(("print", _)) => ("check", &["--profile", "test"], vec!["info"], None, None),
+        Some(("build", _)) => ("test", &["--no-run"], vec!["info", "test-bin"], None, None),
         Some(("run", matches)) => {
             let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
 
@@ -193,7 +205,7 @@ fn main() {
 
             if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
 
-            ("test", &["--no-fail-fast"], "build", Some(passed_args), inspect_opts)
+            ("test", &["--no-fail-fast"], vec!["info", "test-bin"], Some(passed_args), inspect_opts)
         }
         _ => unreachable!(),
     };
@@ -256,7 +268,7 @@ fn main() {
 
     let mut mutest_args = args.clone();
     let i = mutest_args.iter().position(|arg| matches.subcommand_name().is_some_and(|subcommand| arg == subcommand)).expect("subcommand not found in args");
-    mutest_args.splice(i.., [mutest_driver_subcommand.to_owned()]);
+    mutest_args.splice(i.., []);
 
     if let Some(color) = matches.get_one::<String>("color") {
         cmd.args(["--color", color]);
@@ -279,13 +291,17 @@ fn main() {
     }
 
     // Package selection.
+    if let Some(packages) = matches.get_many::<String>("package") {
+        for package in packages { cmd.args(["--package", package]); }
+        strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
+    }
     if matches.get_flag("workspace") {
         cmd.arg("--workspace");
         strip_arg(&mut mutest_args, false, None, Some("workspace"));
     }
-    if let Some(package) = matches.get_one::<String>("package") {
-        cmd.args(["--package", package]);
-        strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
+    if let Some(packages) = matches.get_many::<String>("exclude") {
+        for package in packages { cmd.args(["--exclude", package]); }
+        strip_arg(&mut mutest_args, true, None, Some("exclude"));
     }
 
     // Feature selection.
@@ -385,9 +401,17 @@ fn main() {
         cmd.args(["--lib", "--bins", "--examples", "--tests"]);
     }
 
+    if matches.get_flag("locked") {
+        cmd.arg("--locked");
+        strip_arg(&mut mutest_args, false, None, Some("locked"));
+    }
     if matches.get_flag("offline") {
         cmd.arg("--offline");
         strip_arg(&mut mutest_args, false, None, Some("offline"));
+    }
+    if matches.get_flag("frozen") {
+        cmd.arg("--frozen");
+        strip_arg(&mut mutest_args, false, None, Some("frozen"));
     }
 
     let mut path = env::current_exe().expect("current executable path invalid");
@@ -395,20 +419,27 @@ fn main() {
     if cfg!(windows) { path.set_extension("exe"); }
     cmd.env("RUSTC_WORKSPACE_WRAPPER", path);
 
+    if matches.get_flag("no-emit-metadata") {
+        strip_arg(&mut mutest_args, false, None, Some("no-emit-metadata"));
+    } else {
+        mutest_driver_outputs.push("metadata");
+    }
+    mutest_args.push(format!("--emit={}", mutest_driver_outputs.join(",")));
+
     cmd.env("MUTEST_ENCODED_ARGS", mutest_args.join("\x1F"));
 
     if let Some(passed_args) = passed_args {
         cmd.arg("--");
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
-        if !matches.get_flag("no-write-json") {
-            let out_dir = matches.get_one::<PathBuf>("json-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
+        if !matches.get_flag("no-emit-metadata") {
+            let out_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
             fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory at `{}`", out_dir.display()));
             // NOTE: The out dir path passed to the generated test binary must be canonicalized,
             //       as it will likely be run under a different cwd.
             let out_dir = out_dir.canonicalize().expect("cannot canonicalize out dir path");
             let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
-            cmd.arg(format!("--json-out-root-dir={out_dir}"));
+            cmd.arg(format!("--metadata-out-root-dir={out_dir}"));
         }
         cmd.args(&passed_args);
     }
@@ -432,7 +463,7 @@ fn main() {
     // NOTE: This replicates Cargo's action message styling, including the color and justification.
     color_print::ceprintln!("<green,bold>{:>12}</> inspector", "Running");
 
-    let json_root_dir = matches.get_one::<PathBuf>("json-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
+    let metadata_root_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
 
     let mut path = env::current_exe().expect("current executable path invalid");
     path.set_file_name("mutest-inspector");
@@ -440,14 +471,15 @@ fn main() {
 
     let mut cmd = Command::new(path);
 
-    cmd.arg("--json-root-dir");
-    cmd.arg(json_root_dir);
+    cmd.arg("--metadata-root-dir");
+    cmd.arg(metadata_root_dir);
 
     if let Some(port) = port { cmd.arg(format!("--port={port}")); }
 
     if open {
         // NOTE: Only attempt to open a specific target if only one was selected.
-        if let Some(package) = matches.get_one::<String>("package") {
+        let mut packages_iter = matches.get_many::<String>("package").into_iter().flatten();
+        if let Some(package) = packages_iter.next() && let None = packages_iter.next() {
             if explicit_targetings_count == 1 {
                 match () {
                     _ if matches.get_flag("lib") => { cmd.arg(format!("--open={}/lib", package)); }

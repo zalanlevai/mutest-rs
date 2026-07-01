@@ -13,6 +13,6 @@ pub struct Options {
 }
 
 pub struct Config {
-    pub json_root_dir_path: PathBuf,
+    pub metadata_root_dir_path: PathBuf,
     pub opts: Options,
 }

@@ -72,11 +72,11 @@ pub mod mutant_batch_greedy_ordering_heuristic {
 pub mod print {
     crate::opts! { ALL, pub(crate) possible_values where
         TESTS = "tests"; ["Print list of test cases."]
-        TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
         CALL_GRAPH = "call-graph"; ["Print call graph of test cases."]
-        CONFLICT_GRAPH = "conflict-graph"; ["Print mutation conflict graph."]
-        COMPATIBILITY_GRAPH = "compatibility-graph"; ["Print mutation compatibility graph (i.e. the complement graph of the conflict graph)."]
+        TARGETS = "targets"; ["Print list of functions targeted for mutation at the specified depth."]
         MUTATIONS = "mutations"; ["Print list of generated mutations, optionally grouped into mutation batches."]
+        CONFLICT_GRAPH = "conflict-graph"; ["Print mutation conflict graph."]
+        COMPATIBILITY_GRAPH = "compatibility-graph"; ["Print mutation compatibility graph (i.e., the complement graph of the conflict graph)."]
         CODE = "code"; ["Print the generated code of the test harness."]
     }
 }
@@ -110,10 +110,9 @@ const VERSION_STR: &str = concat!(env!("CARGO_PKG_VERSION"), " (rustc ", env!("R
 pub fn command() -> clap::Command {
     let cmd = clap::command!()
         .name("mutest-rs")
+        .about("Mutation testing tools for Rust")
         .version(VERSION_STR)
         .propagate_version(true)
-        .subcommand_required(true)
-        .arg_required_else_help(true)
         .disable_help_flag(true)
         .disable_version_flag(true)
         .styles({
@@ -124,58 +123,50 @@ pub fn command() -> clap::Command {
                 .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))).bold())
                 .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))))
         })
-        // Subcommands
-        .subcommand(clap::Command::new("print")
-            .display_order(2)
-            .about("Print information about analysis, without building.")
-        )
-        .subcommand(clap::Command::new("build")
-            .display_order(1)
-            .about("Build the test harness.")
-        )
-        // Mutation-related Arguments
-        .arg(clap::arg!(--safe "Avoid mutating code in contexts which contain `unsafe` blocks. [default]").display_order(111))
-        .arg(clap::arg!(--cautious "Produce unsafe mutations in contexts which contain `unsafe` blocks.").display_order(112))
-        .arg(clap::arg!(--risky "Produce safe mutations in contexts which contain `unsafe` blocks.").display_order(113))
-        .arg(clap::arg!(--unsafe "Mutate code in `unsafe` blocks.").display_order(114))
-        .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "risky", "unsafe"]).multiple(false))
-        .arg(clap::arg!(--"mutation-operators" [MUTATION_OPERATORS] "Mutation operators to apply to the code, separated by commas.").value_delimiter(',').value_parser(mutation_operators::possible_values()).default_value("all").display_order(115))
-        .arg(clap::arg!(--"call-graph-depth-limit" [CALL_GRAPH_DEPTH_LIMIT] "Limit depth of call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
-        .arg(clap::arg!(--"call-graph-trace-length-limit" [CALL_GRAPH_TRACE_LENGTH_LIMIT] "Limit maximum length of analyzed call traces during call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)).display_order(150))
-        .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)).display_order(150))
-        .arg(clap::arg!(--"filter-mutations" [MUTATION_FILTERS]).value_delimiter(',').display_order(150)
-            .help("\
-                Filter mutations to only the ones specified by any of the filters. Multiple may be specified, seperated by commas. The following filters are available:\n\
-                * `def:<ITEM_PATH_TO_DEF>`: Only mutate the specified definition. The full canonical item path must be specified (e.g., `def:foo::bar::baz`, `def:Struct::function`, `def:<Struct as Trait>::function`).\n\
-                * `file:<PATH_TO_FILE>[:<LINE>[:<END_LINE>]]`: Only mutate the specified file, or the specified part of the file (e.g., `file:src/lib.rs`, `file:src/lib.rs:21`, `file:src/lib.rs:21:25`).
-            ")
-        )
-        .arg(clap::arg!(--"parallel-mutants" "Enable the parallel evaluation of mutations using dynamic mutation scheduling.").display_order(198))
-        .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to optionally batch mutations into parallel groups.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE).display_order(199))
-        .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single batch.").default_value("1").value_parser(clap::value_parser!(usize)).display_order(199))
-        .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching.").display_order(199))
-        .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(mutant_batch_greedy_ordering_heuristic::possible_values()).default_value(mutant_batch_greedy_ordering_heuristic::REVERSE_CONFLICTS).display_order(199))
-        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)).display_order(199))
-        // Printing-related Arguments
-        .arg(clap::arg!(--timings "Print timing information for each completed pass.").display_order(100))
-        .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0").display_order(100))
-        .arg(clap::arg!(--print [PRINT] "Print additional information during analysis. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(print::possible_values()).display_order(101))
-        .arg(clap::arg!(--"graph-exclude-unsafe" "Exclude unsafe mutations from the graph, only listing safe mutations.").display_order(102))
-        .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(graph_format::possible_values()).default_value(graph_format::SIMPLE).display_order(102))
-        .arg(clap::arg!(--"call-graph-non-local-calls" [CALL_GRAPH_NON_LOCAL_CALL_VIEW] "Mode to display non-local calls in the call graph.").value_parser(call_graph_non_local_call_view::possible_values()).default_value(call_graph_non_local_call_view::COLLAPSE).display_order(103))
-        .arg(clap::arg!(--"call-graph-filter-entry-points" [ENTRY_POINTS] "Filter entry points to display the call graph for. Multiple may be specified, separated by commas.").value_delimiter(',').display_order(103))
-        // Metadata-related Arguments
-        .arg(clap::arg!(--"json-out-root-dir" [JSON_ROOT_DIR] "Write JSON metadata files into the specified output directory. By default, JSON metadata files are written to `target/mutest/json`.").value_parser(clap::value_parser!(PathBuf)).display_order(105))
-        .arg(clap::arg!(--"no-write-json" "Do not write JSON metadata files.").display_order(105))
-        // Experimental Flags
-        .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()).display_order(500))
-        .arg(clap::arg!(--Zembedded "Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime.").display_order(500))
-        .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended.").display_order(500))
+        .next_help_heading("Options")
         // Information
         // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
         //        of the help flags.
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
-        .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true));
+        .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true))
+        // Metadata-related Arguments
+        .arg(clap::arg!(--"metadata-out-root-dir" [METADATA_ROOT_DIR] "Write JSON metadata files into the specified output directory. By default, JSON metadata files are written to `target/mutest/json`.").value_parser(clap::value_parser!(PathBuf)))
+        .next_help_heading("Print Options")
+        .arg(clap::arg!(--timings "Print timing information for each completed pass."))
+        .arg(clap::arg!(-v --verbose "Print more verbose information during execution.").action(clap::ArgAction::Count).default_value("0"))
+        .arg(clap::arg!(--print [PRINT] "Print additional information during analysis. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(print::possible_values()))
+        .arg(clap::arg!(--"graph-exclude-unsafe" "Exclude unsafe mutations from the graph, only listing safe mutations."))
+        .arg(clap::arg!(--"graph-format" [GRAPH_FORMAT] "Format to print the graph in.").value_parser(graph_format::possible_values()).default_value(graph_format::SIMPLE))
+        .arg(clap::arg!(--"call-graph-non-local-calls" [CALL_GRAPH_NON_LOCAL_CALL_VIEW] "Mode to display non-local calls in the call graph.").value_parser(call_graph_non_local_call_view::possible_values()).default_value(call_graph_non_local_call_view::COLLAPSE))
+        .arg(clap::arg!(--"call-graph-filter-entry-points" [ENTRY_POINTS] "Filter entry points to display the call graph for. Multiple may be specified, separated by commas.").value_delimiter(','))
+        .next_help_heading("Mutation Options")
+        .arg(clap::arg!(--safe "Avoid mutating code in contexts which contain `unsafe` blocks. [default]"))
+        .arg(clap::arg!(--cautious "Produce unsafe mutations in contexts which contain `unsafe` blocks."))
+        .arg(clap::arg!(--risky "Produce safe mutations in contexts which contain `unsafe` blocks."))
+        .arg(clap::arg!(--unsafe "Mutate code in `unsafe` blocks."))
+        .group(clap::ArgGroup::new("unsafe-targeting").args(&["safe", "cautious", "risky", "unsafe"]).multiple(false))
+        .arg(clap::arg!(--"mutation-operators" [MUTATION_OPERATORS] "Mutation operators to apply to the code, separated by commas.").value_delimiter(',').value_parser(mutation_operators::possible_values()).default_value("all"))
+        .arg(clap::arg!(--"call-graph-depth-limit" [CALL_GRAPH_DEPTH_LIMIT] "Limit depth of call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)))
+        .arg(clap::arg!(--"call-graph-trace-length-limit" [CALL_GRAPH_TRACE_LENGTH_LIMIT] "Limit maximum length of analyzed call traces during call graph analysis, which is complete by default.").value_parser(clap::value_parser!(usize)))
+        .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)))
+        .arg(clap::arg!(--"filter-mutations" [MUTATION_FILTERS]).value_delimiter(',')
+            .help("\
+                Filter mutations to only the ones specified by any of the filters. Multiple may be specified, seperated by commas. The following filters are available:\n\
+                * `def:<ITEM_PATH_TO_DEF>`: Only mutate the specified definition. The full canonical item path must be specified (e.g., `def:foo::bar::baz`, `def:Struct::function`, `def:<Struct as Trait>::function`).\n\
+                * `file:<PATH_TO_FILE>[:<LINE>[:<END_LINE>]]`: Only mutate the specified file, or the specified part of the file (e.g., `file:src/lib.rs`, `file:src/lib.rs:21`, `file:src/lib.rs:21:25`).\
+            ")
+        )
+        .next_help_heading("Mutation-Parallelism Options")
+        .arg(clap::arg!(--"parallel-mutants" "Enable the parallel evaluation of mutations using dynamic mutation scheduling."))
+        .arg(clap::arg!(--"mutant-batch-algorithm" [MUTANT_BATCH_ALGORITHM] "Algorithm to use to optionally batch mutations into parallel groups.").value_parser(mutant_batch_algorithm::possible_values()).default_value(mutant_batch_algorithm::NONE))
+        .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single batch.").default_value("1").value_parser(clap::value_parser!(usize)))
+        .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching."))
+        .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(mutant_batch_greedy_ordering_heuristic::possible_values()).default_value(mutant_batch_greedy_ordering_heuristic::REVERSE_CONFLICTS))
+        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)))
+        .next_help_heading("Experimental Options")
+        .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()))
+        .arg(clap::arg!(--Zembedded "Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime."))
+        .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended."));
 
     cmd
 }

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use mutest_emit::codegen::mutation::{Operators, UnsafeTargeting};
@@ -53,6 +54,13 @@ pub enum CargoTargetKind {
     Test,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum OutputKind {
+    PrintInfo,
+    Metadata,
+    TestBin,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum GraphFormat {
     Simple,
@@ -83,10 +91,10 @@ pub struct ConflictGraphOptions {
 pub struct PrintOptions {
     pub print_headers: bool,
     pub tests: Option<()>,
-    pub mutation_targets: Option<()>,
     pub call_graph: Option<CallGraphOptions>,
-    pub conflict_graph: Option<ConflictGraphOptions>,
+    pub mutation_targets: Option<()>,
     pub mutations: Option<()>,
+    pub conflict_graph: Option<ConflictGraphOptions>,
     pub code: Option<()>,
 }
 
@@ -94,10 +102,10 @@ impl PrintOptions {
     pub fn is_empty(&self) -> bool {
         true
             && self.tests.is_none()
-            && self.mutation_targets.is_none()
             && self.call_graph.is_none()
-            && self.conflict_graph.is_none()
+            && self.mutation_targets.is_none()
             && self.mutations.is_none()
+            && self.conflict_graph.is_none()
             && self.code.is_none()
     }
 }
@@ -105,11 +113,6 @@ impl PrintOptions {
 #[derive(Clone, Debug)]
 pub struct WriteOptions {
     pub out_dir: PathBuf,
-}
-
-pub enum Mode {
-    Print,
-    Build,
 }
 
 pub use mutest_emit::codegen::mutation::GreedyMutationBatchingOrderingHeuristic;
@@ -169,11 +172,11 @@ pub struct Options<'op, 'm> {
     pub crate_kind: CrateKind,
     pub cargo_target_kind: Option<CargoTargetKind>,
 
-    pub mode: Mode,
+    pub outputs: BTreeSet<OutputKind>,
     pub verbosity: u8,
     pub report_timings: bool,
     pub print_opts: PrintOptions,
-    pub write_opts: Option<WriteOptions>,
+    pub write_opts: WriteOptions,
     pub unsafe_targeting: UnsafeTargeting,
     pub operators: Operators<'op, 'm>,
     pub call_graph_depth_limit: Option<usize>,

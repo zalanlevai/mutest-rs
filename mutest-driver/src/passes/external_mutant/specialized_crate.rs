@@ -26,7 +26,7 @@ pub struct NestedRunResult {
 pub struct SpecializedMutantCrateCompilationResult {
     pub nested_run_result: NestedRunResult,
     pub duration: Duration,
-    pub outputs: Arc<OutputFilenames>,
+    pub outputs: Option<Arc<OutputFilenames>>,
 }
 
 pub fn compile_specialized_mutant_crate(
@@ -73,7 +73,7 @@ pub fn compile_specialized_mutant_crate(
             //       as the two crates represent a single pass.
             cargo_target_kind: config.opts.cargo_target_kind,
 
-            mode: config::Mode::Build,
+            outputs: config.opts.outputs.clone(),
             verbosity: config.opts.verbosity,
             // NOTE: We report timings for this compilation pass separately.
             report_timings: false,
@@ -110,8 +110,7 @@ pub fn compile_specialized_mutant_crate(
     }
 
     let run_result = run_result?;
-    let Some(compilation_pass) = &run_result.compilation_pass else { unreachable!("no compiled output from specialized mutant crate") };
-    let outputs = compilation_pass.outputs.clone();
+    let outputs = run_result.compilation_pass.as_ref().map(|compilation_pass| compilation_pass.outputs.clone());
 
     Ok(SpecializedMutantCrateCompilationResult {
         nested_run_result: NestedRunResult {
