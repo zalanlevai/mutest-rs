@@ -110,6 +110,7 @@ const VERSION_STR: &str = concat!(env!("CARGO_PKG_VERSION"), " (rustc ", env!("R
 pub fn command() -> clap::Command {
     let cmd = clap::command!()
         .name("mutest-rs")
+        .about("Mutation testing tools for Rust")
         .version(VERSION_STR)
         .propagate_version(true)
         .disable_help_flag(true)
