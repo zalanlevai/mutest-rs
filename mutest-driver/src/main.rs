@@ -222,10 +222,12 @@ pub fn main() {
         }));
     }
 
-    let mutest_arg_matches = mutest_driver_cli::command()
-        .name("mutest-driver")
-        .no_binary_name(true)
+    let mutest_arg_matches = mutest_driver_cli::command("mutest-driver")
         .about("Build a mutated crate using a rustc-compatible interface.")
+        .author("Zalán Bálint Lévai")
+        .version(mutest_driver_cli::VERSION_STR)
+        .styles(mutest_driver_cli::STYLES)
+        .no_binary_name(true)
         .next_help_heading("Options")
         // Target-related Arguments
         .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER))

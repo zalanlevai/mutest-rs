@@ -105,28 +105,25 @@ pub const fn rustc_version_str() -> &'static str {
     env!("RUSTC_VERSION_STR")
 }
 
-const VERSION_STR: &str = concat!(env!("CARGO_PKG_VERSION"), " (rustc ", env!("RUSTC_VERSION_STR"), ")");
+pub const VERSION_STR: &str = concat!(env!("CARGO_PKG_VERSION"), " (rustc ", env!("RUSTC_VERSION_STR"), ")");
 
-pub fn command() -> clap::Command {
-    let cmd = clap::command!()
-        .name("mutest-rs")
-        .about("Mutation testing tools for Rust")
-        .version(VERSION_STR)
-        .propagate_version(true)
+pub const STYLES: clap::builder::styling::Styles = {
+    use clap::builder::styling::*;
+    Styles::styled()
+        .header(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightGreen))).bold())
+        .usage(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightGreen))).bold())
+        .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))).bold())
+        .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))))
+};
+
+pub fn command(name: &'static str) -> clap::Command {
+    let cmd = clap::Command::new(name)
         .disable_help_flag(true)
         .disable_version_flag(true)
-        .styles({
-            use clap::builder::styling::*;
-            Styles::styled()
-                .header(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightGreen))).bold())
-                .usage(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightGreen))).bold())
-                .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))).bold())
-                .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))))
-        })
         .next_help_heading("Options")
         // Information
-        // FIXME: Regression; the `help` subcommand can no longer be customized, so the about text does not match that
-        //        of the help flags.
+        // FIXME: Regression; the `help` subcommand can no longer be customized,
+        //        so the about text does not match that of the help flags.
         .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
         .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true))
         // Metadata-related Arguments

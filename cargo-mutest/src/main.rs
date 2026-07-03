@@ -84,81 +84,81 @@ fn cargo_command_base() -> Command {
 fn main() {
     let args = env::args().skip(2).collect::<Vec<_>>();
 
-    let matches = mutest_driver_cli::command()
-        .bin_name("cargo mutest")
-        .no_binary_name(true)
+    let matches = clap::Command::new("cargo mutest")
         .about("Mutation testing tools for Rust")
+        .author("Zalán Bálint Lévai")
+        .version(mutest_driver_cli::VERSION_STR)
+        .styles(mutest_driver_cli::STYLES)
+        .no_binary_name(true)
+        .propagate_version(true)
         .subcommand_required(true)
         .arg_required_else_help(true)
-        // Subcommands
-        .subcommand(clap::Command::new("run")
-            .about("Build and run the test harness.")
-            .arg(clap::arg!(-i --inspect [INSPECT_OPTS] "Inspect mutations after evaluation. Options may be specified in the form `--inspect=[open][:<PORT>]`.").num_args(0..=1).require_equals(true).display_order(100))
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .subcommand(mutest_driver_cli::command("run")
+            .about("Generate mutations in the specified crate(s) and evaluate the project's tests against them.")
+            .next_help_heading("Options")
+            .arg(clap::arg!(--"no-emit-metadata" "Do not write JSON metadata files."))
+            .arg(clap::arg!(--"no-build" "Do not compile the generated mutation test harness."))
+            .arg(clap::arg!(--"no-run" "Do not run the generated mutation test harness."))
+            .arg(clap::arg!(--color [WHEN] "Output coloring."))
+            // NOTE: Whenever these change, the `strip_args` calls in `run_cargo_with_mutest_driver` have to be updated as well.
+            .next_help_heading("Evaluation Options")
+            .arg(clap::arg!(-i --inspect [INSPECT_OPTS] "Inspect mutations after evaluation. Options may be specified in the form `--inspect=[open][:<PORT>]`.").num_args(0..=1).require_equals(true).conflicts_with_all(["no-run", "no-build", "no-emit-metadata"]))
             // Evaluation-related Arguments
-            .arg(clap::arg!(--simulate [MUTATION_ID] "Evaluate tests for a single mutation.").value_parser(clap::value_parser!(u32)).conflicts_with_all(["flakes", "exhaustive", "print"]).display_order(110))
-            .arg(clap::arg!(--flakes [ITERATIONS_COUNT] "Perform mutation analysis multiple times to find flaky test-mutation pairs.").value_parser(clap::value_parser!(usize)).display_order(111))
-            .arg(clap::arg!(--exhaustive "Evaluate remaining tests, even if the mutation has already been detected by another test.").display_order(115))
-            .arg(clap::arg!(--isolate [ISOLATION_MODE] "Isolate tests of mutations into separate processes.").value_parser(run_isolate::possible_values()).default_value(run_isolate::UNSAFE).display_order(120))
-            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").display_order(120))
+            .arg(clap::arg!(--simulate [MUTATION_ID] "Evaluate tests for a single mutation.").value_parser(clap::value_parser!(u32)).conflicts_with_all(["flakes", "exhaustive", "print"]).conflicts_with_all(["no-run", "no-build"]))
+            .arg(clap::arg!(--flakes [ITERATIONS_COUNT] "Perform mutation analysis multiple times to find flaky test-mutation pairs.").value_parser(clap::value_parser!(usize)).conflicts_with_all(["no-run", "no-build"]))
+            .arg(clap::arg!(--exhaustive "Evaluate remaining tests, even if the mutation has already been detected by another test.").conflicts_with_all(["no-run", "no-build"]))
+            .arg(clap::arg!(--isolate [ISOLATION_MODE] "Isolate tests of mutations into separate processes.").value_parser(run_isolate::possible_values()).default_value(run_isolate::UNSAFE).conflicts_with_all(["no-run", "no-build"]))
+            .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").conflicts_with_all(["no-run", "no-build"]))
             // Printing-related Arguments
-            .arg(clap::arg!(--print [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).display_order(101))
+            .arg(clap::arg!(--"eval-print" [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).conflicts_with_all(["no-run", "no-build"]))
             // Experimental Flags
-            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.").display_order(500))
+            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.").conflicts_with_all(["no-run", "no-build", "no-emit-metadata"]))
             // Passed arguments
-            .arg(clap::Arg::new("PASSED_ARGS").trailing_var_arg(true).allow_hyphen_values(true))
-        )
-        .subcommand(clap::Command::new("build")
-            .about("Build the test harness.")
-        )
-        .subcommand(clap::Command::new("print")
-            .about("Print information about analysis, without building.")
+            .arg(clap::arg!([PASSED_OPTIONS] ...).last(true).conflicts_with_all(["no-run", "no-build"]))
+            // Cargo options
+            .next_help_heading("Package Selection")
+            .arg(clap::arg!(-p --package [PACKAGE] "Test the specified packages.").action(clap::ArgAction::Append))
+            .arg(clap::arg!(--workspace "Test all packages in the workspace."))
+            .arg(clap::arg!(--exclude [PACKAGE] "Exclude packages from testing.").action(clap::ArgAction::Append))
+            .next_help_heading("Target Selection")
+            .arg(clap::arg!(--lib "Test only this package's library unit tests."))
+            .arg(clap::arg!(--bin [BINARY] "Test only the specified binary. This flag may be specified multiple times.").action(clap::ArgAction::Append))
+            .arg(clap::arg!(--bins "Test all binaries."))
+            .arg(clap::arg!(--example [EXAMPLE] "Test only the specified example. This flag may be specified multiple times.").action(clap::ArgAction::Append))
+            .arg(clap::arg!(--examples "Test all examples."))
+            .arg(clap::arg!(--test [TEST] "Test only the specified integration test. This flag may be specified multiple times.").action(clap::ArgAction::Append))
+            .arg(clap::arg!(--tests "Test all targets that have the `test = true` manifest flag set."))
+            .arg(clap::arg!(--"all-targets" "Test all targets."))
+            .next_help_heading("Feature Selection")
+            .arg(clap::arg!(-F --features [FEATURES]... "Space or comma separated list of features to activate."))
+            .arg(clap::arg!(--"all-features" "Activate all available features."))
+            .arg(clap::arg!(--"no-default-features" "Do not activate the `default` feature."))
+            .next_help_heading("Compilation Options")
+            .arg(clap::arg!(--target [TRIPLE] "Test for the given architecture. The default is the host architecture."))
+            .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
+            .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
+            .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts.").value_parser(clap::value_parser!(PathBuf)))
+            .next_help_heading("Manifest Options")
+            .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to `Cargo.toml`."))
+            .arg(clap::arg!(--locked "Assert that `Cargo.lock` will remain unchanged."))
+            .arg(clap::arg!(--offline "Run without accessing the network."))
+            .arg(clap::arg!(--frozen "Equivalent to specifying both `--locked` and `--offline`."))
         )
         .next_help_heading("Options")
-        .arg(clap::arg!(--"no-emit-metadata" "Do not write JSON metadata files."))
-        // Cargo options.
-        .arg(clap::arg!(--color [WHEN] "Output coloring."))
-        .next_help_heading("Package Selection")
-        .arg(clap::arg!(-p --package [PACKAGE] "Test the specified packages.").action(clap::ArgAction::Append))
-        .arg(clap::arg!(--workspace "Test all packages in the workspace."))
-        .arg(clap::arg!(--exclude [PACKAGE] "Exclude packages from testing.").action(clap::ArgAction::Append))
-        .next_help_heading("Target Selection")
-        .arg(clap::arg!(--lib "Test only this package's library unit tests."))
-        .arg(clap::arg!(--bin [BINARY] "Test only the specified binary. This flag may be specified multiple times.").action(clap::ArgAction::Append))
-        .arg(clap::arg!(--bins "Test all binaries."))
-        .arg(clap::arg!(--example [EXAMPLE] "Test only the specified example. This flag may be specified multiple times.").action(clap::ArgAction::Append))
-        .arg(clap::arg!(--examples "Test all examples."))
-        .arg(clap::arg!(--test [TEST] "Test only the specified integration test. This flag may be specified multiple times.").action(clap::ArgAction::Append))
-        .arg(clap::arg!(--tests "Test all targets that have the `test = true` manifest flag set."))
-        .arg(clap::arg!(--"all-targets" "Test all targets."))
-        .next_help_heading("Feature Selection")
-        .arg(clap::arg!(-F --features [FEATURES]... "Space or comma separated list of features to activate."))
-        .arg(clap::arg!(--"all-features" "Activate all available features."))
-        .arg(clap::arg!(--"no-default-features" "Do not activate the `default` feature."))
-        .next_help_heading("Compilation Options")
-        .arg(clap::arg!(--target [TRIPLE] "Test for the given architecture. The default is the host architecture."))
-        .arg(clap::arg!(-r --release "Build artifacts in release mode, with optimizations."))
-        .arg(clap::arg!(--profile [PROFILE] "Build artifacts with the specified profile."))
-        .arg(clap::arg!(--"target-dir" [TARGET_DIR] "Directory for all generated artifacts.").value_parser(clap::value_parser!(PathBuf)))
-        .next_help_heading("Manifest Options")
-        .arg(clap::arg!(--"manifest-path" [MANIFEST_PATH] "Path to `Cargo.toml`."))
-        .arg(clap::arg!(--locked "Assert that `Cargo.lock` will remain unchanged."))
-        .arg(clap::arg!(--offline "Run without accessing the network."))
-        .arg(clap::arg!(--frozen "Equivalent to specifying both `--locked` and `--offline`."))
-        .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest run -h</>` to display additional options that can be specified for the running test harness."))
-        .after_long_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest help run</>` to display additional options that can be specified for the running test harness."))
+        // FIXME: Regression; the `help` subcommand can no longer be customized,
+        //        so the about text does not match that of the help flags.
+        .arg(clap::arg!(-h --help "Print help information; this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
+        .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version).global(true))
+        .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest run -h</>` to see the options available for generating and evaluating mutations."))
+        .after_long_help(color_print::cstr!("Run `<bright-cyan,bold>cargo mutest help run</>` to see the options available for generating and evaluating mutations."))
         .get_matches_from(&args);
 
-    let embedded = matches.get_flag("Zembedded");
-    let parallel_mutants = matches.get_flag("parallel-mutants");
-
-    let (cargo_subcommand, cargo_args, mut mutest_driver_outputs, passed_args, inspect_opts): (_, &[&str], _, _, _) = match matches.subcommand() {
-        Some(("print", _)) => ("check", &["--profile", "test"], vec!["info"], None, None),
-        Some(("build", _)) => ("test", &["--no-run"], vec!["info", "test-bin"], None, None),
+    match matches.subcommand() {
         Some(("run", matches)) => {
-            let mut passed_args = matches.get_many::<String>("PASSED_ARGS").unwrap_or_default().map(ToOwned::to_owned).collect::<Vec<_>>();
-
             let inspect_opts = match matches.value_source("inspect") {
-                Some(clap::parser::ValueSource::CommandLine) if let Some(inspect_opts_str) = matches.get_one::<String>("inspect")=> {
+                Some(clap::parser::ValueSource::CommandLine) if let Some(inspect_opts_str) = matches.get_one::<String>("inspect") => {
                     let mut unparsed_str: &str = inspect_opts_str;
 
                     let mut open = false;
@@ -188,30 +188,188 @@ fn main() {
                 _ => None,
             };
 
-            if let Some(mutation_id) = matches.get_one::<u32>("simulate") { passed_args.push(format!("--simulate={mutation_id}")); }
-            if let Some(iterations_count) = matches.get_one::<usize>("flakes") { passed_args.push(format!("--flakes={iterations_count}")); }
-
-            if matches.get_flag("exhaustive") { passed_args.push("--exhaustive".to_owned()); }
-
-            if !embedded {
-                if let Some(isolation_mode) = matches.get_one::<String>("isolate") { passed_args.push(format!("--isolate={isolation_mode}")); }
-                // NOTE: `--parallel-mutants` requires the test thread pool, so we automatically set it.
-                if matches.get_flag("use-thread-pool") || parallel_mutants { passed_args.push("--use-thread-pool".to_owned()); }
+            // Remove subcommand from argument list for processing.
+            let mut args = &args[1..];
+            // Remove passed arguments from argument list for processing.
+            if let Some(rest_idx) = args.iter().position(|arg| arg == "--") {
+                args = &args[..rest_idx];
             }
 
-            let mut print_names = matches.get_many::<String>("print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();
-            if print_names.contains("all") { print_names = HashSet::from_iter(run_print::ALL.into_iter().map(|s| *s)); }
-            for print_name in print_names { passed_args.push(format!("--print={print_name}")); }
+            let mut cargo_invocation = process_cargo_args(&args, matches);
+            // NOTE: Our target directory lives within the real target directory,
+            //       whether specified explicitly through `--target-dir`, or implicitly chosen by Cargo.
+            cargo_invocation.target_dir.push("mutest");
 
-            if matches.get_flag("Zwrite-json-eval-stream") { passed_args.push("--Zwrite-json-eval-stream".to_owned()); }
+            run_cargo_with_mutest_driver(&cargo_invocation, matches);
 
-            ("test", &["--no-fail-fast"], vec!["info", "test-bin"], Some(passed_args), inspect_opts)
+            if let Some((open, port)) = inspect_opts {
+                run_mutest_inspector_from_cargo_invocation(open, port, &cargo_invocation, matches);
+            }
         }
         _ => unreachable!(),
+    }
+}
+
+struct CargoInvocation<'a> {
+    cargo_args: Vec<&'a str>,
+    non_cargo_args: Vec<String>,
+    target_dir: PathBuf,
+    explicit_targetings_count: usize,
+}
+
+fn process_cargo_args<'a>(args: &'a [String], matches: &'a clap::ArgMatches) -> CargoInvocation<'a> {
+    let mut cargo_args = vec![];
+    let mut non_cargo_args = args.to_vec();
+
+    // NOTE: `--color` may be interpreted by the wrapper invoked through Cargo, so we leave it in the non-Cargo args.
+    if let Some(color) = matches.get_one::<String>("color") {
+        cargo_args.extend(["--color", color]);
+    }
+
+    let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
+
+    if let Some(manifest_path) = matches.get_one::<String>("manifest-path") {
+        metadata_cmd.manifest_path(manifest_path);
+        cargo_args.extend(["--manifest-path", manifest_path]);
+        strip_arg(&mut non_cargo_args, true, None, Some("manifest-path"));
+    }
+
+    // Package selection.
+    if let Some(packages) = matches.get_many::<String>("package") {
+        for package in packages { cargo_args.extend(["--package", package]); }
+        strip_arg(&mut non_cargo_args, true, Some("p"), Some("package"));
+    }
+    if matches.get_flag("workspace") {
+        cargo_args.push("--workspace");
+        strip_arg(&mut non_cargo_args, false, None, Some("workspace"));
+    }
+    if let Some(packages) = matches.get_many::<String>("exclude") {
+        for package in packages { cargo_args.extend(["--exclude", package]); }
+        strip_arg(&mut non_cargo_args, true, None, Some("exclude"));
+    }
+
+    // Feature selection.
+    if let Some(features) = matches.get_many::<String>("features") {
+        metadata_cmd.features(cargo_metadata::CargoOpt::SomeFeatures(features.clone().map(ToOwned::to_owned).collect()));
+        for feature in features { cargo_args.extend(["--features", feature]); }
+        strip_arg(&mut non_cargo_args, true, Some("F"), Some("features"));
+    }
+    if matches.get_flag("all-features") {
+        metadata_cmd.features(cargo_metadata::CargoOpt::AllFeatures);
+        cargo_args.push("--all-features");
+        strip_arg(&mut non_cargo_args, false, None, Some("all-features"));
+    }
+    if matches.get_flag("no-default-features") {
+        metadata_cmd.features(cargo_metadata::CargoOpt::NoDefaultFeatures);
+        cargo_args.push("--no-default-features");
+        strip_arg(&mut non_cargo_args, false, None, Some("no-default-features"));
+    }
+
+    let cargo_metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
+
+    let target_dir = matches.get_one::<PathBuf>("target-dir").cloned().unwrap_or_else(|| cargo_metadata.target_directory.clone().into_std_path_buf());
+    strip_arg(&mut non_cargo_args, true, None, Some("target-dir"));
+
+    if let Some(target) = matches.get_one::<String>("target") {
+        cargo_args.extend(["--target", target]);
+        strip_arg(&mut non_cargo_args, true, None, Some("target"));
+    }
+
+    if matches.get_flag("release") {
+        cargo_args.push("--release");
+        strip_arg(&mut non_cargo_args, false, Some("r"), Some("release"));
+    }
+    if let Some(profile) = matches.get_one::<String>("profile") {
+        cargo_args.extend(["--profile", profile]);
+        strip_arg(&mut non_cargo_args, true, None, Some("profile"));
+    }
+
+    // Target selection.
+    let mut explicit_targetings_count = 0;
+    if matches.get_flag("lib") {
+        explicit_targetings_count += 1;
+        cargo_args.push("--lib");
+        strip_arg(&mut non_cargo_args, false, None, Some("lib"));
+    }
+    if let Some(bins) = matches.get_many::<String>("bin") {
+        for bin in bins {
+            explicit_targetings_count += 1;
+            cargo_args.extend(["--bin", bin]);
+        }
+        strip_arg(&mut non_cargo_args, true, None, Some("bin"));
+    }
+    if matches.get_flag("bins") {
+        explicit_targetings_count  += 1;
+        cargo_args.push("--bins");
+        strip_arg(&mut non_cargo_args, false, None, Some("bins"));
+    }
+    if let Some(examples) = matches.get_many::<String>("example") {
+        for example in examples {
+            explicit_targetings_count += 1;
+            cargo_args.extend(["--example", example]);
+        }
+        strip_arg(&mut non_cargo_args, true, None, Some("example"));
+    }
+    if matches.get_flag("examples") {
+        explicit_targetings_count += 1;
+        cargo_args.push("--examples");
+        strip_arg(&mut non_cargo_args, false, None, Some("examples"));
+    }
+    if let Some(tests) = matches.get_many::<String>("test") {
+        for test in tests {
+            explicit_targetings_count += 1;
+            cargo_args.extend(["--test", test]);
+        }
+        strip_arg(&mut non_cargo_args, true, None, Some("test"));
+    }
+    if matches.get_flag("tests") {
+        explicit_targetings_count += 1;
+        cargo_args.push("--tests");
+        strip_arg(&mut non_cargo_args, false, None, Some("tests"));
+    }
+    if matches.get_flag("all-targets") {
+        explicit_targetings_count += 1;
+        cargo_args.push("--all-targets");
+        strip_arg(&mut non_cargo_args, false, None, Some("all-targets"));
+    }
+
+    if matches.get_flag("locked") {
+        cargo_args.push("--locked");
+        strip_arg(&mut non_cargo_args, false, None, Some("locked"));
+    }
+    if matches.get_flag("offline") {
+        cargo_args.push("--offline");
+        strip_arg(&mut non_cargo_args, false, None, Some("offline"));
+    }
+    if matches.get_flag("frozen") {
+        cargo_args.push("--frozen");
+        strip_arg(&mut non_cargo_args, false, None, Some("frozen"));
+    }
+
+    CargoInvocation { cargo_args, non_cargo_args, target_dir, explicit_targetings_count }
+}
+
+fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &clap::ArgMatches) {
+    let mut mutest_args = cargo_invocation.non_cargo_args.clone();
+
+    let no_run = matches.get_flag("no-run");
+    if no_run { strip_arg(&mut mutest_args, false, None, Some("no-run")); }
+
+    let no_build = matches.get_flag("no-build");
+    if no_build { strip_arg(&mut mutest_args, false, None, Some("no-build")); }
+
+    let (cargo_subcommand, cargo_args): (_, &[&str]) = match () {
+        _ if no_build => ("check", &["--profile", "test"]),
+        _ if no_run => ("test", &["--no-run"]),
+        _ => ("test", &["--no-fail-fast"]),
     };
+
+    let mut mutest_driver_outputs = vec!["info"];
+    if !no_build { mutest_driver_outputs.push("test-bin") }
 
     let mut cmd = cargo_command_base();
 
+    let embedded = matches.get_flag("Zembedded");
     if embedded {
         let target = match matches.get_one::<String>("target") {
             Some(target) => target.clone(),
@@ -266,12 +424,7 @@ fn main() {
     cmd.arg(cargo_subcommand);
     cmd.args(cargo_args);
 
-    let mut mutest_args = args.clone();
-    let i = mutest_args.iter().position(|arg| matches.subcommand_name().is_some_and(|subcommand| arg == subcommand)).expect("subcommand not found in args");
-    mutest_args.splice(i.., []);
-
     if let Some(color) = matches.get_one::<String>("color") {
-        cmd.args(["--color", color]);
         strip_arg(&mut mutest_args, true, None, Some("color"));
         if color == "never" {
             // HACK: Indicate to mutest-driver that the explicit `--color=never` flag was passed.
@@ -282,115 +435,14 @@ fn main() {
         }
     }
 
-    let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
-
-    if let Some(manifest_path) = matches.get_one::<String>("manifest-path") {
-        metadata_cmd.manifest_path(manifest_path);
-        cmd.args(["--manifest-path", manifest_path]);
-        strip_arg(&mut mutest_args, true, None, Some("manifest-path"));
-    }
-
-    // Package selection.
-    if let Some(packages) = matches.get_many::<String>("package") {
-        for package in packages { cmd.args(["--package", package]); }
-        strip_arg(&mut mutest_args, true, Some("p"), Some("package"));
-    }
-    if matches.get_flag("workspace") {
-        cmd.arg("--workspace");
-        strip_arg(&mut mutest_args, false, None, Some("workspace"));
-    }
-    if let Some(packages) = matches.get_many::<String>("exclude") {
-        for package in packages { cmd.args(["--exclude", package]); }
-        strip_arg(&mut mutest_args, true, None, Some("exclude"));
-    }
-
-    // Feature selection.
-    if let Some(features) = matches.get_many::<String>("features") {
-        metadata_cmd.features(cargo_metadata::CargoOpt::SomeFeatures(features.clone().map(ToOwned::to_owned).collect()));
-        for feature in features { cmd.args(["--features", feature]); }
-        strip_arg(&mut mutest_args, true, Some("F"), Some("features"));
-    }
-    if matches.get_flag("all-features") {
-        metadata_cmd.features(cargo_metadata::CargoOpt::AllFeatures);
-        cmd.arg("--all-features");
-        strip_arg(&mut mutest_args, false, None, Some("all-features"));
-    }
-    if matches.get_flag("no-default-features") {
-        metadata_cmd.features(cargo_metadata::CargoOpt::NoDefaultFeatures);
-        cmd.arg("--no-default-features");
-        strip_arg(&mut mutest_args, false, None, Some("no-default-features"));
-    }
-
-    let metadata = metadata_cmd.exec().expect("could not retrieve Cargo metadata");
-
-    let target_dir = matches.get_one::<PathBuf>("target-dir").cloned().unwrap_or_else(|| metadata.target_directory.into_std_path_buf()).join("mutest");
     cmd.arg("--target-dir");
-    cmd.arg(&target_dir);
-    cmd.env("MUTEST_TARGET_DIR_ROOT", &target_dir);
+    cmd.arg(&cargo_invocation.target_dir);
+    cmd.env("MUTEST_TARGET_DIR_ROOT", &cargo_invocation.target_dir);
 
-    if let Some(target) = matches.get_one::<String>("target") {
-        cmd.args(["--target", target]);
-        strip_arg(&mut mutest_args, true, None, Some("target"));
-    }
+    cmd.args(&cargo_invocation.cargo_args);
 
-    if matches.get_flag("release") {
-        cmd.arg("--release");
-        strip_arg(&mut mutest_args, false, Some("r"), Some("release"));
-    }
-    if let Some(profile) = matches.get_one::<String>("profile") {
-        cmd.args(["--profile", profile]);
-        strip_arg(&mut mutest_args, true, None, Some("profile"));
-    }
-
-    // Target selection.
-    let mut explicit_targetings_count = 0;
-    if matches.get_flag("lib") {
-        explicit_targetings_count += 1;
-        cmd.arg("--lib");
-        strip_arg(&mut mutest_args, false, None, Some("lib"));
-    }
-    if let Some(bins) = matches.get_many::<String>("bin") {
-        for bin in bins {
-            explicit_targetings_count += 1;
-            cmd.args(["--bin", bin]);
-        }
-        strip_arg(&mut mutest_args, true, None, Some("bin"));
-    }
-    if matches.get_flag("bins") {
-        explicit_targetings_count  += 1;
-        cmd.arg("--bins");
-        strip_arg(&mut mutest_args, false, None, Some("bins"));
-    }
-    if let Some(examples) = matches.get_many::<String>("example") {
-        for example in examples {
-            explicit_targetings_count += 1;
-            cmd.args(["--example", example]);
-        }
-        strip_arg(&mut mutest_args, true, None, Some("example"));
-    }
-    if matches.get_flag("examples") {
-        explicit_targetings_count += 1;
-        cmd.arg("--examples");
-        strip_arg(&mut mutest_args, false, None, Some("examples"));
-    }
-    if let Some(tests) = matches.get_many::<String>("test") {
-        for test in tests {
-            explicit_targetings_count += 1;
-            cmd.args(["--test", test]);
-        }
-        strip_arg(&mut mutest_args, true, None, Some("test"));
-    }
-    if matches.get_flag("tests") {
-        explicit_targetings_count += 1;
-        cmd.arg("--tests");
-        strip_arg(&mut mutest_args, false, None, Some("tests"));
-    }
-    if matches.get_flag("all-targets") {
-        explicit_targetings_count += 1;
-        cmd.arg("--all-targets");
-        strip_arg(&mut mutest_args, false, None, Some("all-targets"));
-    }
-    if explicit_targetings_count == 0 {
+    // Explicitly specify supported targets if none was selected.
+    if cargo_invocation.explicit_targetings_count == 0 {
         // NOTE: We specifically do not target the following:
         //       * `--bench`/`--benches`: Benchmarks, for two reasons.
         //         First, the `#[bench]` attribute is currently a nigthly-only feature.
@@ -399,19 +451,6 @@ fn main() {
         //       * `--doc`: Documentation tests, as they require a completely different
         //         compilation and evaluation strategy that we do not currently support.
         cmd.args(["--lib", "--bins", "--examples", "--tests"]);
-    }
-
-    if matches.get_flag("locked") {
-        cmd.arg("--locked");
-        strip_arg(&mut mutest_args, false, None, Some("locked"));
-    }
-    if matches.get_flag("offline") {
-        cmd.arg("--offline");
-        strip_arg(&mut mutest_args, false, None, Some("offline"));
-    }
-    if matches.get_flag("frozen") {
-        cmd.arg("--frozen");
-        strip_arg(&mut mutest_args, false, None, Some("frozen"));
     }
 
     let mut path = env::current_exe().expect("current executable path invalid");
@@ -426,26 +465,57 @@ fn main() {
     }
     mutest_args.push(format!("--emit={}", mutest_driver_outputs.join(",")));
 
+    // Prevent evaluation arguments from being passed to mutest-driver.
+    strip_arg(&mut mutest_args, false, None, Some("inspect"));
+    strip_arg(&mut mutest_args, true, None, Some("simulate"));
+    strip_arg(&mut mutest_args, true, None, Some("flakes"));
+    strip_arg(&mut mutest_args, false, None, Some("exhaustive"));
+    strip_arg(&mut mutest_args, true, None, Some("isolate"));
+    strip_arg(&mut mutest_args, false, None, Some("use-thread-pool"));
+    strip_arg(&mut mutest_args, true, None, Some("eval-print"));
+    strip_arg(&mut mutest_args, false, None, Some("Zwrite-json-eval-stream"));
+
     cmd.env("MUTEST_ENCODED_ARGS", mutest_args.join("\x1F"));
 
-    if let Some(passed_args) = passed_args {
+    if !no_build && !no_run {
         cmd.arg("--");
+
+        let parallel_mutants = matches.get_flag("parallel-mutants");
+
+        if let Some(mutation_id) = matches.get_one::<u32>("simulate") { cmd.arg(format!("--simulate={mutation_id}")); }
+        if let Some(iterations_count) = matches.get_one::<usize>("flakes") { cmd.arg(format!("--flakes={iterations_count}")); }
+
+        if matches.get_flag("exhaustive") { cmd.arg("--exhaustive"); }
+
+        if !embedded {
+            if let Some(isolation_mode) = matches.get_one::<String>("isolate") { cmd.arg(format!("--isolate={isolation_mode}")); }
+            // NOTE: `--parallel-mutants` requires the test thread pool, so we automatically set it.
+            if matches.get_flag("use-thread-pool") || parallel_mutants { cmd.arg("--use-thread-pool"); }
+        }
+
+        let mut print_names = matches.get_many::<String>("eval-print").map(|print| print.map(String::as_str).collect::<HashSet<_>>()).unwrap_or_default();
+        if print_names.contains("all") { print_names = HashSet::from_iter(run_print::ALL.into_iter().map(|s| *s)); }
+        for print_name in print_names { cmd.arg(format!("--print={print_name}")); }
+
+        if matches.get_flag("Zwrite-json-eval-stream") { cmd.arg("--Zwrite-json-eval-stream"); }
+
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
         if !matches.get_flag("no-emit-metadata") {
-            let out_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
-            fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON output directory at `{}`", out_dir.display()));
+            let out_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| cargo_invocation.target_dir.join("json"));
+            fs::create_dir_all(&out_dir).expect(&format!("cannot create JSON metadata output directory at `{}`", out_dir.display()));
             // NOTE: The out dir path passed to the generated test binary must be canonicalized,
             //       as it will likely be run under a different cwd.
-            let out_dir = out_dir.canonicalize().expect("cannot canonicalize out dir path");
+            let out_dir = out_dir.canonicalize().expect("cannot canonicalize JSON metadata output directory path");
             let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
             cmd.arg(format!("--metadata-out-root-dir={out_dir}"));
         }
-        cmd.args(&passed_args);
-    }
 
-    // NOTE: Disable insta snapshot creation for mutated program tests.
-    cmd.env("INSTA_UPDATE", "no");
+        cmd.args(matches.get_many::<String>("PASSED_OPTIONS").unwrap_or_default());
+
+        // NOTE: Disable insta snapshot creation for mutated program tests.
+        cmd.env("INSTA_UPDATE", "no");
+    }
 
     let exit_status = cmd
         .spawn().expect("failed to run Cargo")
@@ -455,15 +525,13 @@ fn main() {
     if exit_code != Some(0) && exit_code != Some(101) {
         process::exit(exit_code.unwrap_or(-1));
     }
+}
 
-    let Some((open, port)) = inspect_opts else {
-        process::exit(exit_code.unwrap_or(-1));
-    };
-
+fn run_mutest_inspector_from_cargo_invocation(open: bool, port: Option<u16>, cargo_invocation: &CargoInvocation, matches: &clap::ArgMatches) {
     // NOTE: This replicates Cargo's action message styling, including the color and justification.
     color_print::ceprintln!("<green,bold>{:>12}</> inspector", "Running");
 
-    let metadata_root_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| target_dir.join("json"));
+    let metadata_root_dir = matches.get_one::<PathBuf>("metadata-out-root-dir").cloned().unwrap_or_else(|| cargo_invocation.target_dir.join("json"));
 
     let mut path = env::current_exe().expect("current executable path invalid");
     path.set_file_name("mutest-inspector");
@@ -480,7 +548,7 @@ fn main() {
         // NOTE: Only attempt to open a specific target if only one was selected.
         let mut packages_iter = matches.get_many::<String>("package").into_iter().flatten();
         if let Some(package) = packages_iter.next() && let None = packages_iter.next() {
-            if explicit_targetings_count == 1 {
+            if cargo_invocation.explicit_targetings_count == 1 {
                 match () {
                     _ if matches.get_flag("lib") => { cmd.arg(format!("--open={}/lib", package)); }
                     _ if let Some(target_name) = matches.get_one::<String>("bin") => { cmd.arg(format!("--open={}/bin:{}", package, target_name)); }
