@@ -82,14 +82,25 @@ fn cargo_command_base() -> Command {
 }
 
 fn main() {
-    let args = env::args().skip(2).collect::<Vec<_>>();
+    let mut args = env::args().collect::<Vec<_>>();
+    // NOTE: We determine whether we are
+    //       invoked through Cargo as a subcommand ('cargo mutest`) or as a standalone command (`cargo-mutest`)
+    //       based on Cargo's behavior of inserting the subcommand name after the binary path for external subcommands,
+    //       see https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands.
+    let bin_name = match args.get(1).map(String::as_str) == Some("mutest") {
+        true => {
+            args.remove(1);
+            "cargo mutest"
+        }
+        false => "cargo-mutest",
+    };
 
-    let matches = clap::Command::new("cargo mutest")
+    let matches = clap::Command::new("cargo-mutest")
+        .bin_name(bin_name)
         .about("Mutation testing tools for Rust")
         .author("Zalán Bálint Lévai")
         .version(mutest_driver_cli::VERSION_STR)
         .styles(mutest_driver_cli::STYLES)
-        .no_binary_name(true)
         .propagate_version(true)
         .subcommand_required(true)
         .arg_required_else_help(true)
@@ -188,8 +199,8 @@ fn main() {
                 _ => None,
             };
 
-            // Remove subcommand from argument list for processing.
-            let mut args = &args[1..];
+            // Remove binary path and subcommand from argument list for processing.
+            let mut args = &args[2..];
             // Remove passed arguments from argument list for processing.
             if let Some(rest_idx) = args.iter().position(|arg| arg == "--") {
                 args = &args[..rest_idx];
