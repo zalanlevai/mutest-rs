@@ -435,6 +435,9 @@ fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &cl
     cmd.arg(cargo_subcommand);
     cmd.args(cargo_args);
 
+    let cargo_verbosity = env::var("CARGO_VERBOSITY").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or_default();
+    cmd.args((0..cargo_verbosity).map(|_| "-v"));
+
     if let Some(color) = matches.get_one::<String>("color") {
         strip_arg(&mut mutest_args, true, None, Some("color"));
         if color == "never" {
