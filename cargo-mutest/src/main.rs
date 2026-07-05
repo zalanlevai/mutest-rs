@@ -82,7 +82,11 @@ fn cargo_command_base() -> Command {
 }
 
 fn main() {
-    let args = env::args().skip(2).collect::<Vec<_>>();
+    // Detects if called as `cargo mutest` and remove the first 2 arguments
+    // else only remove the first argument
+    let mut args = env::args().skip(1).peekable();
+    args.next_if(|x| env::var("CARGO").is_ok() &&  x == "mutest");
+    let args = args.collect::<Vec<_>>();
 
     let matches = mutest_driver_cli::command()
         .bin_name("cargo mutest")
