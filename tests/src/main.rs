@@ -500,8 +500,7 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
 
     cmd.args(["--out-dir", BUILD_OUT_DIR]);
 
-    // Trick mutest-driver into invoking its behaviour, rather than falling back to a rustc invocation.
-    cmd.env("CARGO_PRIMARY_PACKAGE", "1");
+    // NOTE: For mutest-driver to not fall back to a rustc invocation, we must have at least `cfg(test)` set.
     match no_harness {
         false => { cmd.arg("--test"); }
         true => { cmd.arg("--cfg=test"); }
