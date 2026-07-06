@@ -22,6 +22,7 @@ mutest-json = { path = "../mutest-json", features = ["rustc"] }
 mutest-operators = { path = "../mutest-operators" }
 
 clap = { version = "4", features = ["cargo"] }
+color-print = "0.3"
 
 cargo_metadata = "0.23"
 
