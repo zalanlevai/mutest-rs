@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command};
+use std::process;
 
 use mutest_driver::cargo_package_config;
 use mutest_driver::config::{self, Config};
@@ -41,44 +41,6 @@ impl rustc_driver::Callbacks for RustcCallbacks {
             mutest_driver::passes::track_invocation_fingerprint(parse_sess, args.as_deref());
         }));
     }
-}
-
-/// Fetch the sysroot, looking from most to least specific to this invocation:
-/// * runtime environment
-///   * `SYSROOT`
-///   * `RUSTUP_HOME` and `RUSTUP_TOOLCHAIN`
-///   * `MULTIRUST_HOME` and MULTIRUST_TOOLCHAIN
-/// * sysroot from rustc in the path
-/// * compile-time environment
-///   * `SYSROOT`
-///   * `RUSTUP_HOME` and `RUSTUP_TOOLCHAIN`
-///   * `MULTIRUST_HOME` and `MULTIRUST_TOOLCHAIN`
-fn fetch_sysroot() -> Option<PathBuf> {
-    fn toolchain_path(home: Option<String>, toolchain: Option<String>) -> Option<PathBuf> {
-        match (home, toolchain) {
-            (Some(home), Some(toolchain)) => {
-                let mut path = PathBuf::from(home);
-                path.push("toolchains");
-                path.push(toolchain);
-                Some(path)
-            }
-            _ => None,
-        }
-    }
-
-    env::var("SYSROOT").ok().map(PathBuf::from)
-        .or_else(|| toolchain_path(env::var("RUSTUP_HOME").ok(), env::var("RUSTUP_TOOLCHAIN").ok()))
-        .or_else(|| toolchain_path(env::var("MULTIRUST_HOME").ok(), env::var("MULTIRUST_TOOLCHAIN").ok()))
-        .or_else(|| {
-            Command::new("rustc")
-                .args(&["--print", "sysroot"])
-                .output().ok()
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .map(|s| PathBuf::from(s.trim()))
-        })
-        .or_else(|| option_env!("SYSROOT").map(PathBuf::from))
-        .or_else(|| toolchain_path(option_env!("RUSTUP_HOME").map(ToOwned::to_owned), option_env!("RUSTUP_TOOLCHAIN").map(ToOwned::to_owned)))
-        .or_else(|| toolchain_path(option_env!("MULTIRUST_HOME").map(ToOwned::to_owned), option_env!("MULTIRUST_TOOLCHAIN").map(ToOwned::to_owned)))
 }
 
 enum TestType {
@@ -178,15 +140,6 @@ pub fn main() {
 
     let rustc_wrapper = args.get(1).map(Path::new).and_then(Path::file_stem) == Some("rustc".as_ref());
     if rustc_wrapper { args.remove(1); }
-
-    let sysroot_arg = args.iter().find(|arg| arg.starts_with("--sysroot="))
-        .or_else(|| args.iter().position(|arg| arg == "--sysroot").and_then(|i| args.get(i + 1)));
-    let sysroot = sysroot_arg.map(PathBuf::from)
-        .or_else(|| fetch_sysroot())
-        .map(|path| path.to_string_lossy().to_string())
-        .expect("specify --sysroot argument or SYSROOT environment variable, or use rustup or multirust");
-
-    if sysroot_arg.is_none() { args.extend(["--sysroot".to_owned(), sysroot]); }
 
     // Make `mutest-driver --rustc` work like a subcommand that passes further args to rustc. For example
     // `mutest-driver --rustc --version` will print the rustc version that mutest-driver uses.
