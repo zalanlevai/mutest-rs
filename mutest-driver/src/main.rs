@@ -23,7 +23,7 @@ use mutest_emit::codegen::mutation::{OperatorRef, UnsafeTargeting};
 use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
 use rustc_session::EarlyDiagCtxt;
-use rustc_session::config::{ErrorOutputType, Input};
+use rustc_session::config::{CrateType, ErrorOutputType, Input};
 
 struct DefaultCallbacks;
 impl rustc_driver::Callbacks for DefaultCallbacks {}
@@ -199,16 +199,21 @@ pub fn main() {
         //       This is required for supporting alternative test harnesses, such as embedded-test.
         //       If ultimately no tests are discovered, we simply generate an "empty" no-op meta-mutant.
         || (args.iter().any(|arg| arg == "--cfg=test") || args.array_windows().any(|[a, b]| a == "--cfg" && b == "test"));
+    // NOTE: The crate type may be defined in source using a `#![crate_type = "..."] attribute,
+    //       which we check for later during the pseudo-pass that we use to get the compiler-parsed compiler config.
+    //       This is used for short-circuiting in the common case, where the compiler invocation has a `--crate-type` argument specified.
     let bin_target = args.iter().any(|arg| arg == "--crate-type=bin")
         || args.iter().position(|arg| arg == "--crate-type").is_some_and(|i| args.get(i + 1).is_some_and(|v| v == "bin"));
+    let proc_macro_target = args.iter().any(|arg| arg == "--crate-type=proc-macro")
+        || args.iter().position(|arg| arg == "--crate-type").is_some_and(|i| args.get(i + 1).is_some_and(|v| v == "proc-macro"));
 
     let mutest_args = None
         .or_else(|| env::var("MUTEST_ENCODED_ARGS").ok().map(|args| args.split('\x1F').map(ToOwned::to_owned).collect::<Vec<_>>()))
         .or_else(|| env::var("MUTEST_ARGS").ok().map(|args| args.split(' ').map(ToOwned::to_owned).collect::<Vec<_>>()));
     let mutest_args_str = mutest_args.as_ref().map(|mutest_args| mutest_args.join(" "));
 
-    // Fall back to a rustc invocation if mutest is not "enabled" for the given crate.
-    if info_query || (cargo_invocation && !primary_package) || (bin_target && !test_target) {
+    // Fall back to a rustc invocation if mutest is not "enabled" for the given crate based on invocation.
+    if info_query || (cargo_invocation && !primary_package) || proc_macro_target || (bin_target && !test_target) {
         process::exit(rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str })
         }));
@@ -217,7 +222,17 @@ pub fn main() {
     let mutest_arg_matches = mutest_command.get_matches_from(mutest_args.unwrap_or_default());
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
-        let compiler_config = mutest_driver::passes::parse_compiler_args(&args).expect("no compiler configuration was generated");
+        let (Some(compiler_config), crate_types) = mutest_driver::passes::parse_compiler_args(&args) else {
+            early_dcx.early_fatal("no compiler configuration was generated");
+        };
+
+        let bin_target = crate_types.contains(&CrateType::Executable);
+        let proc_macro_target = crate_types.contains(&CrateType::ProcMacro);
+        // Fall back to a rustc invocation if mutest is not "enabled" for the given crate based on its parsed crate type.
+        // NOTE: This includes `#![crate_type = "..."] crate root attributes.
+        if proc_macro_target || (bin_target && !test_target) {
+            return rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str });
+        }
 
         let early_dcx = EarlyDiagCtxt::new(compiler_config.opts.error_format);
 

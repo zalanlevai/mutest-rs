@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rustc_interface::interface::Result as CompilerResult;
-use rustc_session::config::OutputFilenames;
+use rustc_session::EarlyDiagCtxt;
+use rustc_session::config::{ErrorOutputType, OutputFilenames};
 
 use crate::config::{self, Config};
 use crate::passes::parse_compiler_args;
@@ -57,7 +58,10 @@ pub fn compile_specialized_mutant_crate(
         unsafe { env::remove_var(var) };
     }
 
-    let mut compiler_config = parse_compiler_args(&request.rustc_invocation.args).expect("no compiler configuration was generated");
+    let (Some(mut compiler_config), _crate_types) = parse_compiler_args(&request.rustc_invocation.args) else {
+        let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
+        early_dcx.early_fatal("no compiler configuration was generated");
+    };
 
     compiler_config.opts.cg.extra_filename = format!("{}{}", compiler_config.opts.cg.extra_filename, request.specialized_extra_filename);
 

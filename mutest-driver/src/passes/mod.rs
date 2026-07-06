@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
 
 use rustc_interface::Config as CompilerConfig;
-use rustc_session::config::{ExternEntry, ExternLocation, Externs, Input};
+use rustc_session::config::{CrateType, ExternEntry, ExternLocation, Externs, Input};
 use rustc_session::parse::ParseSess;
 use rustc_span::Symbol;
 use rustc_span::source_map::RealFileLoader;
@@ -96,6 +96,7 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
 
 struct RustcConfigCallbacks {
     config: Option<CompilerConfig>,
+    crate_types: Vec<CrateType>,
 }
 
 impl rustc_driver::Callbacks for RustcConfigCallbacks {
@@ -105,17 +106,21 @@ impl rustc_driver::Callbacks for RustcConfigCallbacks {
 
     fn after_crate_root_parsing(
         &mut self,
-        _compiler: &rustc_interface::interface::Compiler,
-        _krate: &mut rustc_ast::Crate,
+        compiler: &rustc_interface::interface::Compiler,
+        krate: &mut rustc_ast::Crate,
     ) -> rustc_driver::Compilation {
+        rustc_interface::create_and_enter_global_ctxt(compiler, krate.clone(), |tcx| {
+            self.crate_types = tcx.crate_types().to_vec();
+        });
+
         rustc_driver::Compilation::Stop
     }
 }
 
-pub fn parse_compiler_args(args: &[String]) -> Option<CompilerConfig> {
-    let mut callbacks = RustcConfigCallbacks { config: None };
+pub fn parse_compiler_args(args: &[String]) -> (Option<CompilerConfig>, Vec<CrateType>) {
+    let mut callbacks = RustcConfigCallbacks { config: None, crate_types: vec![] };
     rustc_driver::run_compiler(args, &mut callbacks);
-    callbacks.config
+    (callbacks.config, callbacks.crate_types)
 }
 
 pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_fingerprint: Option<&str>) {
