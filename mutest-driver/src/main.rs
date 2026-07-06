@@ -187,7 +187,8 @@ pub fn main() {
         }
     }
 
-    let normal_rustc = args.iter().any(|arg| arg.starts_with("--print"));
+    // HACK: This is an imperfect list of possible info queries, but matches what clippy-driver and cargo-miri does.
+    let info_query = args.iter().any(|arg| arg == "-vV" || arg.starts_with("--print"));
 
     let cargo_invocation = rustc_session::utils::was_invoked_from_cargo();
     let primary_package = env::var("CARGO_PRIMARY_PACKAGE").is_ok();
@@ -206,7 +207,7 @@ pub fn main() {
     let mutest_args_str = mutest_args.as_ref().map(|mutest_args| mutest_args.join(" "));
 
     // Fall back to a rustc invocation if mutest is not "enabled" for the given crate.
-    if normal_rustc || (cargo_invocation && !primary_package) || (bin_target && !test_target) {
+    if info_query || (cargo_invocation && !primary_package) || (bin_target && !test_target) {
         process::exit(rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str })
         }));
