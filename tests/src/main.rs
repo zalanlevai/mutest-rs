@@ -433,7 +433,10 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         // Set defaults.
         let edition = edition.unwrap_or("2018");
 
+        // Run mutest-driver in rustc mode, disabling mutations.
         let mut cmd = Command::new("target/release/mutest-driver");
+        cmd.arg("--rustc");
+
         cmd.arg(&aux_path);
         cmd.args(["--crate-name", aux_crate_name]);
         cmd.arg(format!("--edition={edition}"));
