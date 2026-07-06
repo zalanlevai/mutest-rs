@@ -434,9 +434,6 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
         let edition = edition.unwrap_or("2018");
 
         let mut cmd = Command::new("target/release/mutest-driver");
-        // We need to invoke mutest-driver as a rustc wrapper. This must be the first argument.
-        cmd.arg("/dummy/rustc");
-
         cmd.arg(&aux_path);
         cmd.args(["--crate-name", aux_crate_name]);
         cmd.arg(format!("--edition={edition}"));
@@ -492,9 +489,6 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut cmd = Command::new("target/release/mutest-driver");
-    // We need to invoke mutest-driver as a rustc wrapper. This must be the first argument.
-    cmd.arg("/dummy/rustc");
-
     cmd.arg(&path);
     cmd.args(["--crate-name", &test_crate_name]);
     cmd.arg(format!("--edition={edition}"));
