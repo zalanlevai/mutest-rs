@@ -187,14 +187,16 @@ pub fn main() {
         }
     }
 
+    let normal_rustc = args.iter().any(|arg| arg.starts_with("--print"));
+
+    let cargo_invocation = rustc_session::utils::was_invoked_from_cargo();
     let primary_package = env::var("CARGO_PRIMARY_PACKAGE").is_ok();
+
     let test_target = args.iter().any(|arg| arg == "--test")
         // NOTE: We attempt to mutate testing targets even if the libtest harness is disabled.
         //       This is required for supporting alternative test harnesses, such as embedded-test.
         //       If ultimately no tests are discovered, we simply generate an "empty" no-op meta-mutant.
         || (args.iter().any(|arg| arg == "--cfg=test") || args.array_windows().any(|[a, b]| a == "--cfg" && b == "test"));
-    let normal_rustc = args.iter().any(|arg| arg.starts_with("--print"));
-
     let bin_target = args.iter().any(|arg| arg == "--crate-type=bin")
         || args.iter().position(|arg| arg == "--crate-type").is_some_and(|i| args.get(i + 1).is_some_and(|v| v == "bin"));
 
@@ -203,7 +205,8 @@ pub fn main() {
         .or_else(|| env::var("MUTEST_ARGS").ok().map(|args| args.split(' ').map(ToOwned::to_owned).collect::<Vec<_>>()));
     let mutest_args_str = mutest_args.as_ref().map(|mutest_args| mutest_args.join(" "));
 
-    if normal_rustc || !primary_package || (bin_target && !test_target) {
+    // Fall back to a rustc invocation if mutest is not "enabled" for the given crate.
+    if normal_rustc || (cargo_invocation && !primary_package) || (bin_target && !test_target) {
         process::exit(rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str })
         }));
