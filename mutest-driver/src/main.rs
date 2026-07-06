@@ -23,7 +23,7 @@ use mutest_emit::codegen::mutation::{OperatorRef, UnsafeTargeting};
 use rustc_hash::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
 use rustc_session::EarlyDiagCtxt;
-use rustc_session::config::Input;
+use rustc_session::config::{ErrorOutputType, Input};
 
 struct DefaultCallbacks;
 impl rustc_driver::Callbacks for DefaultCallbacks {}
@@ -136,7 +136,8 @@ mod emit {
 }
 
 pub fn main() {
-    let mut args = env::args().collect::<Vec<_>>();
+    let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
+    let mut args = rustc_driver::args::raw_args(&early_dcx);
 
     // NOTE: When being invoked by Cargo through RUSTC_WRAPPER / RUSTC_WORKSPACE_WRAPPER,
     //       we are passed the path to rustc as the first argument.
