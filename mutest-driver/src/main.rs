@@ -144,15 +144,46 @@ pub fn main() {
     let rustc_wrapper = args.get(1).map(Path::new).and_then(Path::file_stem) == Some("rustc".as_ref());
     if rustc_wrapper { args.remove(1); }
 
-    // Make `mutest-driver --rustc` work like a subcommand that passes further args to rustc. For example
-    // `mutest-driver --rustc --version` will print the rustc version that mutest-driver uses.
+    // Make `mutest-driver --rustc` work like a subcommand that passes further args to rustc directly.
+    // For example, `mutest-driver --rustc --version` will print
+    // the rustc version of rustc_driver that mutest-driver is linked against.
+    // This is distinct from `mutest-driver --version`, which prints the version string of mutest-driver.
     if let Some(marker_arg_position) = args.iter().position(|arg| arg == "--rustc") {
         args.remove(marker_arg_position);
-        args[0] = "rustc".to_string();
+        args[0] = "rustc".to_owned();
 
         process::exit(rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut DefaultCallbacks)
         }));
+    }
+
+    // Parser for non-rustc, mutest-specific arguments provided through MUTEST_ARGS / MUTEST_ENCODED_ARGS.
+    let mutest_command = mutest_driver_cli::command("mutest-driver")
+        .about("Build a mutated crate using a rustc-compatible interface.")
+        .author("Zalán Bálint Lévai")
+        .version(mutest_driver_cli::VERSION_STR)
+        .styles(mutest_driver_cli::STYLES)
+        .no_binary_name(true)
+        .next_help_heading("Options")
+        // Target-related Arguments
+        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER))
+        .arg(clap::arg!(--emit [OUTPUT] "Outputs to emit for the crate, separated by commas. Compilation stops as soon as all emission goals have been met.").value_delimiter(',').value_parser(emit::possible_values()).default_value("all"));
+
+    if !rustc_wrapper {
+        // Forward help and version information invocations to their mutest-driver counterparts for convenience.
+        // NOTE: The exit calls are actually unreachable, but it is good to have them just in case.
+        if args.iter().any(|arg| arg == "-V" || arg == "--version") {
+            let _ = mutest_command.get_matches_from(["--version"]);
+            process::exit(0);
+        }
+        if args.iter().any(|arg| arg == "-h") {
+            let _ = mutest_command.get_matches_from(["-h"]);
+            process::exit(0);
+        }
+        if args.iter().any(|arg| arg == "--help") {
+            let _ = mutest_command.get_matches_from(["--help"]);
+            process::exit(0);
+        }
     }
 
     let primary_package = env::var("CARGO_PRIMARY_PACKAGE").is_ok();
@@ -177,17 +208,7 @@ pub fn main() {
         }));
     }
 
-    let mutest_arg_matches = mutest_driver_cli::command("mutest-driver")
-        .about("Build a mutated crate using a rustc-compatible interface.")
-        .author("Zalán Bálint Lévai")
-        .version(mutest_driver_cli::VERSION_STR)
-        .styles(mutest_driver_cli::STYLES)
-        .no_binary_name(true)
-        .next_help_heading("Options")
-        // Target-related Arguments
-        .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER))
-        .arg(clap::arg!(--emit [OUTPUT] "Outputs to emit for the crate, separated by commas. Compilation stops as soon as all emission goals have been met.").value_delimiter(',').value_parser(emit::possible_values()).default_value("all"))
-        .get_matches_from(mutest_args.unwrap_or_default());
+    let mutest_arg_matches = mutest_command.get_matches_from(mutest_args.unwrap_or_default());
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let compiler_config = mutest_driver::passes::parse_compiler_args(&args).expect("no compiler configuration was generated");
