@@ -138,6 +138,9 @@ mod emit {
 pub fn main() {
     let mut args = env::args().collect::<Vec<_>>();
 
+    // NOTE: When being invoked by Cargo through RUSTC_WRAPPER / RUSTC_WORKSPACE_WRAPPER,
+    //       we are passed the path to rustc as the first argument.
+    //       This is ignored, since we are using rustc_driver directly to invoke the compiler.
     let rustc_wrapper = args.get(1).map(Path::new).and_then(Path::file_stem) == Some("rustc".as_ref());
     if rustc_wrapper { args.remove(1); }
 
@@ -163,8 +166,7 @@ pub fn main() {
     let bin_target = args.iter().any(|arg| arg == "--crate-type=bin")
         || args.iter().position(|arg| arg == "--crate-type").is_some_and(|i| args.get(i + 1).is_some_and(|v| v == "bin"));
 
-    let mutest_args = (!rustc_wrapper)
-        .then_some(args.iter().skip(1).map(ToOwned::to_owned).collect::<Vec<_>>())
+    let mutest_args = None
         .or_else(|| env::var("MUTEST_ENCODED_ARGS").ok().map(|args| args.split('\x1F').map(ToOwned::to_owned).collect::<Vec<_>>()))
         .or_else(|| env::var("MUTEST_ARGS").ok().map(|args| args.split(' ').map(ToOwned::to_owned).collect::<Vec<_>>()));
     let mutest_args_str = mutest_args.as_ref().map(|mutest_args| mutest_args.join(" "));
