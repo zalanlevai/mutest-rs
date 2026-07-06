@@ -163,6 +163,7 @@ pub fn main() {
         .author("Zalán Bálint Lévai")
         .version(mutest_driver_cli::VERSION_STR)
         .styles(mutest_driver_cli::STYLES)
+        .override_usage(color_print::cstr!("<bright-blue,bold>[MUTEST_ARGS=\"<<MUTEST_OPTIONS>>\"] mutest-driver [<<RUSTC_PATH>>] [--rustc] [<<RUSTC_OPTIONS>>]</>"))
         .no_binary_name(true)
         .next_help_heading("Options")
         // Target-related Arguments
