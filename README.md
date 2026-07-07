@@ -58,10 +58,10 @@ cargo install --force --path cargo-mutest
 
 ## Usage
 
-Run the `cargo mutest` subcommand against a standard Cargo package or workspace directory containing your crate.
+Run the `cargo mutest run` subcommand against a standard Cargo package or workspace directory containing your crate.
 
 ```sh
-cargo mutest -p <PACKAGE> run
+cargo mutest run -p <PACKAGE>
 ```
 
 > [!TIP]
