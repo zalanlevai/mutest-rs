@@ -1514,7 +1514,19 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         if is_macro_helper_attr(&self.syntax_extensions, attr) {
             // Disable attribute by overriding it with an empty doc-comment.
             // This is easier than modifying every visit function to properly remove the attribute nodes.
-            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, sym::empty)
+            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, sym::empty);
+            return;
+        }
+
+        // In Rust 2024 `no_mangle`/`export_name`/`link_section` must be written as `unsafe(...)`.
+        // Macros from earlier-edition crates can emit the bare form, which is invalid once the
+        // generated crate is recompiled at the 2024 edition; wrap it to keep the round-trip valid.
+        if self.tcx.sess.edition().at_least_rust_2024()
+            && (attr.has_name(sym::no_mangle) || attr.has_name(sym::export_name) || attr.has_name(sym::link_section))
+            && let ast::AttrKind::Normal(normal) = &mut attr.kind
+            && let ast::Safety::Default = normal.item.unsafety
+        {
+            normal.item.unsafety = ast::Safety::Unsafe(DUMMY_SP);
         }
     }
 
