@@ -100,8 +100,10 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         }
     }
 
-    // NOTE: Some features are only valid if the std crate is loaded.
-    if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+    // NOTE: Some features are only valid if the std crate is loaded. We check for the loaded
+    //       crate rather than the absence of `#![no_std]`, which does not reliably survive to
+    //       this stage (e.g. under the external-mutant recompilation of a no_std crate).
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::std) {
         ensure_attrs! {
             #![feature(print_internals)]
             #![feature(libstd_sys_internals)]
@@ -122,7 +124,7 @@ pub fn insert_generated_code_crate_refs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::alloc) {
         // NOTE: For std-dependent crates, we often rewrite paths through alloc,
         //       which is the actual definition crate.
         //       However, these references can only be resolved correctly if an explicit
