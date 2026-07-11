@@ -656,7 +656,10 @@ pub mod mk {
     }
 
     pub fn expr_str(sp: Span, str: &str) -> Box<ast::Expr> {
-        self::expr_lit(sp, ast::token::LitKind::Str, Symbol::intern(str), None)
+        // Escape the string, since the literal's symbol is unescaped by rustc
+        // (e.g. backslashes in Windows paths would otherwise be invalid escapes).
+        let escaped = crate::analysis::diagnostic::escape_literal(str);
+        self::expr_lit(sp, ast::token::LitKind::Str, Symbol::intern(&escaped), None)
     }
 
     pub fn expr_tuple(sp: Span, exprs: ThinVec<Box<ast::Expr>>) -> Box<ast::Expr> {
