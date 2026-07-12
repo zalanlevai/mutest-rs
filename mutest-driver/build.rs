@@ -15,7 +15,6 @@ fn fetch_rlib_deps(crate_name: &str, rlib_path: &Path, deps_dir_path: &Path) -> 
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::atomic::AtomicBool;
 
-    use rustc_errors::registry::Registry;
     use rustc_interface::{Config as CompilerConfig, create_and_enter_global_ctxt, passes, run_compiler};
     use rustc_session::config::{ExternEntry, ExternLocation, Externs, Input, Options};
     use rustc_session::cstore::CrateSource;
@@ -53,15 +52,13 @@ fn fetch_rlib_deps(crate_name: &str, rlib_path: &Path, deps_dir_path: &Path) -> 
         output_file: None,
         ice_file: None,
         file_loader: None,
-        locale_resources: Default::default(),
         lint_caps: Default::default(),
         psess_created: None,
-        hash_untracked_state: None,
+        track_state: None,
         register_lints: None,
         override_queries: None,
         extra_symbols: Default::default(),
         make_codegen_backend: None,
-        registry: Registry::new(&[]),
         using_internal_features: {
             static USING_INTERNAL_FEATURES: AtomicBool = AtomicBool::new(false);
             &USING_INTERNAL_FEATURES
@@ -89,9 +86,9 @@ fn fetch_rlib_deps(crate_name: &str, rlib_path: &Path, deps_dir_path: &Path) -> 
 
                 let crate_source = tcx.used_crate_source(cnum);
                 let dep_path = match &**crate_source {
-                    CrateSource { rmeta: Some((rmeta_path, _)), .. } => rmeta_path.with_extension("rlib"),
-                    CrateSource { rlib: Some((rlib_path, _)), .. } => rlib_path.clone(),
-                    CrateSource { dylib: Some((dylib_path, _)), .. } => dylib_path.clone(),
+                    CrateSource { rmeta: Some(rmeta_path), .. } => rmeta_path.with_extension("rlib"),
+                    CrateSource { rlib: Some(rlib_path), .. } => rlib_path.clone(),
+                    CrateSource { dylib: Some(dylib_path), .. } => dylib_path.clone(),
                     _ => { continue; }
                 };
                 if !dep_path.starts_with(deps_dir_path) { continue; }

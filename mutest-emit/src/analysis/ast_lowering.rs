@@ -4,7 +4,8 @@ use std::ops::Deref;
 
 use itertools::Itertools;
 use rustc_data_structures::sync::HashMapExt;
-use rustc_hash::FxHashMap;
+use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::unord::{UnordItems, UnordMap};
 use rustc_middle::span_bug;
 use rustc_middle::ty::ResolverAstLowering;
 use thin_vec::ThinVec;
@@ -16,9 +17,9 @@ use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Span};
 
 pub struct DefResolutions {
-    pub node_id_to_def_id: ast::node_id::NodeMap<hir::LocalDefId>,
+    pub node_id_to_def_id: UnordMap<ast::NodeId, hir::LocalDefId>,
     pub partial_res_map: ast::node_id::NodeMap<hir::PartialRes>,
-    pub import_res_map: ast::node_id::NodeMap<hir::PerNS<Option<hir::Res<ast::NodeId>>>>,
+    pub import_res_map: UnordMap<ast::NodeId, hir::PerNS<Option<hir::Res<ast::NodeId>>>>,
 }
 
 impl DefResolutions {
@@ -31,10 +32,22 @@ impl DefResolutions {
     }
 
     pub fn from_resolver(resolver: &ResolverAstLowering) -> Self {
+        // Resolver data is stored per-owner; flatten it back into the node-keyed maps we need.
+        // The owner's own def id is not present in its `node_id_to_def_id`, so add it explicitly.
+        let node_id_to_def_id = resolver.owners.items()
+            .flat_map(|(_, owner)| {
+                owner.node_id_to_def_id.items()
+                    .map(|(&node_id, &def_id)| (node_id, def_id))
+                    .chain(UnordItems::new(iter::once((owner.id, owner.def_id))))
+            })
+            .collect();
+        let import_res_map = resolver.owners.items()
+            .map(|(_, owner)| (owner.id, owner.import_res))
+            .collect();
         Self {
-            node_id_to_def_id: resolver.node_id_to_def_id.clone(),
+            node_id_to_def_id,
             partial_res_map: resolver.partial_res_map.clone(),
-            import_res_map: resolver.import_res_map.clone(),
+            import_res_map,
         }
     }
 
@@ -48,7 +61,7 @@ impl DefResolutions {
 }
 
 pub mod visit {
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
     use std::iter;
 
     use rustc_abi::ExternAbi;
@@ -472,18 +485,18 @@ pub mod visit {
         if let Some(generics_hir) = const_hir.generics {
             visitor.visit_generics(&const_ast.generics, None, generics_hir);
         }
-        if let Some(const_item_rhs_ast) = &const_ast.rhs && let Some(const_item_rhs_hir) = const_hir.rhs {
-            match (const_item_rhs_ast, const_item_rhs_hir) {
-                (ast::ConstItemRhs::TypeConst(anon_const_ast), hir::ConstItemRhs::TypeConst(const_arg_hir)) => {
+        if let Some(const_item_rhs_hir) = const_hir.rhs {
+            match (&const_ast.rhs_kind, const_item_rhs_hir) {
+                (ast::ConstItemRhsKind::TypeConst { rhs: Some(anon_const_ast) }, hir::ConstItemRhs::TypeConst(const_arg_hir)) => {
                     visitor.visit_const_arg(anon_const_ast, const_arg_hir);
                 }
-                (ast::ConstItemRhs::Body(expr_ast), &hir::ConstItemRhs::Body(body_id)) => {
+                (ast::ConstItemRhsKind::Body { rhs: Some(expr_ast) }, &hir::ConstItemRhs::Body(body_id)) => {
                     let body_hir = visitor.nested_body(body_id);
                     if let Some(body_hir) = body_hir {
                         visit_matching_expr(visitor, expr_ast, &body_hir.value)
                     }
                 }
-                _ => unreachable!(),
+                _ => {}
             }
         }
     }
@@ -629,10 +642,6 @@ pub mod visit {
                     for (generic_bound_ast, generic_bound_hir) in iter::zip(&predicate_ast.bounds, predicate_hir.bounds) {
                         visitor.visit_generic_bound(generic_bound_ast, generic_bound_hir);
                     }
-                }
-                (ast::WherePredicateKind::EqPredicate(predicate_ast), hir::WherePredicateKind::EqPredicate(predicate_hir)) => {
-                    visit_matching_ty(visitor, &predicate_ast.lhs_ty, predicate_hir.lhs_ty);
-                    visit_matching_ty(visitor, &predicate_ast.rhs_ty, predicate_hir.rhs_ty);
                 }
                 _ => unreachable!(),
             }
@@ -924,7 +933,7 @@ pub mod visit {
             }
             (ast::ExprKind::Closure(closure_ast), hir::ExprKind::Closure(closure_hir)) => {
                 let ast::Closure { binder: binder_ast, capture_clause: _, constness: _, coroutine_kind: coroutine_kind_ast, movability: _, fn_decl: decl_ast, body: expr_ast, fn_decl_span: _, fn_arg_span: _ } = &**closure_ast;
-                let hir::Closure { def_id: _, binder: _, constness: constness_hir, capture_clause: _, bound_generic_params: _, fn_decl: decl_hir, body: body_hir, fn_decl_span: decl_span_hir, fn_arg_span: _, kind: closure_kind_hir } = closure_hir;
+                let hir::Closure { def_id: _, binder: _, constness: constness_hir, capture_clause: _, bound_generic_params: _, fn_decl: decl_hir, body: body_hir, fn_decl_span: decl_span_hir, fn_arg_span: _, kind: closure_kind_hir, explicit_captures: _ } = closure_hir;
 
                 // TODO: Create separate `visit_closure` function that is more suited for closures.
                 let kind_ast = ast::visit::FnKind::Closure(binder_ast, coroutine_kind_ast, decl_ast, expr_ast);
@@ -982,7 +991,7 @@ pub mod visit {
                     visit_matching_expr(visitor, expr_ast, expr_hir);
                 }
             }
-            (ast::ExprKind::TryBlock(_), _) => {
+            (ast::ExprKind::TryBlock(..), _) => {
                 // TODO
             }
             (ast::ExprKind::Assign(left_ast, right_ast, _), hir::ExprKind::Assign(left_hir, right_hir, _)) => {
@@ -1144,7 +1153,7 @@ pub mod visit {
     pub fn walk_arm<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, arm_ast: &'ast ast::Arm, arm_hir: &'hir hir::Arm<'hir>) {
         visit_matching_pat(visitor, &arm_ast.pat, arm_hir.pat);
         if let Some(arm_guard_ast) = &arm_ast.guard && let Some(arm_guard_hir) = arm_hir.guard {
-            visit_matching_expr(visitor, arm_guard_ast, arm_guard_hir);
+            visit_matching_expr(visitor, &arm_guard_ast.cond, arm_guard_hir);
         }
         if let Some(arm_body_ast) = &arm_ast.body {
             visit_matching_expr(visitor, arm_body_ast, arm_hir.body);
@@ -1263,9 +1272,6 @@ pub mod visit {
             (ast::ExprKind::Path(qself_ast, path_ast), hir::PatExprKind::Path(qpath_hir)) => {
                 visitor.visit_qpath(qself_ast.as_deref(), path_ast, qpath_hir);
             }
-            (ast::ExprKind::ConstBlock(_const_block_ast), hir::PatExprKind::ConstBlock(_const_block_hir)) => {
-                // TODO: Visit const block.
-            }
             _ => unreachable!(),
         }
     }
@@ -1381,9 +1387,6 @@ pub mod visit {
                 }) else { unreachable!() };
 
                 visitor.visit_impl_trait_in_param(*node_id, generic_bounds_ast, impl_trait_predicate_hir_id, impl_trait_predicate_hir);
-            }
-            (ast::TyKind::Typeof(anon_const_ast), hir::TyKind::Typeof(anon_const_hir)) => {
-                visitor.visit_anon_const(anon_const_ast, anon_const_hir);
             }
             (ast::TyKind::ImplicitSelf, hir::TyKind::Path(_qpath_hir)) => {
                 // TODO: Visit path
@@ -1625,7 +1628,7 @@ pub mod visit {
 
     pub fn walk_const_arg<'ast, 'hir, T: AstHirVisitor<'ast, 'hir>>(visitor: &mut T, anon_const_ast: &'ast ast::AnonConst, const_arg_hir: &'hir hir::ConstArg<'hir>) {
         match (&anon_const_ast.value.kind, &const_arg_hir.kind) {
-            (ast::ExprKind::Underscore, hir::ConstArgKind::Infer(_, _)) => {
+            (ast::ExprKind::Underscore, hir::ConstArgKind::Infer(_)) => {
                 // TODO
             }
             (ast::ExprKind::Path(qself_ast, path_ast), hir::ConstArgKind::Path(qpath_hir)) => {
@@ -1680,7 +1683,7 @@ pub mod visit {
                 }
                 ast::ItemKind::Trait(trait_ast) => {
                     let hir::Node::Item(item_hir) = node_hir else { panic!("mismatched HIR node") };
-                    let hir::ItemKind::Trait(_, _, _, _, generics_hir, generic_bounds_hir, _) = &item_hir.kind else { panic!("mismatched HIR node") };
+                    let hir::ItemKind::Trait { generics: generics_hir, bounds: generic_bounds_hir, .. } = &item_hir.kind else { panic!("mismatched HIR node") };
                     AstHirVisitor::visit_trait(visitor, trait_ast, generics_hir, generic_bounds_hir);
                 }
                 ast::ItemKind::TraitAlias(trait_alias_ast) => {
@@ -2440,7 +2443,7 @@ fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path:
                 hir::ItemKind::Enum(ident, _, _) => Some(hir::DefPathData::TypeNs(ident.name)),
                 hir::ItemKind::Struct(ident, _, _) => Some(hir::DefPathData::TypeNs(ident.name)),
                 hir::ItemKind::Union(ident, _, _) => Some(hir::DefPathData::TypeNs(ident.name)),
-                hir::ItemKind::Trait(_, _, _, ident, _, _, _) => Some(hir::DefPathData::TypeNs(ident.name)),
+                hir::ItemKind::Trait { ident, .. } => Some(hir::DefPathData::TypeNs(ident.name)),
                 hir::ItemKind::TraitAlias(_, ident, _, _) => Some(hir::DefPathData::TypeNs(ident.name)),
                 hir::ItemKind::Impl(_) => Some(hir::DefPathData::Impl),
             }
@@ -2497,7 +2500,7 @@ fn disambiguate_hir_def_item_node_path_components<'tcx>(tcx: TyCtxt<'tcx>, path:
                         let items = parent_items.iter().map(|&foreign_item_id| tcx.hir_foreign_item(foreign_item_id)).map(hir::DefItem::ForeignItem);
                         disambiguate_child_item(current_def_item, items)
                     }
-                    hir::ItemKind::Trait(_, _, _, _, _, _, parent_items) => {
+                    hir::ItemKind::Trait { items: parent_items, .. } => {
                         let items = parent_items.iter().map(|&trait_item_id| tcx.hir_trait_item(trait_item_id)).map(hir::DefItem::TraitItem);
                         disambiguate_child_item(current_def_item, items)
                     }
@@ -2599,7 +2602,7 @@ where
             hir::ItemKind::Union(_ ,_, _) => {
                 matching_item!(ast::DefItemKind::Union(_, _, _) => |item_ast| Some(item_ast.ident()) == item_hir.kind.ident())
             }
-            hir::ItemKind::Trait(_, _, _, _, _, _, _) => {
+            hir::ItemKind::Trait { .. } => {
                 matching_item!(ast::DefItemKind::Trait(_) => |item_ast| Some(item_ast.ident()) == item_hir.kind.ident())
             }
             hir::ItemKind::TraitAlias(_, _, _, _) => {

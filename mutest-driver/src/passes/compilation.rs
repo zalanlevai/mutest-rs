@@ -21,7 +21,7 @@ pub struct CompilationPassResult {
 pub fn run(config: &Config, analysis_pass: &AnalysisPassResult, specialized_external_mutant_crate: Option<&(String, SpecializedMutantCrateCompilationResult)>) -> CompilerResult<CompilationPassResult> {
     let mut compiler_config = base_compiler_config(config);
     compiler_config.input = Input::Str {
-        name: compiler_config.input.source_name(),
+        name: analysis_pass.source_file_name.clone(),
         input: analysis_pass.generated_crate_code.to_owned(),
     };
 

@@ -1,7 +1,7 @@
 use std::env;
 use std::time::{Duration, Instant};
 
-use rustc_hash::{FxHashSet, FxHashMap};
+use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::bug;
@@ -36,6 +36,7 @@ pub struct AnalysisPassResult {
     pub codegen_duration: Duration,
     pub write_duration: Duration,
     pub generated_crate_code: String,
+    pub source_file_name: FileName,
     pub specialized_external_mutant_crate: Option<(String, SpecializedMutantCrateCompilationRequest)>,
 }
 
@@ -97,7 +98,7 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
         code = rustc_ast_pretty::pprust::print_crate(
             tcx.sess.source_map(),
             generated_crate_ast,
-            tcx.sess.io.input.source_name(),
+            tcx.sess.io.input.file_name(tcx.sess),
             "".to_owned(),
             &NoAnn,
             true,
@@ -159,6 +160,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             codegen_duration: Duration::ZERO,
             write_duration: Duration::ZERO,
             generated_crate_code: String::new(),
+            source_file_name: compiler.sess.io.input.file_name(&compiler.sess),
             specialized_external_mutant_crate: None,
         };
 
@@ -177,13 +179,14 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
         let result = create_and_enter_global_ctxt(compiler, crate_ast.clone(), |tcx| -> Flow<AnalysisPassResult, ErrorGuaranteed> {
             let (mut generated_crate_ast, def_res) = {
-                let (resolver, expanded_crate_ast) = &*tcx.resolver_for_lowering().borrow();
+                let (resolver, expanded_crate_ast) = tcx.resolver_for_lowering();
+                let resolver = &*resolver.borrow();
                 let def_res = mutest_emit::analysis::ast_lowering::DefResolutions::from_resolver(resolver);
 
                 // TODO: Generate code based on the original, unexpanded AST instead of the
                 //       expanded AST which may contain invalid code that is not equivalent due
                 //       to macro hygiene.
-                let generated_crate_ast = (**expanded_crate_ast).clone();
+                let generated_crate_ast = expanded_crate_ast.borrow().clone();
 
                 (generated_crate_ast, def_res)
             };

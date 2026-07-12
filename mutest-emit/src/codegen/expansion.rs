@@ -4,7 +4,6 @@ use std::path::{self, Path, PathBuf};
 
 use itertools::Itertools;
 use rustc_middle::ty::TyCtxt;
-use rustc_query_system::ich::StableHashingContext;
 use rustc_session::Session;
 use rustc_session::parse::ParseSess;
 use rustc_span::{ExpnData, LocalExpnId};
@@ -42,7 +41,7 @@ impl<'tcx> TcxExpansionExt for TyCtxt<'tcx> {
             None,
             None,
         );
-        LocalExpnId::fresh(expn_data, StableHashingContext::new(self.sess, self.untracked()))
+        self.with_stable_hashing_context(|hcx| LocalExpnId::fresh(expn_data, hcx))
     }
 }
 
@@ -80,9 +79,8 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(allocator_api)]
         #![feature(cfg_target_thread_local)]
         #![feature(core_intrinsics)]
-        #![feature(error_in_core)]
-        #![feature(derive_clone_copy)]
-        #![feature(derive_eq)]
+        #![feature(derive_clone_copy_internals)]
+        #![feature(derive_eq_internals)]
         #![feature(coverage_attribute)]
         #![feature(hint_must_use)]
         #![feature(never_type)]
@@ -342,7 +340,7 @@ pub fn load_modules(sess: &Session, krate: &mut ast::Crate) {
         FileName::Real(name) => {
             name.into_local_path().expect("attempting to resolve a file path in an external file")
         }
-        other => PathBuf::from(other.prefer_local().to_string()),
+        other => PathBuf::from(other.prefer_local_unconditionally().to_string()),
     };
     let dir_path = file_path.parent().unwrap_or(&file_path).to_owned();
 

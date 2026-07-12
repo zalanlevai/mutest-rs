@@ -270,10 +270,10 @@ fn mk_subst_map_ty_alias(sp: Span, subst_locs: &[SubstLoc]) -> Box<ast::Item> {
     let ident = Ident::new(sym::SubstMap, sp);
     ast::mk::item(sp, thin_vec![], vis, ast::ItemKind::TyAlias(Box::new(ast::TyAlias {
         ident,
-        defaultness: ast::Defaultness::Final,
+        defaultness: ast::Defaultness::Implicit,
         generics: Default::default(),
         after_where_clause: Default::default(),
-        bounds: vec![],
+        bounds: thin_vec![],
         // [Option<mutest_runtime::SubstMeta>; $subst_locs_count]
         ty: Some(ast::mk::ty_array(sp, option_subst_meta_ty, subst_locs_count_anon_const)),
     })))

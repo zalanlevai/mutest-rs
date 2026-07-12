@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 use std::marker::PhantomData;
 
-use rustc_hash::{FxHashSet, FxHashMap};
+use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 use smallvec::{SmallVec, smallvec};
@@ -238,7 +238,7 @@ impl<'trg, 'm> Mut<'trg, 'm> {
     }
 
     pub fn display_location(&self, sess: &Session) -> String {
-        sess.source_map().span_to_embeddable_string(self.span)
+        sess.source_map().span_to_string(self.span, rustc_span::RemapPathScopeComponents::MACRO)
     }
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
@@ -560,7 +560,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             ast::ExprKind::Match(expr, arms, _) => {
                 self.visit_expr(expr);
                 for arm in arms {
-                    if let Some(guard) = &arm.guard { self.visit_expr(guard); }
+                    if let Some(guard) = &arm.guard { self.visit_expr(&guard.cond); }
                     if let Some(body) = &arm.body { self.visit_expr(body); }
                 }
             }

@@ -4,7 +4,7 @@ use mutest_emit::analysis::call_graph::{CallGraph, Callee, EntryPoints, LocalEnt
 use mutest_emit::analysis::tests::Test;
 use mutest_emit::codegen::symbols::span_diagnostic_ord;
 use mutest_emit::codegen::mutation::{Mut, MutId, MutationBatch, MutationConflictGraph, UnsafeTargeting};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::DefId;

@@ -37,7 +37,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::LocalDefId, body: hir::Body
     // This avoids a case of infinite recursion, resulting in a stack overflow.
     let ty_default = res::fns::default(tcx);
     let ty_default_generic_args = tcx.mk_args_trait(expr_ty, vec![]);
-    let typing_env = ty::TypingEnv { typing_mode: ty::TypingMode::PostAnalysis, param_env };
+    let typing_env = ty::TypingEnv::new(param_env, ty::TypingMode::PostAnalysis);
     if let Some(ty_default_impl) = ty::Instance::try_resolve(tcx, typing_env, ty_default, ty_default_generic_args).ok().flatten()
         && let Some(ty_default_impl_def_id) = ty_default_impl.def_id().as_local()
         && let Some(ty_default_impl_body_id) = tcx.hir_node_by_def_id(ty_default_impl_def_id).body_id()
@@ -53,7 +53,7 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::LocalDefId, body: hir::Body
             })
             .flat_map(|(def_id, generic_args)| {
                 let param_env = tcx.param_env(def_id);
-                let typing_env = ty::TypingEnv { typing_mode: ty::TypingMode::PostAnalysis, param_env };
+                let typing_env = ty::TypingEnv::new(param_env, ty::TypingMode::PostAnalysis);
                 ty::Instance::try_resolve(tcx, typing_env, def_id, generic_args).ok().flatten()
             });
 

@@ -23,8 +23,8 @@ pub fn impl_assoc_ty<'tcx>(tcx: TyCtxt<'tcx>, caller_def_id: hir::LocalDefId, ty
         .find_by_ident_and_kind(tcx, Ident::new(assoc_ty, DUMMY_SP), ty::AssocTag::Type, trait_def_id)
         .and_then(|assoc_item| {
             let args = tcx.mk_args_trait(ty, args);
-            let proj = Ty::new_projection(tcx, assoc_item.def_id, args);
-            tcx.try_normalize_erasing_regions(typing_env, proj).ok()
+            let proj = Ty::new_projection(tcx, ty::IsRigid::No, assoc_item.def_id, args);
+            tcx.try_normalize_erasing_regions(typing_env, ty::Unnormalized::new(proj)).ok()
         })
 }
 
@@ -468,7 +468,7 @@ pub mod print {
                 | ty::ConstKind::Infer(_)
                 | ty::ConstKind::Bound(_, _)
                 | ty::ConstKind::Placeholder(_)
-                | ty::ConstKind::Unevaluated(_)
+                | ty::ConstKind::Alias(_, _)
                 | ty::ConstKind::Value(_)
                 | ty::ConstKind::Expr(_)
                 => {
@@ -645,7 +645,7 @@ pub mod print {
                 .chain(auto_traits.into_iter())
                 .collect::<Vec<_>>();
 
-            Ok(ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn)))
+            Ok(ast::mk::ty(sp, ast::TyKind::TraitObject(bounds.into(), ast::TraitObjectSyntax::Dyn)))
         }
 
         fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error> {
@@ -718,25 +718,25 @@ pub mod print {
                     }
                     Ok(dyn_existential)
                 }
-                ty::TyKind::Alias(alias_kind, alias_ty) => {
-                    match alias_kind {
-                        ty::AliasTyKind::Opaque => {
+                ty::TyKind::Alias(_, alias_ty) => {
+                    match alias_ty.kind {
+                        ty::AliasTyKind::Opaque { def_id } => {
                             match self.opaque_ty_handling {
                                 OpaqueTyHandling::Infer => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
                                 OpaqueTyHandling::Keep => {
-                                    let def_path = self.print_def_path(alias_ty.def_id, alias_ty.args)?;
+                                    let def_path = self.print_def_path(def_id, alias_ty.args)?;
                                     Ok(ast::mk::ty(sp, ast::TyKind::ImplTrait(ast::DUMMY_NODE_ID, vec![
                                         ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, def_path)
-                                    ])))
+                                    ].into())))
                                 }
                                 OpaqueTyHandling::Resolve => {
-                                    let ty = self.tcx.type_of(alias_ty.def_id).instantiate_identity();
+                                    let ty = self.tcx.type_of(def_id).instantiate_identity().skip_normalization();
                                     self.print_ty(ty)
                                 }
                             }
                         }
-                        ty::AliasTyKind::Projection => {
-                            let def_path = self.print_def_path(alias_ty.def_id, alias_ty.args)?;
+                        ty::AliasTyKind::Projection { def_id } => {
+                            let def_path = self.print_def_path(def_id, alias_ty.args)?;
 
                             let self_ty = self.print_ty(alias_ty.self_ty())?;
                             let qself = Box::new(ast::QSelf {
@@ -747,8 +747,8 @@ pub mod print {
 
                             Ok(ast::mk::ty_path(Some(qself), def_path))
                         }
-                        ty::AliasTyKind::Inherent | ty::AliasTyKind::Free => {
-                            let def_path = self.print_def_path(alias_ty.def_id, alias_ty.args)?;
+                        ty::AliasTyKind::Inherent { def_id } | ty::AliasTyKind::Free { def_id } => {
+                            let def_path = self.print_def_path(def_id, alias_ty.args)?;
                             Ok(ast::mk::ty_path(None, def_path))
                         }
                     }
@@ -779,15 +779,15 @@ pub mod print {
 
                     let input_params = input_tys_ast.into_iter().map(|ty| ast::mk::param(sp, ast::mk::pat_wild(sp), ty)).collect();
                     Ok(ast::mk::ty(sp, ast::TyKind::FnPtr(Box::new(ast::FnPtrTy {
-                        safety: match fn_header.safety {
+                        safety: match fn_header.safety() {
                             hir::Safety::Safe => ast::Safety::Default,
                             hir::Safety::Unsafe => ast::Safety::Unsafe(sp),
                         },
                         ext: ast::Extern::Explicit(ast::StrLit {
                             span: sp,
                             style: ast::StrStyle::Cooked,
-                            symbol: Symbol::intern(fn_header.abi.name()),
-                            symbol_unescaped: Symbol::intern(fn_header.abi.name()),
+                            symbol: Symbol::intern(fn_header.abi().name()),
+                            symbol_unescaped: Symbol::intern(fn_header.abi().name()),
                             suffix: None,
                         }, DUMMY_SP),
                         generic_params: ThinVec::new(),

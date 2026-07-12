@@ -1,10 +1,9 @@
 use std::num::NonZeroUsize;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_session::config::ExternLocation;
-use rustc_session::search_paths::PathKind;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 
@@ -36,8 +35,7 @@ impl<'tcx> CrateResolutions<'tcx> {
             .filter_map(|&cnum| {
                 let crate_source = tcx.used_crate_source(cnum);
                 let extern_crate_source_paths = [&crate_source.dylib, &crate_source.rlib, &crate_source.rmeta].into_iter().flatten()
-                    .filter(|(_, path_kind)| matches!(path_kind, PathKind::ExternFlag))
-                    .map(|(path, _)| path.clone())
+                    .cloned()
                     .collect::<SmallVec<[_; 3]>>();
                 match &extern_crate_source_paths[..] {
                     [] => None,
@@ -472,7 +470,7 @@ impl<'tcx> DefPath<'tcx> {
             }
         }
 
-        (qself, ast::Path { span: DUMMY_SP, segments, tokens: None })
+        (qself, ast::Path { span: DUMMY_SP, segments })
     }
 }
 
@@ -501,7 +499,7 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     };
     for (i, &def_id) in relative_def_id_path.iter().enumerate().rev() {
         let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(def_id) else { continue; };
-        let implementer_ty = tcx.type_of(def_id).instantiate_identity();
+        let implementer_ty = tcx.type_of(def_id).instantiate_identity().skip_normalization();
 
         relative_def_id_path = &relative_def_id_path[(i + 1)..];
         root = DefPathRootKind::Ty(implementer_ty);
@@ -526,9 +524,9 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
                 | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::Union | hir::DefKind::Variant | hir::DefKind::TyAlias
                 | hir::DefKind::ForeignMod | hir::DefKind::ForeignTy
                 | hir::DefKind::Trait | hir::DefKind::Impl { .. } | hir::DefKind::TraitAlias
-                | hir::DefKind::Fn | hir::DefKind::Const | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
-                | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
-                | hir::DefKind::AnonConst | hir::DefKind::InlineConst
+                | hir::DefKind::Fn | hir::DefKind::Const { .. } | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
+                | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst { .. }
+                | hir::DefKind::AnonConst
                 | hir::DefKind::Closure
             );
             while is_transparent(tcx.def_kind(scope)) && let Some(parent_scope) = tcx.opt_parent(scope) {
@@ -557,7 +555,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
 }
 
 pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span, limit: Option<NonZeroUsize>) -> SmallVec<[DefPath<'tcx>; 1]> {
-    let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
+    let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(*def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
         // NOTE: Such paths will never be accessible outside of the scope of the assoc item.
@@ -566,7 +564,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
         // `..::{impl#?}::$assoc_item` path.
         Some((0, impl_parent_def_id)) => {
             let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(impl_parent_def_id) else { unreachable!("encountered trait impl in def path") };
-            let implementer_ty = tcx.type_of(impl_parent_def_id).instantiate_identity();
+            let implementer_ty = tcx.type_of(impl_parent_def_id).instantiate_identity().skip_normalization();
 
             let ident = tcx.opt_item_ident(def_id).unwrap();
             let def_path = DefPath::new(DefPathRootKind::Ty(implementer_ty), vec![DefPathSegment { def_id, ident, reexport: None }]);

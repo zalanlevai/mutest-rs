@@ -72,6 +72,7 @@ pub mod sym {
         mutest_runtime,
         op_name,
         reachable_from,
+        skip,
         source_file,
         start_col,
         start_line,
