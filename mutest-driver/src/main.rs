@@ -144,11 +144,15 @@ const UNSTABLE_OPTIONS: &[UnstableOption] = mutest_driver_cli::extend_const_slic
     // No mutest-driver-specific unstable options at the moment.
 ]);
 
+const BUG_REPORT_URL: &str = "https://github.com/zalanlevai/mutest-rs/issues/new";
+
 pub fn main() {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
     let mut args = rustc_driver::args::raw_args(&early_dcx);
 
     rustc_driver::init_rustc_env_logger(&early_dcx);
+
+    rustc_driver::install_ice_hook(BUG_REPORT_URL, |_dcx| {});
 
     // NOTE: When being invoked by Cargo through RUSTC_WRAPPER / RUSTC_WORKSPACE_WRAPPER,
     //       we are passed the path to rustc as the first argument.
