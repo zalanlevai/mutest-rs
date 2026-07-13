@@ -148,6 +148,8 @@ pub fn main() {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
     let mut args = rustc_driver::args::raw_args(&early_dcx);
 
+    rustc_driver::init_rustc_env_logger(&early_dcx);
+
     // NOTE: When being invoked by Cargo through RUSTC_WRAPPER / RUSTC_WORKSPACE_WRAPPER,
     //       we are passed the path to rustc as the first argument.
     //       This is ignored, since we are using rustc_driver directly to invoke the compiler.
