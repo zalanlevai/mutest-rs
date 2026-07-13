@@ -40,7 +40,7 @@ impl SpanFromGenericsExt for ty::ParamConst {
     }
 }
 
-pub use print::ast_repr;
+pub use print::{ast_repr, const_ast};
 
 pub mod print {
     use std::iter;
@@ -860,5 +860,28 @@ pub mod print {
             binding_item_def_id,
         };
         printer.print_region(region).ok().flatten()
+    }
+
+    pub fn const_ast<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        scope: Option<hir::DefId>,
+        sp: Span,
+        ct: ty::Const<'tcx>,
+        binding_item_def_id: hir::DefId,
+        sanitize_macro_expns: bool,
+    ) -> Option<ast::AnonConst> {
+        // HACK: We construct an AstTyPrinter with some unused dummy values to call the `print_const` impl.
+        let mut printer = AstTyPrinter {
+            tcx,
+            crate_res: &res::CrateResolutions::empty(tcx),
+            def_res: &ast_lowering::DefResolutions::empty(),
+            scope,
+            sp,
+            def_path_handling: DefPathHandling::FullyQualified,
+            opaque_ty_handling: OpaqueTyHandling::Infer,
+            sanitize_macro_expns,
+            binding_item_def_id,
+        };
+        printer.print_const(ct).ok()
     }
 }
