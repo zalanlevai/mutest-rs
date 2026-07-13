@@ -18,6 +18,7 @@ use std::process;
 use mutest_driver::cargo_package_config;
 use mutest_driver::config::{self, Config};
 use mutest_driver::passes::external_mutant::RustcInvocation;
+use mutest_driver_cli::{UnstableFlag, UnstableOption};
 use mutest_emit::analysis::hir::Safety;
 use mutest_emit::codegen::mutation::{OperatorRef, UnsafeTargeting};
 use rustc_hash::FxHashSet;
@@ -135,6 +136,14 @@ mod emit {
     }
 }
 
+const UNSTABLE_FLAGS: &[UnstableFlag] = mutest_driver_cli::extend_const_slice!(mutest_driver_cli::UNSTABLE_FLAGS: &[UnstableFlag], &[
+    // No mutest-driver-specific unstable flags at the moment.
+]);
+
+const UNSTABLE_OPTIONS: &[UnstableOption] = mutest_driver_cli::extend_const_slice!(mutest_driver_cli::UNSTABLE_OPTIONS: &[UnstableOption], &[
+    // No mutest-driver-specific unstable options at the moment.
+]);
+
 pub fn main() {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
     let mut args = rustc_driver::args::raw_args(&early_dcx);
@@ -167,9 +176,9 @@ pub fn main() {
         .override_usage(color_print::cstr!("<bright-blue,bold>[MUTEST_ARGS=\"<<MUTEST_OPTIONS>>\"] mutest-driver [<<RUSTC_PATH>>] [--rustc] [<<RUSTC_OPTIONS>>]</>"))
         .no_binary_name(true)
         .next_help_heading("Options")
-        // Target-related Arguments
         .arg(clap::arg!(--"crate-kind" [CRATE_KIND] "Determine how the crate is handled in terms of mutations and tests.").value_parser(crate_kind::possible_values()).default_value(crate_kind::INFER))
-        .arg(clap::arg!(--emit [OUTPUT] "Outputs to emit for the crate, separated by commas. Compilation stops as soon as all emission goals have been met.").value_delimiter(',').value_parser(emit::possible_values()).default_value("all"));
+        .arg(clap::arg!(--emit [OUTPUT] "Outputs to emit for the crate, separated by commas. Compilation stops as soon as all emission goals have been met.").value_delimiter(',').value_parser(emit::possible_values()).default_value("all"))
+        .arg(clap::arg!(Z: -Z [FLAG] "Experimental, unstable flags. See `-Z help` for details.").action(clap::ArgAction::Append));
 
     if !rustc_wrapper {
         // Forward help and version information invocations to their mutest-driver counterparts for convenience.
@@ -220,6 +229,16 @@ pub fn main() {
     }
 
     let mutest_arg_matches = mutest_command.get_matches_from(mutest_args.unwrap_or_default());
+
+    let unstable_flags = mutest_arg_matches.get_many::<String>("Z").into_iter().flatten().map(String::as_str).collect::<Vec<_>>();
+    if unstable_flags.contains(&"help") {
+        mutest_driver_cli::print_unstable_flags_help(UNSTABLE_FLAGS);
+        process::exit(0);
+    }
+    mutest_driver_cli::check_unstable_flags(&unstable_flags, UNSTABLE_FLAGS);
+    if !unstable_flags.contains(&"unstable-options") {
+        mutest_driver_cli::check_unstable_options(&mutest_arg_matches, UNSTABLE_OPTIONS);
+    }
 
     process::exit(rustc_driver::catch_with_exit_code(|| {
         let (Some(compiler_config), crate_types) = mutest_driver::passes::parse_compiler_args(&args) else {
@@ -626,29 +645,11 @@ pub fn main() {
             }))
         };
 
-        let verify_opts = {
-            use mutest_driver_cli::verify as opts;
-
-            let mut verify_opts = config::VerifyOptions {
-                ast_lowering: false,
-            };
-
-            let mut verify_names = mutest_arg_matches.get_many::<String>("Zverify").map(|verify| verify.map(String::as_str).collect::<FxHashSet<_>>()).unwrap_or_default();
-            if verify_names.contains("all") { verify_names = FxHashSet::from_iter(opts::ALL.into_iter().map(|s| *s)); }
-
-            for verify_name in verify_names {
-                match verify_name {
-                    opts::AST_LOWERING => verify_opts.ast_lowering = true,
-                    _ => unreachable!("invalid verify name: `{verify_name}`"),
-                }
-            }
-
-            verify_opts
+        let unstable_flag_opts = config::UnstableFlags {
+            verify_ast_lowering: unstable_flags.contains(&"verify-ast-lowering"),
+            embedded: unstable_flags.contains(&"embedded"),
+            no_sanitize_macro_expns: unstable_flags.contains(&"no-sanitize-macro-expns"),
         };
-
-        let embedded = mutest_arg_matches.get_flag("Zembedded");
-
-        let sanitize_macro_expns = !mutest_arg_matches.get_flag("Zno-sanitize-macro-expns");
 
         let config = Config {
             compiler_config,
@@ -663,6 +664,7 @@ pub fn main() {
                 verbosity,
                 report_timings,
                 print_opts,
+                write_opts,
                 unsafe_targeting,
                 operators: &mutation_operators,
                 call_graph_depth_limit,
@@ -671,10 +673,7 @@ pub fn main() {
                 mutation_filters,
                 mutation_parallelism,
 
-                write_opts,
-                verify_opts,
-                embedded,
-                sanitize_macro_expns,
+                unstable_flags: unstable_flag_opts,
             },
         };
 

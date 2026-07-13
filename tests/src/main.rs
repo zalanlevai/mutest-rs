@@ -532,12 +532,11 @@ fn run_test(path: &Path, aux_dir_path: &Path, root_dir: &Path, opts: &Opts, resu
     }
 
     let mut mutest_args = vec![format!("--emit={}", mutest_outputs.join(","))];
-    let mut verifications = directives.iter().filter_map(|d| d.strip_prefix("verify:").map(str::trim))
-        .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))
-        .peekable();
-    if verifications.peek().is_some() {
-        mutest_args.push("--Zverify".to_owned());
-        mutest_args.push(verifications.intersperse(",").collect::<String>());
+    let verifications = directives.iter().filter_map(|d| d.strip_prefix("verify:").map(str::trim))
+        .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()));
+    for verification in verifications {
+        mutest_args.push("-Z".to_owned());
+        mutest_args.push(format!("verify-{}", verification));
     }
     let mut mutation_operators = directives.iter().filter_map(|d| d.strip_prefix("mutation-operators:").map(str::trim))
         .flat_map(|flags| flags.split(",").map(str::trim).filter(|flag| !flag.is_empty()))

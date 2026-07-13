@@ -82,6 +82,7 @@ pub fn compile_specialized_mutant_crate(
             // NOTE: We report timings for this compilation pass separately.
             report_timings: false,
             print_opts,
+            write_opts: config.opts.write_opts.clone(),
             unsafe_targeting: config.opts.unsafe_targeting,
             operators: config.opts.operators,
             call_graph_depth_limit: config.opts.call_graph_depth_limit,
@@ -90,10 +91,7 @@ pub fn compile_specialized_mutant_crate(
             mutation_filters: config.opts.mutation_filters.clone(),
             mutation_parallelism: config.opts.mutation_parallelism.clone(),
 
-            write_opts: config.opts.write_opts.clone(),
-            verify_opts: config.opts.verify_opts.clone(),
-            embedded: config.opts.embedded,
-            sanitize_macro_expns: config.opts.sanitize_macro_expns,
+            unstable_flags: config.opts.unstable_flags.clone(),
         },
     };
 

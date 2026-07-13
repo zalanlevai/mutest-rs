@@ -1,10 +1,13 @@
 #![feature(if_let_guard)]
+#![feature(trim_prefix_suffix)]
 
 use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{self, Command};
+
+use mutest_driver_cli::{UnstableFlag, UnstableOption};
 
 pub mod build {
     pub const RUST_TOOLCHAIN_VERSION: &str = env!("RUST_TOOLCHAIN_VERSION");
@@ -21,9 +24,39 @@ fn strip_arg(args: &mut Vec<String>, has_value: bool, short_arg: Option<&str>, l
             .or_else(|| long_arg.as_deref().and_then(|v| arg.strip_prefix(v)));
 
         match arg_without_prefix.map(|v| has_value && !v.trim_start().starts_with("=") && i + 1 < args.len()) {
-            Some(true) => { args.splice(i..=(i + 1), None); }
+            Some(true) => { args.splice(i..=(i + 1), []); }
             Some(false) => { args.remove(i); }
             None => i += 1,
+        }
+    }
+}
+
+fn strip_arg_value_occurrences(args: &mut Vec<String>, short_arg: Option<&str>, long_arg: Option<&str>, value: &str) {
+    let short_arg = short_arg.map(|v| format!("-{v}"));
+    let long_arg = long_arg.map(|v| format!("--{v}"));
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+
+        match () {
+            _ if let Some(short_arg_without_prefix) = short_arg.as_deref().and_then(|v| arg.strip_prefix(v)) => {
+                let short_arg_inline_value = short_arg_without_prefix.trim_prefix('=');
+                match (short_arg_inline_value.is_empty(), args.get(i + 1)) {
+                    (false, _) if short_arg_inline_value == value => { args.remove(i); }
+                    (true, Some(v)) if v == value => { args.splice(i..=(i + 1), []); }
+                    _ => { i += 1; }
+                }
+            }
+            _ if let Some(long_arg_without_prefix) = long_arg.as_deref().and_then(|v| arg.strip_prefix(v)) => {
+                let long_arg_inline_value = long_arg_without_prefix.strip_prefix('=');
+                match (long_arg_inline_value, args.get(i + 1)) {
+                    (Some(v), _) if v == value => { args.remove(i); }
+                    (None, Some(v)) if v == value => { args.splice(i..=(i + 1), []); }
+                    _ => { i += 1; }
+                }
+            }
+            _ => { i += 1; }
         }
     }
 }
@@ -50,6 +83,38 @@ fn test_strip_arg() {
     strip_arg(&mut args, true, None, Some("features"));
     assert_eq!(&["--metadata-out-root-dir=target/mutest/json".to_owned(), "--print=code".to_owned()] as &[String], &args[..]);
 }
+
+#[test]
+fn test_strip_arg_value_occurences() {
+    let mut args = vec!["-Z".to_owned(), "write-json-eval-stream".to_owned()];
+    strip_arg_value_occurrences(&mut args, Some("Z"), None, "write-json-eval-stream");
+    assert_eq!(&[] as &[String], &args[..]);
+
+    let mut args = vec!["-Zwrite-json-eval-stream".to_owned()];
+    strip_arg_value_occurrences(&mut args, Some("Z"), None, "write-json-eval-stream");
+    assert_eq!(&[] as &[String], &args[..]);
+
+    let mut args = vec!["-Z=write-json-eval-stream".to_owned()];
+    strip_arg_value_occurrences(&mut args, Some("Z"), None, "write-json-eval-stream");
+    assert_eq!(&[] as &[String], &args[..]);
+
+    let mut args = vec!["-Z".to_owned(), "feature-a".to_owned(), "-Z".to_owned(), "feature-b".to_owned(), "-Z".to_owned(), "feature-c".to_owned()];
+    strip_arg_value_occurrences(&mut args, Some("Z"), None, "feature-b");
+    assert_eq!(&["-Z".to_owned(), "feature-a".to_owned(), "-Z".to_owned(), "feature-c".to_owned()] as &[String], &args[..]);
+
+    let mut args = vec!["-Z".to_owned(), "feature-b".to_owned(), "-Z".to_owned(), "feature-a".to_owned(), "-Z".to_owned(), "feature-b".to_owned()];
+    strip_arg_value_occurrences(&mut args, Some("Z"), None, "feature-b");
+    assert_eq!(&["-Z".to_owned(), "feature-a".to_owned()] as &[String], &args[..]);
+}
+
+const RUN_UNSTABLE_FLAGS: &[UnstableFlag] = mutest_driver_cli::extend_const_slice!(mutest_driver_cli::UNSTABLE_FLAGS: &[UnstableFlag], &[
+    // NOTE: Whenever these change, the `strip_arg_value_occurrences` calls in `run_cargo_with_mutest_driver` have to be updated as well.
+    UnstableFlag::new("write-json-eval-stream", Some("During evaluation, write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.")),
+]);
+
+const RUN_UNSTABLE_OPTIONS: &[UnstableOption] = mutest_driver_cli::extend_const_slice!(mutest_driver_cli::UNSTABLE_OPTIONS: &[UnstableOption], &[
+    // No Cargo or evaluation-specific unstable options at the moment.
+]);
 
 mod run_isolate {
     mutest_driver_cli::exclusive_opts! { pub(crate) possible_values where
@@ -113,6 +178,7 @@ fn main() {
             .arg(clap::arg!(--"no-build" "Do not compile the generated mutation test harness."))
             .arg(clap::arg!(--"no-run" "Do not run the generated mutation test harness."))
             .arg(clap::arg!(--color [WHEN] "Output coloring."))
+            .arg(clap::arg!(Z: -Z [FLAG] "Experimental, unstable flags. See `-Z help` for details.").action(clap::ArgAction::Append))
             // NOTE: Whenever these change, the `strip_args` calls in `run_cargo_with_mutest_driver` have to be updated as well.
             .next_help_heading("Evaluation Options")
             .arg(clap::arg!(-i --inspect [INSPECT_OPTS] "Inspect mutations after evaluation. Options may be specified in the form `--inspect=[open][:<PORT>]`.").num_args(0..=1).require_equals(true).conflicts_with_all(["no-run", "no-build", "no-emit-metadata"]))
@@ -124,8 +190,6 @@ fn main() {
             .arg(clap::arg!(--"use-thread-pool" "Evaluate tests in a fixed-size thread pool.").conflicts_with_all(["no-run", "no-build"]))
             // Printing-related Arguments
             .arg(clap::arg!(--"eval-print" [PRINT] "Print additional information during mutation evaluation. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(run_print::possible_values()).conflicts_with_all(["no-run", "no-build"]))
-            // Experimental Flags
-            .arg(clap::arg!(--"Zwrite-json-eval-stream" "Write JSONL stream file into JSON output directory specified by `--metadata-out-root-dir`.").conflicts_with_all(["no-run", "no-build", "no-emit-metadata"]))
             // Passed arguments
             .arg(clap::arg!([PASSED_OPTIONS] ...).last(true).conflicts_with_all(["no-run", "no-build"]))
             // Cargo options
@@ -168,6 +232,16 @@ fn main() {
 
     match matches.subcommand() {
         Some(("run", matches)) => {
+            let unstable_flags = matches.get_many::<String>("Z").into_iter().flatten().map(String::as_str).collect::<Vec<_>>();
+            if unstable_flags.contains(&"help") {
+                mutest_driver_cli::print_unstable_flags_help(RUN_UNSTABLE_FLAGS);
+                process::exit(0);
+            }
+            mutest_driver_cli::check_unstable_flags(&unstable_flags, RUN_UNSTABLE_FLAGS);
+            if !unstable_flags.contains(&"unstable-options") {
+                mutest_driver_cli::check_unstable_options(matches, RUN_UNSTABLE_OPTIONS);
+            }
+
             let inspect_opts = match matches.value_source("inspect") {
                 Some(clap::parser::ValueSource::CommandLine) if let Some(inspect_opts_str) = matches.get_one::<String>("inspect") => {
                     let mut unparsed_str: &str = inspect_opts_str;
@@ -211,7 +285,7 @@ fn main() {
             //       whether specified explicitly through `--target-dir`, or implicitly chosen by Cargo.
             cargo_invocation.target_dir.push("mutest");
 
-            run_cargo_with_mutest_driver(&cargo_invocation, matches);
+            run_cargo_with_mutest_driver(&cargo_invocation, matches, &unstable_flags);
 
             if let Some((open, port)) = inspect_opts {
                 run_mutest_inspector_from_cargo_invocation(open, port, &cargo_invocation, matches);
@@ -360,7 +434,7 @@ fn process_cargo_args<'a>(args: &'a [String], matches: &'a clap::ArgMatches) -> 
     CargoInvocation { cargo_args, non_cargo_args, target_dir, explicit_targetings_count }
 }
 
-fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &clap::ArgMatches) {
+fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &clap::ArgMatches, unstable_flags: &[&str]) {
     let mut mutest_args = cargo_invocation.non_cargo_args.clone();
 
     let no_run = matches.get_flag("no-run");
@@ -380,7 +454,7 @@ fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &cl
 
     let mut cmd = cargo_command_base();
 
-    let embedded = matches.get_flag("Zembedded");
+    let embedded = unstable_flags.contains(&"embedded");
     if embedded {
         let target = match matches.get_one::<String>("target") {
             Some(target) => target.clone(),
@@ -487,7 +561,7 @@ fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &cl
     strip_arg(&mut mutest_args, true, None, Some("isolate"));
     strip_arg(&mut mutest_args, false, None, Some("use-thread-pool"));
     strip_arg(&mut mutest_args, true, None, Some("eval-print"));
-    strip_arg(&mut mutest_args, false, None, Some("Zwrite-json-eval-stream"));
+    strip_arg_value_occurrences(&mut mutest_args, Some("Z"), None, "write-json-eval-stream");
 
     cmd.env("MUTEST_ENCODED_ARGS", mutest_args.join("\x1F"));
 
@@ -511,8 +585,6 @@ fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &cl
         if print_names.contains("all") { print_names = HashSet::from_iter(run_print::ALL.into_iter().map(|s| *s)); }
         for print_name in print_names { cmd.arg(format!("--print={print_name}")); }
 
-        if matches.get_flag("Zwrite-json-eval-stream") { cmd.arg("--Zwrite-json-eval-stream"); }
-
         cmd.args((0..matches.get_count("verbose")).map(|_| "-v"));
         if matches.get_flag("timings") { cmd.arg("--timings"); }
         if !matches.get_flag("no-emit-metadata") {
@@ -524,6 +596,8 @@ fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &cl
             let out_dir = out_dir.as_os_str().to_str().expect("non-UTF-8 path");
             cmd.arg(format!("--metadata-out-root-dir={out_dir}"));
         }
+
+        if unstable_flags.contains(&"write-json-eval-stream") { cmd.arg("--Zwrite-json-eval-stream"); }
 
         cmd.args(matches.get_many::<String>("PASSED_OPTIONS").unwrap_or_default());
 

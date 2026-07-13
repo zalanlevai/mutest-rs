@@ -156,16 +156,18 @@ pub enum MutationParallelism {
 }
 
 #[derive(Clone, Debug)]
-pub struct VerifyOptions {
-    pub ast_lowering: bool,
-}
-
-#[derive(Clone, Debug)]
 pub enum MutationFilter {
     /// `file:path/to/src.rs` or `file:path/to/src.rs:15` or `file:path/to/src.rs:15:17`.
     File(PathBuf, Option<(usize, Option<usize>)>),
     /// `def:path::to::function` or `def:<impl path::to::Trait for path::to::Type>::function`, using fully-qualified (without root crate) Rust item paths.
     Def(String),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct UnstableFlags {
+    pub verify_ast_lowering: bool,
+    pub embedded: bool,
+    pub no_sanitize_macro_expns: bool,
 }
 
 pub struct Options<'op, 'm> {
@@ -185,9 +187,7 @@ pub struct Options<'op, 'm> {
     pub mutation_filters: Vec<MutationFilter>,
     pub mutation_parallelism: Option<MutationParallelism>,
 
-    pub verify_opts: VerifyOptions,
-    pub embedded: bool,
-    pub sanitize_macro_expns: bool,
+    pub unstable_flags: UnstableFlags,
 }
 
 pub struct Config<'op, 'm> {
