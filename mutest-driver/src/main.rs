@@ -84,7 +84,12 @@ fn fetch_cargo_target_kind(input: &Input) -> Option<config::CargoTargetKind> {
     let input_file_path = input.opt_path().expect("cannot get input file path").to_owned();
     let input_file_path = input_file_path.canonicalize().expect("cannot canonicalize input file path");
 
-    let Some(target) = package.targets.iter().find(|target| target.name.replace("-", "_") == cargo_crate_name && target.src_path == input_file_path) else {
+    let Some(target) = package.targets.iter().find(|target| {
+        // Canonicalize `src_path` to match the canonicalized `input_file_path` above
+        // (on Windows canonicalization adds a `\\?\` prefix that plain equality misses).
+        target.name.replace("-", "_") == cargo_crate_name
+            && Path::new(target.src_path.as_str()).canonicalize().map(|p| p == input_file_path).unwrap_or(false)
+    }) else {
         panic!("cannot find target in Cargo package metadata");
     };
 
