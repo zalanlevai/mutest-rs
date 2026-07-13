@@ -1,7 +1,7 @@
 use mutest_emit::analysis::call_graph::{EntryPointAssoc, EntryPointAssocs, ExternEntryPoint, Target, TargetKind, TargetReachability, Unsafety};
 use mutest_emit::analysis::hir;
 use mutest_emit::codegen::symbols::Symbol;
-use rustc_hash::FxHashMap;
+use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
 

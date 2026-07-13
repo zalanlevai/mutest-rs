@@ -26,13 +26,13 @@ pub struct FnItem<'hir> {
 impl<'tcx: 'hir, 'hir> FnItem<'hir> {
     pub fn from_node(tcx: TyCtxt<'tcx>, node: hir::Node<'hir>) -> Option<Self> {
         match node {
-            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ref kind, has_delayed_lints: _ }) => {
+            hir::Node::Item(&hir::Item { owner_id, span, vis_span, ref kind, eii: _ }) => {
                 let hir::ItemKind::Fn { sig, ident, generics, body, has_body: _ } = kind else { return None; };
                 let body = Some(tcx.hir_body(*body));
                 let fn_kind = hir::intravisit::FnKind::ItemFn(*ident, generics, sig.header);
                 Some(FnItem { owner_id, span, ident: *ident, kind: fn_kind, vis_span: Some(vis_span), sig, generics, body })
             }
-            hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness: _, has_delayed_lints: _ }) => {
+            hir::Node::TraitItem(&hir::TraitItem { owner_id, span, ident, ref generics, ref kind, defaultness: _ }) => {
                 let hir::TraitItemKind::Fn(sig, trait_fn) = kind else { return None; };
                 let body = match trait_fn {
                     hir::TraitFn::Provided(body) => Some(tcx.hir_body(*body)),
@@ -41,7 +41,7 @@ impl<'tcx: 'hir, 'hir> FnItem<'hir> {
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
                 Some(FnItem { owner_id, span, ident, kind: fn_kind, vis_span: None, sig, generics, body })
             }
-            hir::Node::ImplItem(&hir::ImplItem { owner_id, span, impl_kind: _, ident, ref generics, ref kind, has_delayed_lints: _ }) => {
+            hir::Node::ImplItem(&hir::ImplItem { owner_id, span, impl_kind: _, ident, ref generics, ref kind }) => {
                 let hir::ImplItemKind::Fn(sig, body) = kind else { return None; };
                 let body = Some(tcx.hir_body(*body));
                 let fn_kind = hir::intravisit::FnKind::Method(ident, sig);
@@ -235,7 +235,7 @@ impl<'hir> Descr for hir::ItemKind<'hir> {
             hir::ItemKind::Enum(..) => "enum",
             hir::ItemKind::Struct(..) => "struct",
             hir::ItemKind::Union(..) => "union",
-            hir::ItemKind::Trait(..) => "trait",
+            hir::ItemKind::Trait { .. } => "trait",
             hir::ItemKind::TraitAlias(..) => "trait alias",
             hir::ItemKind::Impl(..) => "impl",
             hir::ItemKind::GlobalAsm { .. } => "global asm item",
@@ -334,11 +334,12 @@ impl<'hir> Descr for hir::TyKind<'hir> {
             hir::TyKind::OpaqueDef(..) => "opaque definition",
             hir::TyKind::TraitObject(..) => "trait object",
             hir::TyKind::TraitAscription(..) => "trait ascription",
-            hir::TyKind::Typeof(..) => "typeof",
             hir::TyKind::Infer(..) => "infer",
             hir::TyKind::InferDelegation(..) => "infer delegation",
             hir::TyKind::UnsafeBinder(..) => "unsafe binder",
             hir::TyKind::Pat(..) => "pattern",
+            hir::TyKind::FieldOf(..) => "field of",
+            hir::TyKind::View(..) => "view",
             hir::TyKind::Err(..) => "error",
         }
     }
@@ -354,8 +355,8 @@ pub mod attr {
     pub fn match_attr_name(attr: &hir::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
         let hir::Attribute::Unparsed(attr_item) = attr else { return false; };
         match (tool, &attr_item.path.segments[..]) {
-            (None, [path_name]) => path_name.name == name,
-            (Some(tool), [path_tool, path_name]) => path_tool.name == tool && path_name.name == name,
+            (None, [path_name]) => *path_name == name,
+            (Some(tool), [path_tool, path_name]) => *path_tool == tool && *path_name == name,
             _ => false,
         }
     }

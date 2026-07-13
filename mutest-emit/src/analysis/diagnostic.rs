@@ -3,8 +3,8 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use rustc_errors::{AutoStream, ColorChoice, Diag, DiagCtxt, EmissionGuarantee, TerminalUrl};
-use rustc_errors::emitter::{ColorConfig, Destination, DynEmitter, HumanEmitter, OutputTheme};
-use rustc_errors::translation::Translator;
+use rustc_errors::annotate_snippet_emitter_writer::AnnotateSnippetEmitter;
+use rustc_errors::emitter::{ColorConfig, Destination, DynEmitter, OutputTheme};
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 
@@ -58,7 +58,6 @@ fn emit_with_emitter<G: EmissionGuarantee>(mut diagnostic: Diag<G>, emitter: Box
 pub fn raw_output_full<G: EmissionGuarantee>(
     diagnostic: Diag<G>,
     source_map: Option<Arc<SourceMap>>,
-    translator: Translator,
     short_message: bool,
     ui_testing: bool,
     ignored_directories_in_source_blocks: Vec<String>,
@@ -85,7 +84,7 @@ pub fn raw_output_full<G: EmissionGuarantee>(
         _ => ColorChoice::AlwaysAnsi,
     };
     let dst: Destination = AutoStream::new(Box::new(shared_buffer), color_choice);
-    let emitter = HumanEmitter::new(dst, translator)
+    let emitter = AnnotateSnippetEmitter::new(dst)
         .sm(source_map)
         .short_message(short_message)
         .ui_testing(ui_testing)
@@ -104,7 +103,6 @@ pub fn raw_output_full<G: EmissionGuarantee>(
 pub fn output_full<G: EmissionGuarantee>(
     diagnostic: Diag<G>,
     source_map: Option<Arc<SourceMap>>,
-    translator: Translator,
     short_message: bool,
     ui_testing: bool,
     ignored_directories_in_source_blocks: Vec<String>,
@@ -115,13 +113,12 @@ pub fn output_full<G: EmissionGuarantee>(
     theme: OutputTheme,
     color_config: ColorConfig,
 ) -> String {
-    let bytes = raw_output_full(diagnostic, source_map, translator, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config);
+    let bytes = raw_output_full(diagnostic, source_map, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config);
     String::from_utf8(bytes).unwrap()
 }
 
 pub fn output<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> String {
     let source_map = Some(sess.psess.clone_source_map());
-    let translator = rustc_driver::default_translator();
     let short_message = false;
     let ui_testing = sess.opts.unstable_opts.ui_testing;
     let ignored_directories_in_source_blocks = vec![];
@@ -132,7 +129,7 @@ pub fn output<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> Stri
     let theme = OutputTheme::Ascii;
     let color_config = sess.opts.color;
 
-    output_full(diagnostic, source_map, translator, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config)
+    output_full(diagnostic, source_map, short_message, ui_testing, ignored_directories_in_source_blocks, diagnostic_width, macro_backtrace, track_diagnostics, terminal_url, theme, color_config)
 }
 
 pub fn emit_str<G: EmissionGuarantee>(diagnostic: Diag<G>, sess: &Session) -> String {

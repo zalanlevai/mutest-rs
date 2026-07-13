@@ -1,9 +1,7 @@
-#![feature(assert_matches)]
 #![feature(associated_type_defaults)]
 #![feature(decl_macro)]
 #![feature(f16)]
 #![feature(f128)]
-#![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(iterator_try_collect)]
@@ -22,7 +20,6 @@ extern crate rustc_driver;
 extern crate rustc_error_messages;
 extern crate rustc_errors;
 extern crate rustc_expand;
-extern crate rustc_hash;
 extern crate rustc_hir;
 extern crate rustc_hir_analysis;
 extern crate rustc_index;
@@ -30,7 +27,6 @@ extern crate rustc_infer;
 extern crate rustc_metadata;
 extern crate rustc_middle;
 extern crate rustc_parse;
-extern crate rustc_query_system;
 extern crate rustc_resolve;
 extern crate rustc_session;
 extern crate rustc_span;

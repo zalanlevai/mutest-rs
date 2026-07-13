@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
-use rustc_hash::FxHashSet;
+use rustc_data_structures::fx::FxHashSet;
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::span_bug;
@@ -262,7 +262,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                             if let Some(assoc_item) = assoc_items
                                                 .filter_by_name_unhygienic(assoc_constraint.ident.name)
-                                                .find(|assoc_item| assoc_item.as_tag() == assoc_tag)
+                                                .find(|assoc_item| assoc_item.tag() == assoc_tag)
                                             {
                                                 // Copy and sanitize assoc item definition ident.
                                                 let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
@@ -326,7 +326,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        *path = ast::Path { span: path.span, segments, tokens: None };
+        *path = ast::Path { span: path.span, segments };
 
         if path.segments.is_empty() {
             span_bug!(path.span, "path was sanitized into an empty path");
@@ -463,12 +463,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::ForeignMod
                     | hir::DefKind::ForeignTy
                     | hir::DefKind::Fn
-                    | hir::DefKind::Const
+                    | hir::DefKind::Const { .. }
                     | hir::DefKind::Static { .. }
                     | hir::DefKind::Ctor(..)
                     | hir::DefKind::AssocTy
                     | hir::DefKind::AssocFn
-                    | hir::DefKind::AssocConst
+                    | hir::DefKind::AssocConst { .. }
                     | hir::DefKind::Macro(..)
                     => {
                         if let hir::DefKind::Ctor(..) = def_kind {
@@ -498,7 +498,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::ExternCrate
                     | hir::DefKind::Use
                     | hir::DefKind::AnonConst
-                    | hir::DefKind::InlineConst
                     | hir::DefKind::OpaqueTy
                     | hir::DefKind::GlobalAsm
                     | hir::DefKind::Impl { .. }
@@ -514,6 +513,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             | hir::Res::SelfCtor(..)
             | hir::Res::ToolMod
             | hir::Res::NonMacroAttr(..)
+            | hir::Res::OpenMod(..)
             | hir::Res::Err
             => None
         }
@@ -630,7 +630,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 }
             }
 
-            hir::LifetimeKind::Error => span_bug!(lifetime_hir.ident.span, "encountered invalid lifetime"),
+            hir::LifetimeKind::Error(_) => span_bug!(lifetime_hir.ident.span, "encountered invalid lifetime"),
         }
     }
 
@@ -703,18 +703,18 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 //       that appears in the trait def.
                 let dummy_self_param_ty = ty::ParamTy::new(0, kw::SelfUpper).to_ty(self.tcx);
                 let args = self.tcx.mk_args_trait(dummy_self_param_ty, trait_ref.skip_binder().args.iter().skip(1));
-                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, args).predicates;
+                let generic_predicates = self.tcx.predicates_of(trait_ref.skip_binder().def_id).instantiate(self.tcx, args).predicates.into_iter().map(|p| p.skip_normalization()).collect::<Vec<_>>();
 
                 (impl_def_id, generic_predicates, 0)
             }
             // `Self::$assoc` in `impl T`
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: false, .. } => {
-                let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx).predicates;
+                let generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx).predicates.into_iter().map(|p| p.skip_normalization()).collect::<Vec<_>>();
                 (impl_def_id, generic_predicates, 0)
             }
             // `Self::$assoc` in `trait T<'a, 'b>: Base<'a, 'b>`
             hir::Res::SelfTyParam { trait_: trait_def_id } => {
-                let mut generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx).predicates;
+                let mut generic_predicates = self.tcx.predicates_of(trait_def_id).instantiate_identity(self.tcx).predicates.into_iter().map(|p| p.skip_normalization()).collect::<Vec<_>>();
 
                 // NOTE: Because `predicates_of` does not reveal implicit supertrait predicates, we have to append those ourselves.
                 let supertrait_clauses = ty::elaborate::supertraits(self.tcx, ty::Binder::dummy(ty::TraitRef::identity(self.tcx, trait_def_id)));
@@ -730,7 +730,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             hir::Res::Def(hir::DefKind::TyParam, param_def_id) => {
                 let generics = self.tcx.generics_of(self.tcx.parent(param_def_id));
                 let Some(&param_index) = generics.param_def_id_to_index.get(&param_def_id) else { unreachable!() };
-                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id)).instantiate_identity(self.tcx).predicates;
+                let generic_predicates = self.tcx.predicates_of(self.tcx.parent(param_def_id)).instantiate_identity(self.tcx).predicates.into_iter().map(|p| p.skip_normalization()).collect::<Vec<_>>();
                 (self.tcx.parent(param_def_id), generic_predicates, param_index)
             }
             _ => { return None; }
@@ -809,10 +809,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                         //       so we have to use the only remaining accessible workaround,
                                         //       even though it is marked as "quasi-deprecated".
                                         let ty = rustc_hir_analysis::lower_ty(self.tcx, ty_hir);
-                                        let ty::TyKind::Alias(ty::AliasTyKind::Projection | ty::AliasTyKind::Inherent, alias_ty) = ty.kind() else { unreachable!() };
+                                        let ty::TyKind::Alias(_, alias_ty) = ty.kind() else { unreachable!() };
+                                        let (ty::AliasTyKind::Projection { def_id } | ty::AliasTyKind::Inherent { def_id }) = alias_ty.kind else { unreachable!() };
 
-                                        let trait_item_def_id = alias_ty.def_id;
-                                        let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
+                                        let trait_item_def_id = def_id;
+                                        let trait_item_def_kind = self.tcx.def_kind(trait_item_def_id);
 
                                         qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
                                     }
@@ -1173,7 +1174,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return;
         }
 
-        let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
+        let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![] };
         let parent_mod_def_id = hir::ModDefId::new_unchecked(parent_mod_def_id);
         adjust_mod_path_from_expansion(&mut parent_mod_path, parent_mod_def_id, ModPathKind::ParentModPathStub, Some(import_def_id.to_def_id()));
         path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), parent_mod_path.segments);
@@ -1215,7 +1216,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
 
             match &use_tree.kind {
-                ast::UseTreeKind::Glob => {
+                ast::UseTreeKind::Glob(_) => {
                     let Some(res) = def_res.node_res(node_id).or_else(|| {
                         let [.., last_prefix_segment] = &use_tree.prefix.segments[..] else { return None; };
                         def_res.node_res(last_prefix_segment.id)
@@ -1258,7 +1259,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         let import_paths = imports.into_iter()
             .map(|import| {
                 let span = import.path_segments.last().unwrap().ident.span;
-                let mut path = ast::Path { span, segments: import.path_segments, tokens: None };
+                let mut path = ast::Path { span, segments: import.path_segments };
                 self.sanitize_import_path(scope, import.node_id, &mut path, import.res);
 
                 let mut use_kind = import.use_kind;
@@ -1309,10 +1310,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let nested_use_tree = ast::UseTree {
                     prefix: path,
                     kind: match use_kind {
-                        UseKind::Glob => ast::UseTreeKind::Glob,
+                        UseKind::Glob => ast::UseTreeKind::Glob(DUMMY_SP),
                         UseKind::Single { rename, .. } => ast::UseTreeKind::Simple(rename),
                     },
-                    span: DUMMY_SP,
                 };
 
                 (nested_use_tree, ast::DUMMY_NODE_ID)
@@ -1575,7 +1575,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
                     | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id)
                     | hir::Res::Def(hir::DefKind::AssocTy, alias_def_id) => {
-                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
+                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity().skip_normalization();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
                     }
@@ -1600,6 +1600,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     ast::StructRest::Base(base_expr) => self.visit_expr(base_expr),
                     ast::StructRest::Rest(_span) => {}
                     ast::StructRest::None => {}
+                    ast::StructRest::NoneWithError(_) => {}
                 }
 
                 return;
@@ -1680,7 +1681,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
                     | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id)
                     | hir::Res::Def(hir::DefKind::AssocTy, alias_def_id) => {
-                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
+                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity().skip_normalization();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
                     }
@@ -1766,6 +1767,12 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     fn visit_vis(&mut self, vis: &mut ast::Visibility) {
         match &mut vis.kind {
             ast::VisibilityKind::Restricted { path, id, .. } => {
+                // `pub(crate)`, `pub(self)`, and `pub(super)` restrict through a single path-keyword
+                // segment. Such keywords are not macro-hygiene-sensitive and need no re-rooting, and
+                // the resolver does not record a partial resolution for them, so leave them as-is.
+                if let [segment] = &path.segments[..] && segment.ident.is_path_segment_keyword() {
+                    return;
+                }
                 let Some(res) = self.def_res.node_res(*id) else {
                     span_bug!(vis.span, "restricted visibility path `{}` cannot be resolved", ast::print::path_to_string(path));
                 };
@@ -1792,6 +1799,7 @@ fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
             allow_internal_unsafe: false,
             local_inner_macros: false,
             collapse_debuginfo: true,
+            hide_backtrace: false,
         }
     }
 
@@ -1807,9 +1815,9 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     let cstore = CStore::from_tcx(tcx);
 
     // Find all loaded proc macro syntax extensions.
-    cstore.all_proc_macro_def_ids()
+    cstore.all_proc_macro_def_ids(tcx)
         .filter_map(|def_id| {
-            match cstore.load_macro_untracked(def_id, tcx) {
+            match cstore.load_macro_untracked(tcx, def_id) {
                 LoadedMacro::ProcMacro(syntax_extension) => Some(syntax_extension),
                 // TODO: Generate syntax extensions from regular macros.
                 LoadedMacro::MacroDef { def: _, ident: _, attrs: _, span: _, edition: _ } => None,

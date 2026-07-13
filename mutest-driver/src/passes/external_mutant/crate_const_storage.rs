@@ -55,7 +55,7 @@ pub fn extract_rustc_invocation<'tcx>(tcx: TyCtxt<'tcx>, cnum: hir::CrateNum) ->
 
     let crate_kind_const = tcx.module_children(mutest_generated_mod).iter().find_map(|mod_child| {
         if mod_child.ident.name != sym::CRATE_KIND { return None; }
-        let hir::Res::Def(hir::DefKind::Const, def_id) = mod_child.res else { return None; };
+        let hir::Res::Def(hir::DefKind::Const { .. }, def_id) = mod_child.res else { return None; };
         Some(def_id)
     })?;
     let Ok(crate_kind_val) = tcx.const_eval_poly(crate_kind_const) else { unreachable!() };
@@ -65,7 +65,7 @@ pub fn extract_rustc_invocation<'tcx>(tcx: TyCtxt<'tcx>, cnum: hir::CrateNum) ->
 
     let Some(rustc_args_const) = tcx.module_children(mutest_generated_mod).iter().find_map(|mod_child| {
         if mod_child.ident.name != Symbol::intern("RUSTC_ARGS") { return None; }
-        let hir::Res::Def(hir::DefKind::Const, def_id) = mod_child.res else { return None; };
+        let hir::Res::Def(hir::DefKind::Const { .. }, def_id) = mod_child.res else { return None; };
         Some(def_id)
     }) else {
         let mut diagnostic = tcx.dcx().struct_fatal("missing `mutest_generated::RUSTC_ARGS` in recompilable dependency crate");
@@ -80,7 +80,7 @@ pub fn extract_rustc_invocation<'tcx>(tcx: TyCtxt<'tcx>, cnum: hir::CrateNum) ->
 
     let Some(rustc_env_vars_const) = tcx.module_children(mutest_generated_mod).iter().find_map(|mod_child| {
         if mod_child.ident.name != Symbol::intern("RUSTC_ENV_VARS") { return None; }
-        let hir::Res::Def(hir::DefKind::Const, def_id) = mod_child.res else { return None; };
+        let hir::Res::Def(hir::DefKind::Const { .. }, def_id) = mod_child.res else { return None; };
         Some(def_id)
     }) else {
         let mut diagnostic = tcx.dcx().struct_fatal("missing `mutest_generated::RUSTC_ENV_VARS` in recompilable dependency crate");

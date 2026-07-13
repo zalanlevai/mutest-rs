@@ -10,7 +10,7 @@ use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileNameDisplayPreference, Ident, MacroKind, Symbol, path, sym};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, MacroKind, Symbol, path, sym};
 
 pub enum TestKind {
     Test,
@@ -209,7 +209,7 @@ fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_loweri
 
         let (source_file, lo_line, lo_col, hi_line, hi_col) = sess.source_map().span_to_location_info(ident.span);
         let file_name = match source_file {
-            Some(source_file) => source_file.name.display(FileNameDisplayPreference::Remapped).to_string(),
+            Some(source_file) => source_file.name.prefer_remapped_unconditionally().to_string(),
             None => "no-location".to_owned(),
         };
 

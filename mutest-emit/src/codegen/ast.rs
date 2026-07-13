@@ -38,6 +38,7 @@ pub enum DefItemKind<'ast> {
     Use(&'ast ast::UseTree),
     Static(&'ast ast::StaticItem),
     Const(&'ast ast::ConstItem),
+    ConstBlock(&'ast ast::ConstBlockItem),
     Fn(&'ast ast::Fn),
     Mod(ast::Safety, Ident, &'ast ast::ModKind),
     ForeignMod(&'ast ast::ForeignMod),
@@ -62,6 +63,7 @@ impl<'ast> DefItemKind<'ast> {
             ast::ItemKind::Use(use_tree) => Self::Use(use_tree),
             ast::ItemKind::Static(static_item) => Self::Static(static_item),
             ast::ItemKind::Const(const_item) => Self::Const(const_item),
+            ast::ItemKind::ConstBlock(const_block_item) => Self::ConstBlock(const_block_item),
             ast::ItemKind::Fn(fn_item) => Self::Fn(fn_item),
             ast::ItemKind::Mod(safety, ident, mod_kind) => Self::Mod(*safety, *ident, mod_kind),
             ast::ItemKind::ForeignMod(foreign_mod) => Self::ForeignMod(foreign_mod),
@@ -205,7 +207,7 @@ pub mod mk {
 
         segments.push(self::path_segment_raw(sp, last_ident, args));
 
-        ast::Path { span: sp, segments, tokens: None }
+        ast::Path { span: sp, segments }
     }
 
     pub fn path_args(sp: Span, global: bool, idents: Vec<Ident>, args: Vec<ast::GenericArg>) -> ast::Path {
@@ -260,7 +262,7 @@ pub mod mk {
     }
 
     pub fn ty(sp: Span, kind: ast::TyKind) -> Box<ast::Ty> {
-        Box::new(ast::Ty { id: ast::DUMMY_NODE_ID, span: sp, kind, tokens: None })
+        Box::new(ast::Ty { id: ast::DUMMY_NODE_ID, span: sp, kind })
     }
 
     pub fn ty_mut(ty: Box<ast::Ty>, mutbl: ast::Mutability) -> ast::MutTy {
@@ -421,7 +423,7 @@ pub mod mk {
     }
 
     pub fn pat(sp: Span, kind: ast::PatKind) -> Box<ast::Pat> {
-        Box::new(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind, tokens: None })
+        Box::new(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind })
     }
 
     pub fn pat_wild(sp: Span) -> Box<ast::Pat> {
@@ -462,7 +464,7 @@ pub mod mk {
             span: sp,
             attrs: ast::AttrVec::new(),
             pat,
-            guard,
+            guard: guard.map(|cond| Box::new(ast::Guard { cond: *cond, span_with_leading_if: sp })),
             body: expr,
             is_placeholder: false,
         }
@@ -681,7 +683,6 @@ pub mod mk {
             span: sp,
             rules: block_check_mode,
             stmts,
-            tokens: None,
         })
     }
 
@@ -698,7 +699,7 @@ pub mod mk {
     }
 
     pub fn vis(sp: Span, kind: ast::VisibilityKind) -> ast::Visibility {
-        ast::Visibility { span: sp.shrink_to_lo(), kind, tokens: None }
+        ast::Visibility { span: sp.shrink_to_lo(), kind }
     }
 
     pub fn vis_default(sp: Span) -> ast::Visibility {
@@ -735,6 +736,7 @@ pub mod mk {
             safety: ast::Safety::Default,
             mutability: mutbl,
             expr: Some(expr),
+            eii_impls: ThinVec::new(),
             define_opaque: None,
         })))
     }
@@ -742,7 +744,7 @@ pub mod mk {
     pub fn item_const(sp: Span, vis: ast::Visibility, ident: Ident, ty: Box<ast::Ty>, expr: Box<ast::Expr>) -> Box<ast::Item> {
         self::item(sp, ThinVec::new(), vis, ast::ItemKind::Const(Box::new(ast::ConstItem {
             ident,
-            defaultness: ast::Defaultness::Final,
+            defaultness: ast::Defaultness::Implicit,
             generics: ast::Generics {
                 params: ThinVec::new(),
                 where_clause: ast::WhereClause {
@@ -753,7 +755,7 @@ pub mod mk {
                 span: sp,
             },
             ty,
-            rhs: Some(ast::ConstItemRhs::Body(expr)),
+            rhs_kind: ast::ConstItemRhsKind::new_body(expr),
             define_opaque: None,
         })))
     }
@@ -773,7 +775,7 @@ pub mod mk {
     pub fn item_fn(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, header: Option<ast::FnHeader>, inputs: ThinVec<ast::Param>, output: Option<Box<ast::Ty>>, body: Option<Box<ast::Block>>) -> Box<ast::Item> {
         self::item(sp, ThinVec::new(), vis, ast::ItemKind::Fn(Box::new(ast::Fn {
             ident,
-            defaultness: ast::Defaultness::Final,
+            defaultness: ast::Defaultness::Implicit,
             generics: generics.unwrap_or_default(),
             sig: ast::FnSig {
                 span: sp,
@@ -781,6 +783,7 @@ pub mod mk {
                 decl: self::fn_decl(inputs, self::fn_ret_ty(sp, output)),
             },
             contract: None,
+            eii_impls: ThinVec::new(),
             define_opaque: None,
             body,
         })))
@@ -793,6 +796,7 @@ pub mod mk {
             attrs: ast::AttrVec::new(),
             vis,
             safety: ast::Safety::Default,
+            mut_restriction: ast::MutRestriction { kind: ast::RestrictionKind::Unrestricted, span: sp.shrink_to_lo() },
             ident,
             ty,
             default: None,
@@ -870,11 +874,11 @@ pub mod mk {
     }
 
     pub fn attr_inner_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args, tokens: None }, None, ast::AttrStyle::Inner, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args: ast::AttrItemKind::Unparsed(args) }, None, ast::AttrStyle::Inner, sp)
     }
 
     pub fn attr_outer_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args, tokens: None }, None, ast::AttrStyle::Outer, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args: ast::AttrItemKind::Unparsed(args) }, None, ast::AttrStyle::Outer, sp)
     }
 
     pub fn attr_inner(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
@@ -882,7 +886,7 @@ pub mod mk {
     }
 
     pub fn attr_outer(g: &ast::attr::AttrIdGenerator, sp: Span, unsafety: ast::Safety, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety, path: ast::Path::from_ident(ident), args, tokens: None }, None, ast::AttrStyle::Outer, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety, path: ast::Path::from_ident(ident), args: ast::AttrItemKind::Unparsed(args) }, None, ast::AttrStyle::Outer, sp)
     }
 
     pub fn attr_args_delimited(sp: Span, delimiter: ast::token::Delimiter, tokens: ast::tokenstream::TokenStream) -> ast::AttrArgs {
@@ -1011,8 +1015,10 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::Index(..) => "index",
             ast::ExprKind::Range(..) => "range",
             ast::ExprKind::Underscore => "_",
+            ast::ExprKind::DirectConstArg(..) => "const argument",
             ast::ExprKind::Path(..) => "path",
             ast::ExprKind::AddrOf(..) => "reference",
+            ast::ExprKind::Move(..) => "move",
             ast::ExprKind::Break(..) => "break",
             ast::ExprKind::Continue(..) => "continue",
             ast::ExprKind::Ret(..) => "return",
@@ -1076,12 +1082,14 @@ impl Descr for ast::TyKind {
             ast::TyKind::FnPtr(..) => "fn pointer",
             ast::TyKind::TraitObject(..) => "trait object",
             ast::TyKind::ImplTrait(..) => "impl trait",
-            ast::TyKind::Typeof(..) => "typeof",
             ast::TyKind::ImplicitSelf => "self",
             ast::TyKind::Infer => "infer",
             ast::TyKind::CVarArgs => "C var args (va_list)",
             ast::TyKind::UnsafeBinder(..) => "unsafe binder",
             ast::TyKind::Pat(..) => "pattern",
+            ast::TyKind::FieldOf(..) => "field of",
+            ast::TyKind::View(..) => "view",
+            ast::TyKind::DirectConstArg(..) => "const argument",
             ast::TyKind::Paren(..) => "parentheses",
             ast::TyKind::MacCall(..) => "macro call",
             ast::TyKind::Err(..) => "error",
@@ -1105,7 +1113,7 @@ pub mod print {
         match qself {
             Some(qself) => {
                 // HACK: Workaround, because `print_qpath` is private.
-                let dummy_ty = ast::Ty { id: DUMMY_NODE_ID, span: DUMMY_SP, kind: ast::TyKind::Path(Some(Box::new(qself.clone())), path.clone()), tokens: None };
+                let dummy_ty = ast::Ty { id: DUMMY_NODE_ID, span: DUMMY_SP, kind: ast::TyKind::Path(Some(Box::new(qself.clone())), path.clone()) };
                 ty_to_string(&dummy_ty)
             },
             None => path_to_string(path),
