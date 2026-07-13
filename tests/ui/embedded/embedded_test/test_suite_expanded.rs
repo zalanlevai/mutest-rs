@@ -3,7 +3,7 @@
 //@ print-mutations
 //@ run: fail
 //@ stdout
-//@ mutest-flags: --Zembedded
+//@ mutest-flags: -Z embedded
 
 // HACK: Stub out the runtime dependencies of the embedded_test macro expansion.
 mod embedded_test {

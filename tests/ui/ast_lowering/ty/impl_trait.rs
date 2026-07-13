@@ -1,5 +1,5 @@
 //@ build
-//@ verify: ast_lowering
+//@ verify: ast-lowering
 //@ stderr: empty
 
 #![feature(type_alias_impl_trait)]

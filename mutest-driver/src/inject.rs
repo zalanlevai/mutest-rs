@@ -96,7 +96,7 @@ pub fn inject_runtime_crate_and_deps(config: &Config, compiler_config: &mut Comp
         externs.insert(key.clone(), entry.clone());
     }
 
-    if !config.opts.embedded {
+    if !config.opts.unstable_flags.embedded {
         externs.insert("mutest_runtime".to_owned(), ExternEntry {
             location: ExternLocation::ExactPaths(BTreeSet::from([
                 CanonicalizedPath::new(mutest_target_artifacts_dir_path.join(rlib_catalog::MUTEST_RUNTIME_RLIB_FILENAME)),
@@ -148,7 +148,7 @@ pub fn inject_runtime_crate_and_deps(config: &Config, compiler_config: &mut Comp
         let mut dep_file_paths = BTreeSet::new();
         // FIXME: Use the actual public dependency list of the injected embedded runtime crate,
         //        rather than piggy-backing off the main mutest-runtime crate.
-        if !config.opts.embedded {
+        if !config.opts.unstable_flags.embedded {
             dep_file_paths.insert(CanonicalizedPath::new(mutest_target_deps_dir_path.join(dep_file_name)));
         } else {
             let dep_file_name_root = match dep_file_name.split_once("-") {
@@ -218,10 +218,10 @@ pub fn inject_test_crate_shim_if_no_target_std(config: &Config, compiler_config:
 
     let target_triple = compiler_config.opts.target_triple.tuple();
 
-    if !config.opts.embedded {
+    if !config.opts.unstable_flags.embedded {
         let mut diag = early_dcx.early_struct_fatal(format!("target `{}` does not support std, but the embedded mutation runtime was not specified", target_triple));
         diag.note("the default mutation runtime does not support targets without std support");
-        diag.note("consider running with the `--Zembedded` flag to use the embedded mutation runtime");
+        diag.note("consider running with the `-Z embedded` flag to use the experimental embedded mutation runtime");
         diag.emit();
     }
 

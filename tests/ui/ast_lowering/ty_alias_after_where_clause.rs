@@ -1,4 +1,5 @@
-//@ verify: ast_lowering
+//@ build
+//@ verify: ast-lowering
 //@ stderr: empty
 
 #![allow(unused)]

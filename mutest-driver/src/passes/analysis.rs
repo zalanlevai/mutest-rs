@@ -55,13 +55,13 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
     if opts.crate_kind.provides_tests() {
         mutest_emit::codegen::entry_point::clean_generated_entry_points(generated_crate_ast);
 
-        if opts.embedded {
+        if opts.unstable_flags.embedded {
             mutest_emit::codegen::entry_point::generate_embedded_test_entry_point(tcx, generated_crate_ast);
         }
     }
 
     // TODO: Deprecate and remove from expansion module.
-    if !opts.sanitize_macro_expns {
+    if opts.unstable_flags.no_sanitize_macro_expns {
         mutest_emit::codegen::expansion::load_modules(tcx.sess, unexpanded_crate_ast);
         mutest_emit::codegen::expansion::revert_non_local_macro_expansions(generated_crate_ast, unexpanded_crate_ast);
     }
@@ -85,7 +85,7 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
         }
         _ => None,
     };
-    mutest_emit::codegen::harness::generate_harness(tcx, cargo_metadata.as_ref(), opts.embedded, entry_points, meta_mutant, generated_crate_ast);
+    mutest_emit::codegen::harness::generate_harness(tcx, cargo_metadata.as_ref(), opts.unstable_flags.embedded, entry_points, meta_mutant, generated_crate_ast);
 
     // HACK: The generated code is currently based on the expanded AST and contains references to the internals
     //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
@@ -143,7 +143,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     let sess_opts = mutest_emit::session::Options {
         verbosity: opts.verbosity,
         report_timings: opts.report_timings,
-        sanitize_macro_expns: opts.sanitize_macro_expns,
+        sanitize_macro_expns: !opts.unstable_flags.no_sanitize_macro_expns,
     };
 
     let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
@@ -190,7 +190,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
             let t_test_discovery_start = Instant::now();
             let tests = opts.crate_kind.provides_tests()
-                .then(|| match opts.embedded {
+                .then(|| match opts.unstable_flags.embedded {
                     false => mutest_emit::analysis::tests::collect_tests(tcx, &generated_crate_ast, &def_res),
                     true => mutest_emit::analysis::tests::collect_and_mark_embedded_tests(sess, &mut generated_crate_ast, &def_res),
                 })
@@ -410,18 +410,18 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 //       which are marked up with `#[rustc_test_marker]` attrs to
                 //       trigger the generation of visible paths to custom tests
                 //       using the built-in codegen mechanism.
-                if !opts.embedded {
+                if !opts.unstable_flags.embedded {
                     // Undo `#[test]` macro expansions, since these are only valid with hygiene information.
                     mutest_emit::codegen::expansion::clean_up_test_cases(sess, &tests, &mut generated_crate_ast);
                 }
             }
 
             let body_res = mutest_emit::analysis::ast_lowering::resolve_bodies(tcx, &def_res, &generated_crate_ast);
-            if opts.verify_opts.ast_lowering {
+            if opts.unstable_flags.verify_ast_lowering {
                 mutest_emit::analysis::ast_lowering::validate_body_resolutions(&body_res, &def_res, &generated_crate_ast);
             }
 
-            if opts.sanitize_macro_expns {
+            if !opts.unstable_flags.no_sanitize_macro_expns {
                 let t_sanitize_macro_expns_start = Instant::now();
                 mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &crate_res, &def_res, &body_res, &mut generated_crate_ast);
                 pass_result.sanitize_macro_expns_duration = t_sanitize_macro_expns_start.elapsed();

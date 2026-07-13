@@ -1,6 +1,100 @@
 #![feature(decl_macro)]
+#![feature(if_let_guard)]
 
 use std::path::PathBuf;
+use std::process;
+
+pub macro extend_const_slice($base:path: &[$ty:ty], $ext:expr) {
+    &const {
+        const EXT: &[$ty] = $ext;
+        const LEN: usize = $base.len() + EXT.len();
+        let mut dst: [$ty; LEN] = match ($base.len(), EXT.len()) {
+            // HACK: We must generate a value of type `[$ty; LEN]` here
+            //       regardless of whether it will be used during const evaluation
+            //       (i.e., even if `LEN != 0`).
+            // SAFETY: For the only case this will be used (`LEN == 0`),
+            //         the value will always be a `[_; 0]`, i.e., an empty `[]`.
+            (0, 0) => unsafe { std::mem::transmute([0u8; std::mem::size_of::<$ty>() * LEN]) }
+            (0, _) => [EXT[0]; LEN],
+            _ => [$base[0]; LEN],
+        };
+        let mut i = 0;
+        while i < $base.len() {
+            dst[i] = $base[i];
+            i += 1;
+        }
+        i = 0;
+        while i < EXT.len() {
+            dst[i + $base.len()] = EXT[i];
+            i += 1;
+        }
+        dst
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct UnstableFlag {
+    pub name: &'static str,
+    pub help: Option<&'static str>,
+}
+
+impl UnstableFlag {
+    pub const fn new(name: &'static str, help: Option<&'static str>) -> Self {
+        Self { name, help }
+    }
+}
+
+pub fn print_unstable_flags_help(flags: &[UnstableFlag]) {
+    color_print::cprintln!("<bright-green,bold>Unstable Flags:</>");
+    let w_name = flags.iter().map(|flag| flag.name.len()).max().unwrap_or_default();
+    color_print::cprintln!("  <bright-blue,bold>-Z {:<w_name$}</>  Print help information.", "help");
+    for flag in flags {
+        color_print::cprint!("  <bright-blue,bold>-Z {:<w_name$}</>", flag.name);
+        if let Some(help) = &flag.help {
+            color_print::cprint!("  {}", help);
+        }
+        color_print::cprintln!("");
+    }
+}
+
+pub fn check_unstable_flags(provided_flags: &[&str], known_flags: &[UnstableFlag]) {
+    for flag in provided_flags {
+        if !known_flags.iter().any(|f| f.name == *flag) {
+            color_print::ceprintln!("<red,bold>error</>: unknown unstable flag `{}`", flag);
+            process::exit(1);
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct UnstableOption {
+    pub name: &'static str,
+    pub value: Option<&'static str>,
+}
+
+impl UnstableOption {
+    pub const fn new(name: &'static str, value: Option<&'static str>) -> Self {
+        Self { name, value }
+    }
+}
+
+pub fn check_unstable_options(matches: &clap::ArgMatches, options: &[UnstableOption]) {
+    for option in options {
+        if let None | Some(clap::parser::ValueSource::DefaultValue) = matches.value_source(option.name) { continue; }
+
+        match option.value {
+            None => {
+                color_print::ceprintln!("<red,bold>error</>: the `--{}` flag is unstable, pass `-Z unstable-options` to enable it", option.name);
+                process::exit(1);
+            }
+            Some(value) if let Some(mut values) = matches.get_many::<String>(option.name) && values.any(|v| v == value) => {
+                color_print::ceprintln!("<red,bold>error</>: the `--{}={}` option is unstable, pass `-Z unstable-options` to enable it", option.name, value);
+                process::exit(1);
+            }
+            _ => {}
+        }
+    }
+}
 
 pub macro opts(
     $all:ident, $possible_values_vis:vis $possible_values:ident where
@@ -27,6 +121,20 @@ pub macro exclusive_opts(
         vec![$($(#[$attr])* clap::builder::PossibleValue::new($name)$(.help($help))?,)*]
     }
 }
+
+pub const UNSTABLE_FLAGS: &[UnstableFlag] = &[
+    UnstableFlag::new("unstable-options", Some("Enable the use of unstable options.")),
+    // Permanently unstable options.
+    UnstableFlag::new("verify-ast-lowering", Some("Verify whether all AST nodes are mapped to their HIR counterparts.")),
+    // Experimental options.
+    UnstableFlag::new("embedded", Some("Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime.")),
+    // Legacy options.
+    UnstableFlag::new("no-sanitize-macro-expns", Some("Skip sanitizing the identifiers and paths in macro expansions. This is legacy behavior and is not recommended.")),
+];
+
+pub const UNSTABLE_OPTIONS: &[UnstableOption] = &[
+    // No unstable options at the moment.
+];
 
 pub mod mutation_operators {
     crate::opts! { ALL, pub(crate) possible_values where
@@ -95,12 +203,6 @@ pub mod call_graph_non_local_call_view {
     }
 }
 
-pub mod verify {
-    crate::opts! { ALL, pub(crate) possible_values where
-        AST_LOWERING = "ast_lowering";
-    }
-}
-
 pub const fn rustc_version_str() -> &'static str {
     env!("RUSTC_VERSION_STR")
 }
@@ -159,11 +261,7 @@ pub fn command(name: &'static str) -> clap::Command {
         .arg(clap::arg!(--"mutant-batch-size" [MUTANT_BATCH_SIZE] "Maximum number of mutations to batch into a single batch.").default_value("1").value_parser(clap::value_parser!(usize)))
         .arg(clap::arg!(--"mutant-batch-seed" [MUTANT_BATCH_SEED] "Random seed to use for randomness during mutation batching."))
         .arg(clap::arg!(--"mutant-batch-greedy-ordering-heuristic" [MUTANT_BATCH_GREEDY_ORDERING_HEURISTIC] "Ordering heuristic to use for `greedy` mutation batching algorithm.").value_parser(mutant_batch_greedy_ordering_heuristic::possible_values()).default_value(mutant_batch_greedy_ordering_heuristic::REVERSE_CONFLICTS))
-        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)))
-        .next_help_heading("Experimental Options")
-        .arg(clap::arg!(--Zverify [VERIFY] "Perform additional checks to verify correctness and completeness. Multiple may be specified, separated by commas.").value_delimiter(',').value_parser(verify::possible_values()))
-        .arg(clap::arg!(--Zembedded "Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime."))
-        .arg(clap::arg!(--"Zno-sanitize-macro-expns" "Skip sanitizing the identifiers and paths in the expanded output of macro invocations. This was the previous behavior and is not recommended."));
+        .arg(clap::arg!(--"mutant-batch-greedy-epsilon" [MUTANT_BATCH_GREEDY_EPSILON] "Optional epsilon parameter for `greedy` mutation batching algorithm, used to control the probability of random mutation assignment.").default_value("0").value_parser(clap::value_parser!(f64)));
 
     cmd
 }
