@@ -22,9 +22,14 @@ pub fn embed_rustc_invocation(krate: &mut ast::Crate, rustc_invocation: &RustcIn
         ast::mk::item_const(DUMMY_SP, vis, ident, ty, expr)
     };
 
-    // pub const RUSTC_ENV_VARS: &str = "KEY\x1Fval\x1F...";
+    // pub const RUSTC_ENV_VARS: &str = "KEY\x1Fval\x1EKEY\x1Fval\x1E...";
+    // NOTE: Pairs are separated by `\x1E` and the key/value within a pair by `\x1F`, because
+    //       some values (e.g. `MUTEST_ENCODED_ARGS`) themselves contain `\x1F` separators.
     let rustc_env_vars_const = {
-        let rustc_env_vars_str = rustc_invocation.env_vars.iter().flat_map(|(k, v)| [k, v]).map(|s| -> &str { s }).intersperse("\x1F").collect::<String>();
+        let rustc_env_vars_str = rustc_invocation.env_vars.iter()
+            .map(|(k, v)| format!("{k}\x1F{v}"))
+            .collect::<Vec<_>>()
+            .join("\x1E");
 
         let vis = ast::mk::vis_pub(DUMMY_SP);
         let ident = Ident::new(Symbol::intern("RUSTC_ENV_VARS"), DUMMY_SP);
@@ -91,7 +96,10 @@ pub fn extract_rustc_invocation<'tcx>(tcx: TyCtxt<'tcx>, cnum: hir::CrateNum) ->
     let Some(rustc_env_vars_bytes) = rustc_env_vars_val.try_get_slice_bytes_for_diagnostics(tcx) else { unreachable!() };
 
     let Ok(rustc_env_vars) = str::from_utf8(rustc_env_vars_bytes) else { tcx.dcx().fatal("invalid UTF-8 in rustc invocation metadata") };
-    let rustc_env_vars = rustc_env_vars.split("\x1F").array_chunks::<2>().map(|[k, v]| (k.to_owned(), v.to_owned())).collect::<Vec<_>>();
+    let rustc_env_vars = rustc_env_vars.split('\x1E')
+        .filter_map(|pair| pair.split_once('\x1F'))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect::<Vec<_>>();
 
     Some(RustcInvocation {
         args: rustc_args,
