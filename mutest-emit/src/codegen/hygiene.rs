@@ -674,8 +674,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let ty_ast = self.sanitize_ty(ty, binding_item_def_id, span);
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
                     }
-                    ty::GenericArgKind::Const(_) => {
-                        None // TODO
+                    ty::GenericArgKind::Const(ct) => {
+                        let const_ast = ty::const_ast(self.tcx, self.current_scope, span, ct, binding_item_def_id, true)?;
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Const(const_ast)))
                     }
                 }
             })

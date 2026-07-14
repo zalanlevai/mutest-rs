@@ -58,6 +58,15 @@ macro m() {
     }
     fn mul_f32<T: std::ops::Mul<f32>>() -> Result<(), T::Output> { Ok(()) }
 
+    // TEST: Transplant const generic args from type parameter predicates.
+    trait Aligned<const N: usize> {
+        type Error: Error;
+    }
+    // NOTE: A const arg that is a generic const parameter is reconstructed as its parameter name,
+    //       while a concrete const arg is reconstructed from its evaluated value.
+    fn align_generic<const M: usize, __A: Aligned<M>>() -> Result<(), __A::Error> { Ok(()) }
+    fn align_concrete<__A: Aligned<8>>() -> Result<(), __A::Error> { Ok(()) }
+
     // TEST: Do not transplant anything if no bounds are available for the trait.
     trait DefaultWithIndirection<'de>: Default {
         type Error;
