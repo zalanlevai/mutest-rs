@@ -1,0 +1,12 @@
+diff --git a/cargo-mutest/src/main.rs b/cargo-mutest/src/main.rs
+index c302f48..17da9f3 100644
+--- a/cargo-mutest/src/main.rs
++++ b/cargo-mutest/src/main.rs
+@@ -66,7 +66,7 @@ mod run_print {
+ #[cfg(not(windows))]
+ fn cargo_command_base() -> Command {
+     let mut cmd = Command::new("cargo");
+-    cmd.arg(format!("+{}", build::RUST_TOOLCHAIN_VERSION));
++    // cmd.arg(format!("+{}", build::RUST_TOOLCHAIN_VERSION));
+     cmd
+ }
