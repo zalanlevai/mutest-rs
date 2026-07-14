@@ -5,7 +5,6 @@ use rustc_middle::ty::TyCtxt;
 use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::call_graph::{EntryPoints, TargetReachability, Unsafety};
-use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::expansion::TcxExpansionExt;
@@ -76,7 +75,7 @@ pub fn bake_mutation<'tcx, 'ent>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: Entr
             ast::mk::expr_str(sp, &mutation.display_name())
         }),
         ast::mk::expr_struct_field(sp, Ident::new(sym::display_location, sp), {
-            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.display_location(tcx.sess)))
+            ast::mk::expr_str(sp, &mutation.display_location(tcx.sess))
         }),
 
         ast::mk::expr_struct_field(sp, Ident::new(sym::reachable_from, sp), {
@@ -102,7 +101,7 @@ pub fn bake_mutation<'tcx, 'ent>(sp: Span, tcx: TyCtxt<'tcx>, entry_points: Entr
         }),
 
         ast::mk::expr_struct_field(sp, Ident::new(sym::undetected_diagnostic, sp), {
-            ast::mk::expr_str(sp, &diagnostic::escape_literal(&mutation.undetected_diagnostic(tcx.sess)))
+            ast::mk::expr_str(sp, &mutation.undetected_diagnostic(tcx.sess))
         }),
     ])
 }
