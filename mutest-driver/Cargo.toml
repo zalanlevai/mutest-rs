@@ -18,7 +18,7 @@ rustc_private = true
 [dependencies]
 mutest-driver-cli = { path = "../mutest-driver-cli" }
 mutest-emit = { path = "../mutest-emit" }
-mutest-json = { path = "../mutest-json", features = ["rustc"] }
+mutest-json = { path = "../mutest-json" }
 mutest-operators = { path = "../mutest-operators" }
 
 clap = { version = "4", features = ["cargo"] }
