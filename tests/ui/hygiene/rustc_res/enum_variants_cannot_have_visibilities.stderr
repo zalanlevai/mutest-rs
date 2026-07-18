@@ -1,0 +1,43 @@
+error[E0449]: visibility qualifiers are not permitted here
+ --> tests/ui/hygiene/rustc_res/enum_variants_cannot_have_visibilities.rs:7:9
+  |
+7 |         pub PubVariant,
+  |         ^^^ help: remove the qualifier
+  |
+  = note: enum variants and their fields always share the visibility of the enum they are in
+
+error[E0449]: visibility qualifiers are not permitted here
+ --> tests/ui/hygiene/rustc_res/enum_variants_cannot_have_visibilities.rs:8:9
+  |
+8 |         pub(crate) CrateVariant,
+  |         ^^^^^^^^^^ help: remove the qualifier
+  |
+  = note: enum variants and their fields always share the visibility of the enum they are in
+
+error[E0449]: visibility qualifiers are not permitted here
+ --> tests/ui/hygiene/rustc_res/enum_variants_cannot_have_visibilities.rs:9:9
+  |
+9 |         pub(super) InnerVariant,
+  |         ^^^^^^^^^^ help: remove the qualifier
+  |
+  = note: enum variants and their fields always share the visibility of the enum they are in
+
+error[E0449]: visibility qualifiers are not permitted here
+  --> tests/ui/hygiene/rustc_res/enum_variants_cannot_have_visibilities.rs:10:9
+   |
+10 |         pub(self) SelfVariant,
+   |         ^^^^^^^^^ help: remove the qualifier
+   |
+   = note: enum variants and their fields always share the visibility of the enum they are in
+
+error[E0449]: visibility qualifiers are not permitted here
+  --> tests/ui/hygiene/rustc_res/enum_variants_cannot_have_visibilities.rs:11:9
+   |
+11 |         pub(in crate::inner) InInnerVariant,
+   |         ^^^^^^^^^^^^^^^^^^^^ help: remove the qualifier
+   |
+   = note: enum variants and their fields always share the visibility of the enum they are in
+
+error: aborting due to 5 previous errors
+
+For more information about this error, try `rustc --explain E0449`.

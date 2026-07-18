@@ -38,6 +38,7 @@ pub enum DefItemKind<'ast> {
     Use(&'ast ast::UseTree),
     Static(&'ast ast::StaticItem),
     Const(&'ast ast::ConstItem),
+    ConstBlock(&'ast ast::ConstBlockItem),
     Fn(&'ast ast::Fn),
     Mod(ast::Safety, Ident, &'ast ast::ModKind),
     ForeignMod(&'ast ast::ForeignMod),
@@ -62,6 +63,7 @@ impl<'ast> DefItemKind<'ast> {
             ast::ItemKind::Use(use_tree) => Self::Use(use_tree),
             ast::ItemKind::Static(static_item) => Self::Static(static_item),
             ast::ItemKind::Const(const_item) => Self::Const(const_item),
+            ast::ItemKind::ConstBlock(const_block_item) => Self::ConstBlock(const_block_item),
             ast::ItemKind::Fn(fn_item) => Self::Fn(fn_item),
             ast::ItemKind::Mod(safety, ident, mod_kind) => Self::Mod(*safety, *ident, mod_kind),
             ast::ItemKind::ForeignMod(foreign_mod) => Self::ForeignMod(foreign_mod),
@@ -205,7 +207,7 @@ pub mod mk {
 
         segments.push(self::path_segment_raw(sp, last_ident, args));
 
-        ast::Path { span: sp, segments, tokens: None }
+        ast::Path { span: sp, segments }
     }
 
     pub fn path_args(sp: Span, global: bool, idents: Vec<Ident>, args: Vec<ast::GenericArg>) -> ast::Path {
@@ -260,7 +262,7 @@ pub mod mk {
     }
 
     pub fn ty(sp: Span, kind: ast::TyKind) -> Box<ast::Ty> {
-        Box::new(ast::Ty { id: ast::DUMMY_NODE_ID, span: sp, kind, tokens: None })
+        Box::new(ast::Ty { id: ast::DUMMY_NODE_ID, span: sp, kind })
     }
 
     pub fn ty_mut(ty: Box<ast::Ty>, mutbl: ast::Mutability) -> ast::MutTy {
@@ -358,6 +360,10 @@ pub mod mk {
         self::anon_const(sp, ast::ExprKind::Path(None, self::path_ident(sp, ident)))
     }
 
+    pub fn const_path(qself: Option<Box<ast::QSelf>>, path: ast::Path) -> ast::AnonConst {
+        self::anon_const(path.span, ast::ExprKind::Path(qself, path))
+    }
+
     pub fn expr(sp: Span, kind: ast::ExprKind) -> Box<ast::Expr> {
         Box::new(ast::Expr {
             id: ast::DUMMY_NODE_ID,
@@ -421,7 +427,7 @@ pub mod mk {
     }
 
     pub fn pat(sp: Span, kind: ast::PatKind) -> Box<ast::Pat> {
-        Box::new(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind, tokens: None })
+        Box::new(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind })
     }
 
     pub fn pat_wild(sp: Span) -> Box<ast::Pat> {
@@ -462,7 +468,7 @@ pub mod mk {
             span: sp,
             attrs: ast::AttrVec::new(),
             pat,
-            guard,
+            guard: guard.map(|cond| Box::map(cond, |cond| ast::Guard { cond, span_with_leading_if: sp })),
             body: expr,
             is_placeholder: false,
         }
@@ -681,7 +687,6 @@ pub mod mk {
             span: sp,
             rules: block_check_mode,
             stmts,
-            tokens: None,
         })
     }
 
@@ -698,7 +703,7 @@ pub mod mk {
     }
 
     pub fn vis(sp: Span, kind: ast::VisibilityKind) -> ast::Visibility {
-        ast::Visibility { span: sp.shrink_to_lo(), kind, tokens: None }
+        ast::Visibility { span: sp.shrink_to_lo(), kind }
     }
 
     pub fn vis_default(sp: Span) -> ast::Visibility {
@@ -736,13 +741,14 @@ pub mod mk {
             mutability: mutbl,
             expr: Some(expr),
             define_opaque: None,
+            eii_impls: ThinVec::new(),
         })))
     }
 
     pub fn item_const(sp: Span, vis: ast::Visibility, ident: Ident, ty: Box<ast::Ty>, expr: Box<ast::Expr>) -> Box<ast::Item> {
         self::item(sp, ThinVec::new(), vis, ast::ItemKind::Const(Box::new(ast::ConstItem {
             ident,
-            defaultness: ast::Defaultness::Final,
+            defaultness: ast::Defaultness::Implicit,
             generics: ast::Generics {
                 params: ThinVec::new(),
                 where_clause: ast::WhereClause {
@@ -753,7 +759,7 @@ pub mod mk {
                 span: sp,
             },
             ty,
-            rhs: Some(ast::ConstItemRhs::Body(expr)),
+            rhs_kind: ast::ConstItemRhsKind::Body { rhs: Some(expr) },
             define_opaque: None,
         })))
     }
@@ -773,7 +779,7 @@ pub mod mk {
     pub fn item_fn(sp: Span, vis: ast::Visibility, ident: Ident, generics: Option<ast::Generics>, header: Option<ast::FnHeader>, inputs: ThinVec<ast::Param>, output: Option<Box<ast::Ty>>, body: Option<Box<ast::Block>>) -> Box<ast::Item> {
         self::item(sp, ThinVec::new(), vis, ast::ItemKind::Fn(Box::new(ast::Fn {
             ident,
-            defaultness: ast::Defaultness::Final,
+            defaultness: ast::Defaultness::Implicit,
             generics: generics.unwrap_or_default(),
             sig: ast::FnSig {
                 span: sp,
@@ -783,6 +789,7 @@ pub mod mk {
             contract: None,
             define_opaque: None,
             body,
+            eii_impls: ThinVec::new(),
         })))
     }
 
@@ -792,6 +799,7 @@ pub mod mk {
             span: sp,
             attrs: ast::AttrVec::new(),
             vis,
+            mut_restriction: ast::MutRestriction { kind: ast::RestrictionKind::Unrestricted, span: sp },
             safety: ast::Safety::Default,
             ident,
             ty,
@@ -870,11 +878,11 @@ pub mod mk {
     }
 
     pub fn attr_inner_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args, tokens: None }, None, ast::AttrStyle::Inner, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args }, None, ast::AttrStyle::Inner, sp)
     }
 
     pub fn attr_outer_path(g: &ast::attr::AttrIdGenerator, sp: Span, path: ast::Path, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args, tokens: None }, None, ast::AttrStyle::Outer, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety: ast::Safety::Default, path, args }, None, ast::AttrStyle::Outer, sp)
     }
 
     pub fn attr_inner(g: &ast::attr::AttrIdGenerator, sp: Span, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
@@ -882,7 +890,7 @@ pub mod mk {
     }
 
     pub fn attr_outer(g: &ast::attr::AttrIdGenerator, sp: Span, unsafety: ast::Safety, ident: Ident, args: ast::AttrArgs) -> ast::Attribute {
-        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety, path: ast::Path::from_ident(ident), args, tokens: None }, None, ast::AttrStyle::Outer, sp)
+        ast::attr::mk_attr_from_item(g, ast::AttrItem { unsafety, path: ast::Path::from_ident(ident), args }, None, ast::AttrStyle::Outer, sp)
     }
 
     pub fn attr_args_delimited(sp: Span, delimiter: ast::token::Delimiter, tokens: ast::tokenstream::TokenStream) -> ast::AttrArgs {
@@ -988,6 +996,7 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::Tup(..) => "tuple literal",
             ast::ExprKind::Binary(..) => "binary operation",
             ast::ExprKind::Unary(..) => "unary operation",
+            ast::ExprKind::Move(..) => "move",
             ast::ExprKind::Lit(..) => "literal",
             ast::ExprKind::Cast(..) => "cast",
             ast::ExprKind::Type(..) => "type ascription",
@@ -1029,6 +1038,7 @@ impl Descr for ast::ExprKind {
             ast::ExprKind::IncludedBytes(..) => "included bytes",
             ast::ExprKind::FormatArgs(..) => "format_args",
             ast::ExprKind::UnsafeBinderCast(..) => "unsafe binder cast",
+            ast::ExprKind::DirectConstArg(..) => "direct const arg",
             ast::ExprKind::Err(..) => "error",
             ast::ExprKind::Dummy => "dummy",
         }
@@ -1076,12 +1086,14 @@ impl Descr for ast::TyKind {
             ast::TyKind::FnPtr(..) => "fn pointer",
             ast::TyKind::TraitObject(..) => "trait object",
             ast::TyKind::ImplTrait(..) => "impl trait",
-            ast::TyKind::Typeof(..) => "typeof",
             ast::TyKind::ImplicitSelf => "self",
             ast::TyKind::Infer => "infer",
             ast::TyKind::CVarArgs => "C var args (va_list)",
             ast::TyKind::UnsafeBinder(..) => "unsafe binder",
             ast::TyKind::Pat(..) => "pattern",
+            ast::TyKind::FieldOf(..) => "field of",
+            ast::TyKind::View(..) => "view",
+            ast::TyKind::DirectConstArg(..) => "direct const arg",
             ast::TyKind::Paren(..) => "parentheses",
             ast::TyKind::MacCall(..) => "macro call",
             ast::TyKind::Err(..) => "error",
@@ -1105,7 +1117,7 @@ pub mod print {
         match qself {
             Some(qself) => {
                 // HACK: Workaround, because `print_qpath` is private.
-                let dummy_ty = ast::Ty { id: DUMMY_NODE_ID, span: DUMMY_SP, kind: ast::TyKind::Path(Some(Box::new(qself.clone())), path.clone()), tokens: None };
+                let dummy_ty = ast::Ty { id: DUMMY_NODE_ID, span: DUMMY_SP, kind: ast::TyKind::Path(Some(Box::new(qself.clone())), path.clone()) };
                 ty_to_string(&dummy_ty)
             },
             None => path_to_string(path),
@@ -1120,8 +1132,8 @@ pub mod inspect {
     use rustc_span::Symbol;
 
     pub fn match_attr_name(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
-        let ast::AttrKind::Normal(attr_item) = &attr.kind else { return false; };
-        match (tool, &attr_item.item.path.segments[..]) {
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return false; };
+        match (tool, &normal_attr.item.path.segments[..]) {
             (None, [path_name]) => path_name.ident.name == name,
             (Some(tool), [path_tool, path_name]) => path_tool.ident.name == tool && path_name.ident.name == name,
             _ => false,
@@ -1129,17 +1141,20 @@ pub mod inspect {
     }
 
     pub fn is_word_attr(attr: &ast::Attribute, tool: Option<Symbol>, word: Symbol) -> bool {
-        let Some(ast::MetaItemKind::Word) = attr.meta_kind() else { return false; };
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return false; };
+        let Some(ast::MetaItemKind::Word) = normal_attr.item.meta_kind() else { return false; };
         match_attr_name(attr, tool, word)
     }
 
     pub fn is_name_value_attr(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, value: &ast::LitKind) -> bool {
-        let Some(ast::MetaItemKind::NameValue(lit)) = attr.meta_kind() else { return false; };
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return false; };
+        let Some(ast::MetaItemKind::NameValue(lit)) = normal_attr.item.meta_kind() else { return false; };
         match_attr_name(attr, tool, name) && lit.kind == *value
     }
 
     pub fn is_list_attr_with_some(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol) -> bool {
-        let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return false; };
+        let Some(ast::MetaItemKind::List(meta_items)) = normal_attr.item.meta_kind() else { return false; };
         match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {
             let Some(ast::MetaItem { path: _meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item.meta_item() else { return false };
             true
@@ -1147,7 +1162,8 @@ pub mod inspect {
     }
 
     pub fn is_list_attr_with_path(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, path: &ast::Path) -> bool {
-        let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return false; };
+        let Some(ast::MetaItemKind::List(meta_items)) = normal_attr.item.meta_kind() else { return false; };
         match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {
             let Some(ast::MetaItem { path: meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item.meta_item() else { return false };
             iter::zip(&meta_path.segments, &path.segments).all(|(a, b)| a.ident.name == b.ident.name)
@@ -1155,7 +1171,8 @@ pub mod inspect {
     }
 
     pub fn is_list_attr_with_ident(attr: &ast::Attribute, tool: Option<Symbol>, name: Symbol, ident: Symbol) -> bool {
-        let Some(ast::MetaItemKind::List(meta_items)) = attr.meta_kind() else { return false; };
+        let ast::AttrKind::Normal(normal_attr) = &attr.kind else { return false; };
+        let Some(ast::MetaItemKind::List(meta_items)) = normal_attr.item.meta_kind() else { return false; };
         match_attr_name(attr, tool, name) && meta_items.iter().any(|meta_item| {
             let Some(ast::MetaItem { path: meta_path, kind: ast::MetaItemKind::Word, .. }) = meta_item.meta_item() else { return false };
             meta_path.segments.len() == 1 && meta_path.segments[0].ident.name == ident
@@ -1170,42 +1187,5 @@ pub mod inspect {
         }
 
         false
-    }
-}
-
-pub mod mut_visit {
-    pub use rustc_ast::mut_visit::*;
-
-    use rustc_ast::*;
-
-    // Copy of `rustc_ast::mut_visit::walk_vis`, which has been made private.
-    pub fn walk_vis<T: MutVisitor>(vis: &mut T, visibility: &mut Visibility) {
-        match &mut visibility.kind {
-            VisibilityKind::Public | VisibilityKind::Inherited => {}
-            VisibilityKind::Restricted { path, id, shorthand: _ } => {
-                vis.visit_path(path);
-                vis.visit_id(id);
-            }
-        }
-        vis.visit_span(&mut visibility.span);
-    }
-
-    // Copy of `rustc_ast::mut_visit::walk_assoc_item_constraint`, which has been made private.
-    pub fn walk_assoc_item_constraint<T: MutVisitor>(vis: &mut T, assoc_item_constraint: &mut AssocItemConstraint) {
-        vis.visit_id(&mut assoc_item_constraint.id);
-        vis.visit_ident(&mut assoc_item_constraint.ident);
-        if let Some(gen_args) = &mut assoc_item_constraint.gen_args { vis.visit_generic_args(gen_args); }
-        match &mut assoc_item_constraint.kind {
-            AssocItemConstraintKind::Equality { term } => match term {
-                Term::Ty(ty) => vis.visit_ty(ty),
-                Term::Const(c) => vis.visit_anon_const(c),
-            }
-            AssocItemConstraintKind::Bound { bounds } => {
-                for bound in bounds {
-                    vis.visit_param_bound(bound, visit::BoundKind::Bound);
-                }
-            }
-        }
-        vis.visit_span(&mut assoc_item_constraint.span);
     }
 }

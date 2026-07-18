@@ -4,8 +4,6 @@
 //@ stderr: empty
 //@ edition: 2024
 
-#![feature(if_let_guard)]
-
 #![allow(irrefutable_let_patterns)]
 
 fn mutable_fn() {

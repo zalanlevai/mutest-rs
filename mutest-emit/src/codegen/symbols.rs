@@ -44,6 +44,7 @@ pub mod sym {
     pub use rustc_span::sym::*;
 
     symbols! {
+        generic_atomic,
         non_upper_case_globals,
         unused_parens,
 
@@ -72,6 +73,7 @@ pub mod sym {
         mutest_runtime,
         op_name,
         reachable_from,
+        skip,
         source_file,
         start_col,
         start_line,

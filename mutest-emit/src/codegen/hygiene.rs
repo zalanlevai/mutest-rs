@@ -4,8 +4,8 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
+use rustc_data_structures::fx::FxHashSet;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
-use rustc_hash::FxHashSet;
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::span_bug;
@@ -122,12 +122,12 @@ fn is_macro_helper_attr(syntax_extensions: &[SyntaxExtension], attr: &ast::Attri
 #[derive(Clone, Copy)]
 enum DefPathRequestKind {
     Item(hir::DefId),
-    ParentModStub(hir::ModDefId),
+    ParentModStub(hir::ModId),
 }
 
 #[derive(Clone, Copy)]
 enum Macros2_0TopLevelRelativePathResHack {
-    InTopLevelMacros2_0Scope { parent_module: hir::DefId },
+    InTopLevelMacros2_0Scope { parent_module: hir::ModId },
     InNestedMacros2_0Scope(ExpnId),
     NotInMacros2_0Scope,
 }
@@ -141,7 +141,7 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     syntax_extensions: Vec<SyntaxExtension>,
     /// The prelude module of this crate (marked with `#[prelude_import]`)
     /// whose contents are available in every module, used for import path resolution.
-    prelude_mod: Option<hir::DefId>,
+    prelude_mod: Option<hir::ModId>,
 
     /// Keep track of the current scope (e.g. items and bodies) for relative name resolution.
     current_scope: Option<hir::DefId>,
@@ -157,6 +157,10 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     ///       to test whether this expectation is still met.
     macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack,
 
+    /// Keep track of the node that the next visibility is associated with
+    /// (i.e., item, field definition, enum variant).
+    /// This is unset by `visit_vis`.
+    next_vis_owner: Option<ast::NodeId>,
     /// We do not want to sanitize some idents (mostly temporarily) in the AST.
     /// During the visit we keep track of these so that they can be exluded from sanitization.
     protected_idents: FxHashSet<Ident>,
@@ -262,7 +266,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                             if let Some(assoc_item) = assoc_items
                                                 .filter_by_name_unhygienic(assoc_constraint.ident.name)
-                                                .find(|assoc_item| assoc_item.as_tag() == assoc_tag)
+                                                .find(|assoc_item| assoc_item.tag() == assoc_tag)
                                             {
                                                 // Copy and sanitize assoc item definition ident.
                                                 let Some(assoc_item_ident_span) = self.tcx.def_ident_span(assoc_item.def_id) else { unreachable!() };
@@ -326,7 +330,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        *path = ast::Path { span: path.span, segments, tokens: None };
+        *path = ast::Path { span: path.span, segments };
 
         if path.segments.is_empty() {
             span_bug!(path.span, "path was sanitized into an empty path");
@@ -463,12 +467,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::ForeignMod
                     | hir::DefKind::ForeignTy
                     | hir::DefKind::Fn
-                    | hir::DefKind::Const
+                    | hir::DefKind::Const { .. }
                     | hir::DefKind::Static { .. }
                     | hir::DefKind::Ctor(..)
                     | hir::DefKind::AssocTy
                     | hir::DefKind::AssocFn
-                    | hir::DefKind::AssocConst
+                    | hir::DefKind::AssocConst { .. }
                     | hir::DefKind::Macro(..)
                     => {
                         if let hir::DefKind::Ctor(..) = def_kind {
@@ -498,7 +502,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::DefKind::ExternCrate
                     | hir::DefKind::Use
                     | hir::DefKind::AnonConst
-                    | hir::DefKind::InlineConst
                     | hir::DefKind::OpaqueTy
                     | hir::DefKind::GlobalAsm
                     | hir::DefKind::Impl { .. }
@@ -513,6 +516,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             | hir::Res::SelfTyAlias { .. }
             | hir::Res::SelfCtor(..)
             | hir::Res::ToolMod
+            | hir::Res::OpenMod(..)
             | hir::Res::NonMacroAttr(..)
             | hir::Res::Err
             => None
@@ -630,7 +634,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 }
             }
 
-            hir::LifetimeKind::Error => span_bug!(lifetime_hir.ident.span, "encountered invalid lifetime"),
+            hir::LifetimeKind::Error(_) => span_bug!(lifetime_hir.ident.span, "encountered invalid lifetime"),
         }
     }
 
@@ -719,9 +723,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 // NOTE: Because `predicates_of` does not reveal implicit supertrait predicates, we have to append those ourselves.
                 let supertrait_clauses = ty::elaborate::supertraits(self.tcx, ty::Binder::dummy(ty::TraitRef::identity(self.tcx, trait_def_id)));
                 generic_predicates.extend(supertrait_clauses.map(|trait_ref| {
-                    self.tcx.mk_predicate(trait_ref.map_bound(|trait_ref| {
+                    ty::Unnormalized::new(self.tcx.mk_predicate(trait_ref.map_bound(|trait_ref| {
                         ty::PredicateKind::Clause(ty::ClauseKind::Trait(ty::TraitPredicate { trait_ref, polarity: ty::PredicatePolarity::Positive }))
-                    })).expect_clause()
+                    })).expect_clause())
                 }));
 
                 (trait_def_id, generic_predicates, 0)
@@ -736,7 +740,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             _ => { return None; }
         };
 
-        let predicates = generic_predicates.iter()
+        let trait_predicates = generic_predicates.iter()
             .filter_map(|&clause| clause.as_trait_clause().map(|p| p.skip_binder()))
             .filter(|trait_predicate| {
                 let ty::TyKind::Param(param_ty) = trait_predicate.self_ty().kind() else { return false; };
@@ -744,7 +748,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             })
             .collect::<Vec<_>>();
 
-        let Some(trait_predicate) = predicates.iter().find(|trait_predicate| trait_predicate.def_id() == trait_def_id) else {
+        let Some(trait_predicate) = trait_predicates.iter().find(|trait_predicate| trait_predicate.def_id() == trait_def_id) else {
             // No trait predicates for the trait, skip.
             return None;
         };
@@ -809,10 +813,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                         //       so we have to use the only remaining accessible workaround,
                                         //       even though it is marked as "quasi-deprecated".
                                         let ty = rustc_hir_analysis::lower_ty(self.tcx, ty_hir);
-                                        let ty::TyKind::Alias(ty::AliasTyKind::Projection | ty::AliasTyKind::Inherent, alias_ty) = ty.kind() else { unreachable!() };
+                                        let ty::TyKind::Alias(_, alias_ty) = ty.kind() else { unreachable!() };
+                                        let (ty::AliasTyKind::Projection { def_id: trait_item_def_id } | ty::AliasTyKind::Inherent { def_id: trait_item_def_id }) = alias_ty.kind else { unreachable!() };
 
-                                        let trait_item_def_id = alias_ty.def_id;
-                                        let trait_item_def_kind = self.tcx.def_kind(alias_ty.def_id);
+                                        let trait_item_def_kind = self.tcx.def_kind(trait_item_def_id);
 
                                         qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
                                     }
@@ -1015,10 +1019,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             ParentModPathStub,
         }
 
-        let adjust_mod_path_from_expansion = |path: &mut ast::Path, mod_def_id: hir::ModDefId, mod_path_kind: ModPathKind, ignore_reexport: Option<hir::DefId>| {
+        let adjust_mod_path_from_expansion = |path: &mut ast::Path, mod_id: hir::ModId, mod_path_kind: ModPathKind, ignore_reexport: Option<hir::DefId>| {
             let def_path_request = match mod_path_kind {
-                ModPathKind::DirectPath => DefPathRequestKind::Item(mod_def_id.to_def_id()),
-                ModPathKind::ParentModPathStub => DefPathRequestKind::ParentModStub(mod_def_id),
+                ModPathKind::DirectPath => DefPathRequestKind::Item(mod_id.to_def_id()),
+                ModPathKind::ParentModPathStub => DefPathRequestKind::ParentModStub(mod_id),
             };
 
             let visible_def_path = self.expect_visible_def_path(def_path_request, path.span, ignore_reexport);
@@ -1046,8 +1050,8 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     break 'arm;
                 }
 
-                let mod_def_id = hir::ModDefId::new_unchecked(def_id);
-                return adjust_mod_path_from_expansion(path, mod_def_id, ModPathKind::DirectPath, Some(import_def_id.to_def_id()));
+                let mod_id = hir::ModId::new_unchecked(def_id);
+                return adjust_mod_path_from_expansion(path, mod_id, ModPathKind::DirectPath, Some(import_def_id.to_def_id()));
             }
 
             hir::Res::Def(_, _) => {}
@@ -1075,19 +1079,20 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         };
         let hir::Res::Def(_, item_def_id) = item_res else { span_bug!(path.span, "import path has non-def item segment") };
 
-        let mod_scope = self.tcx.parent_module(scope).to_def_id();
+        let mod_scope = self.tcx.parent_module(scope).to_mod_id();
         let overlay_mod_scope = match self.macros_2_0_top_level_relative_path_res_hack {
             Macros2_0TopLevelRelativePathResHack::InTopLevelMacros2_0Scope { parent_module: macros_2_0_def_parent_mod } => Some(macros_2_0_def_parent_mod),
             _ => None,
         };
 
-        let (parent_mod_def_id, referenced_mod_child) = match mod_path_segments {
+        let (parent_mod_id, referenced_mod_child) = match mod_path_segments {
             [.., parent_mod_path_segment] if let Some(parent_mod_res) = self.def_res.node_res(parent_mod_path_segment.id) => {
                 let hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id) = parent_mod_res else { span_bug!(path.span, "import path has non-mod prefix segment") };
+                let parent_mod_id = hir::ModId::new_unchecked(parent_mod_def_id);
                 let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, item_res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(parent_mod_def_id))
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(parent_mod_id))
                 };
-                (parent_mod_def_id, referenced_mod_child)
+                (parent_mod_id, referenced_mod_child)
             }
 
             // `$crate::Item` paths.
@@ -1096,50 +1101,50 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, crate_num.as_def_id(), item_res.expect_non_local(), item_path_segment.ident.name) else {
                     span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(crate_num.as_def_id()))
                 };
-                (crate_num.as_def_id(), referenced_mod_child)
+                (crate_num.as_mod_id(), referenced_mod_child)
             }
 
             // `crate::Item` paths.
             [crate_segment] if crate_segment.ident.name == kw::Crate => {
                 // NOTE: It is important that we look into the local crate root first, to avoid potential visibility issues.
-                let crate_scopes = [LOCAL_CRATE.as_def_id(), item_def_id.krate.as_def_id()];
+                let crate_scopes = [LOCAL_CRATE.as_mod_id(), item_def_id.krate.as_mod_id()];
 
-                let Some((parent_mod_def_id, referenced_mod_child)) = crate_scopes.into_iter().find_map(|scope| {
-                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, item_res.expect_non_local(), item_path_segment.ident.name)?;
+                let Some((parent_mod_id, referenced_mod_child)) = crate_scopes.into_iter().find_map(|scope| {
+                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope.to_def_id(), item_res.expect_non_local(), item_path_segment.ident.name)?;
                     Some((scope, referenced_mod_child))
                 }) else {
-                    let searched_mods = crate_scopes.into_iter().map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
+                    let searched_mods = crate_scopes.into_iter().map(|parent_mod_id| self.tcx.def_path_str(parent_mod_id));
                     span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(item_def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
                 };
 
-                (parent_mod_def_id, referenced_mod_child)
+                (parent_mod_id, referenced_mod_child)
             }
 
             // `super{::super}*::Item` paths.
             [super_segments @ ..] if !super_segments.is_empty() && super_segments.iter().all(|segment| segment.ident.name == kw::Super) => {
-                let mut parent_mod_def_id = overlay_mod_scope.unwrap_or(mod_scope);
+                let mut parent_mod_id = overlay_mod_scope.unwrap_or(mod_scope);
                 for _ in 0..super_segments.len() {
-                    parent_mod_def_id = self.tcx.parent_module_from_def_id(parent_mod_def_id.expect_local()).to_def_id();
+                    parent_mod_id = self.tcx.parent_module_from_def_id(parent_mod_id.expect_local().to_local_def_id()).to_mod_id();
                 }
-                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_def_id, item_res.expect_non_local(), item_path_segment.ident.name) else {
-                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(parent_mod_def_id))
+                let Some(referenced_mod_child) = res::lookup_mod_child(self.tcx, parent_mod_id.to_def_id(), item_res.expect_non_local(), item_path_segment.ident.name) else {
+                    span_bug!(path.span, "cannot resolve item {} in module {}", self.tcx.def_path_str(item_def_id), self.tcx.def_path_str(parent_mod_id))
                 };
-                (parent_mod_def_id, referenced_mod_child)
+                (parent_mod_id, referenced_mod_child)
             }
 
             // `{self::}?Item` paths.
             [] | [ast::PathSegment { ident: Ident { name: kw::SelfLower, .. }, .. }] => {
                 let mod_scopes = [overlay_mod_scope, Some(mod_scope), self.prelude_mod];
 
-                let Some((parent_mod_def_id, referenced_mod_child)) = mod_scopes.into_iter().flatten().find_map(|scope| {
-                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope, item_res.expect_non_local(), item_path_segment.ident.name)?;
+                let Some((parent_mod_id, referenced_mod_child)) = mod_scopes.into_iter().flatten().find_map(|scope| {
+                    let referenced_mod_child = res::lookup_mod_child(self.tcx, scope.to_def_id(), item_res.expect_non_local(), item_path_segment.ident.name)?;
                     Some((scope, referenced_mod_child))
                 }) else {
-                    let searched_mods = mod_scopes.into_iter().flatten().map(|parent_mod_def_id| self.tcx.def_path_str(parent_mod_def_id));
+                    let searched_mods = mod_scopes.into_iter().flatten().map(|parent_mod_id| self.tcx.def_path_str(parent_mod_id));
                     span_bug!(path.span, "cannot resolve item {} in modules {}", self.tcx.def_path_str(item_def_id), searched_mods.intersperse(", ".to_owned()).collect::<String>())
                 };
 
-                (parent_mod_def_id, referenced_mod_child)
+                (parent_mod_id, referenced_mod_child)
             }
 
             _ => span_bug!(path.span, "unhandled import path root with missing parent mod resolutions"),
@@ -1168,14 +1173,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
         }
 
-        if parent_mod_def_id == mod_scope {
+        if parent_mod_id == mod_scope {
             path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), []);
             return;
         }
 
-        let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![], tokens: None };
-        let parent_mod_def_id = hir::ModDefId::new_unchecked(parent_mod_def_id);
-        adjust_mod_path_from_expansion(&mut parent_mod_path, parent_mod_def_id, ModPathKind::ParentModPathStub, Some(import_def_id.to_def_id()));
+        let mut parent_mod_path = ast::Path { span: DUMMY_SP, segments: thin_vec![] };
+        adjust_mod_path_from_expansion(&mut parent_mod_path, parent_mod_id, ModPathKind::ParentModPathStub, Some(import_def_id.to_def_id()));
         path.segments.splice(0..(path.segments.len() - mod_child_path_segments_count), parent_mod_path.segments);
     }
 
@@ -1215,7 +1219,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             }
 
             match &use_tree.kind {
-                ast::UseTreeKind::Glob => {
+                ast::UseTreeKind::Glob(_) => {
                     let Some(res) = def_res.node_res(node_id).or_else(|| {
                         let [.., last_prefix_segment] = &use_tree.prefix.segments[..] else { return None; };
                         def_res.node_res(last_prefix_segment.id)
@@ -1258,7 +1262,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         let import_paths = imports.into_iter()
             .map(|import| {
                 let span = import.path_segments.last().unwrap().ident.span;
-                let mut path = ast::Path { span, segments: import.path_segments, tokens: None };
+                let mut path = ast::Path { span, segments: import.path_segments };
                 self.sanitize_import_path(scope, import.node_id, &mut path, import.res);
 
                 let mut use_kind = import.use_kind;
@@ -1309,10 +1313,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let nested_use_tree = ast::UseTree {
                     prefix: path,
                     kind: match use_kind {
-                        UseKind::Glob => ast::UseTreeKind::Glob,
+                        UseKind::Glob => ast::UseTreeKind::Glob(DUMMY_SP),
                         UseKind::Single { rename, .. } => ast::UseTreeKind::Simple(rename),
                     },
-                    span: DUMMY_SP,
                 };
 
                 (nested_use_tree, ast::DUMMY_NODE_ID)
@@ -1334,6 +1337,7 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<
         current_scope: scope,
         current_typeck_ctx: None,
         macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
+        next_vis_owner: None,
         protected_idents: Default::default(),
     };
 
@@ -1355,8 +1359,7 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<
 macro def_flat_map_item_fns(
     $(fn $ident:ident(&mut $self:ident, $item:ident: $item_kind:ident $(,$($args:tt)*)?) |$def_id:ident| {
         walk_item: $walk_item:expr,
-        $(check_item $check_item:block)?
-        $(check_def $check_def:block)?
+        $(check $check:block)?
         $(post_walk $post_walk:block)?
     });+;
 ) {
@@ -1365,11 +1368,12 @@ macro def_flat_map_item_fns(
             // Skip generated items corresponding to compiler (and mutest-rs) internals.
             if $item.id == ast::DUMMY_NODE_ID || $item.span == DUMMY_SP { return smallvec![$item]; }
 
-            $($check_item)?
+            // NOTE: This needs to happen before any visit of the visibility of the item, which may be triggered in $check.
+            $self.next_vis_owner = Some($item.id);
 
             let Some(&$def_id) = $self.def_res.node_id_to_def_id.get(&$item.id) else { unreachable!() };
 
-            $($check_def)?
+            $($check)?
 
             // Store new context scope.
             let previous_scope = mem::replace(&mut $self.current_scope, Some($def_id.to_def_id()));
@@ -1401,7 +1405,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     def_flat_map_item_fns! {
         fn flat_map_item(&mut self, item: ItemKind) |def_id| {
             walk_item: ast::mut_visit::walk_item(self, &mut item),
-            check_item {
+            check {
                 let id = item.id;
                 let span = item.span;
 
@@ -1423,6 +1427,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
 
                 if let ast::ItemKind::ExternCrate(symbol, ident) = &mut item.kind {
+                    self.visit_vis(&mut item.vis);
+
                     // Retain original crate name if not already aliased.
                     if symbol.is_none() { *symbol = Some(ident.name); }
 
@@ -1433,6 +1439,8 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
 
                 if let ast::ItemKind::Use(use_tree) = &mut item.kind {
+                    self.visit_vis(&mut item.vis);
+
                     // FIXME: Resolutions for the prelude import path are missing; ignore.
                     if !item.attrs.iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::prelude_import)) {
                         self.sanitize_use_tree(use_tree, id, span);
@@ -1462,7 +1470,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
         fn flat_map_assoc_item(&mut self, item: AssocItemKind, assoc_ctxt: ast::visit::AssocCtxt) |def_id| {
             walk_item: ast::mut_visit::walk_assoc_item(self, &mut item, assoc_ctxt),
-            check_def {
+            check {
                 let generics = match &mut item.kind {
                     ast::AssocItemKind::Const(const_item) => Some(&mut const_item.generics),
                     ast::AssocItemKind::Type(ty_alias) => Some(&mut ty_alias.generics),
@@ -1507,6 +1515,22 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
             }
         };
+    }
+
+    fn flat_map_foreign_item(&mut self, item: Box<ast::ForeignItem>) -> SmallVec<[Box<ast::ForeignItem>; 1]> {
+        self.next_vis_owner = Some(item.id);
+        ast::mut_visit::walk_flat_map_foreign_item(self, item)
+    }
+
+    fn flat_map_variant(&mut self, mut variant: ast::Variant) -> SmallVec<[ast::Variant; 1]> {
+        self.next_vis_owner = Some(variant.id);
+        ast::mut_visit::walk_variant(self, &mut variant);
+        smallvec![variant]
+    }
+
+    fn visit_field_def(&mut self, field_def: &mut ast::FieldDef) {
+        self.next_vis_owner = Some(field_def.id);
+        ast::mut_visit::walk_field_def(self, field_def);
     }
 
     fn visit_attribute(&mut self, attr: &mut ast::Attribute) {
@@ -1575,7 +1599,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
                     | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id)
                     | hir::Res::Def(hir::DefKind::AssocTy, alias_def_id) => {
-                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
+                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity().skip_normalization();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
                     }
@@ -1600,6 +1624,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     ast::StructRest::Base(base_expr) => self.visit_expr(base_expr),
                     ast::StructRest::Rest(_span) => {}
                     ast::StructRest::None => {}
+                    ast::StructRest::NoneWithError(_) => {}
                 }
 
                 return;
@@ -1680,7 +1705,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     | hir::Res::SelfTyAlias { alias_to: alias_def_id, .. }
                     | hir::Res::Def(hir::DefKind::TyAlias, alias_def_id)
                     | hir::Res::Def(hir::DefKind::AssocTy, alias_def_id) => {
-                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity();
+                        let self_ty = self.tcx.type_of(alias_def_id).instantiate_identity().skip_normalization();
                         let ty::TyKind::Adt(adt_def, _) = self_ty.kind() else { unreachable!() };
                         adt_def.variant_of_res(res.expect_non_local())
                     }
@@ -1764,11 +1789,20 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     }
 
     fn visit_vis(&mut self, vis: &mut ast::Visibility) {
+        let Some(owner_node_id) = self.next_vis_owner.take() else {
+            span_bug!(vis.span, "encountered visibility with unknown owner node");
+        };
+        let Some(&owner_def_id) = self.def_res.node_id_to_def_id.get(&owner_node_id) else { unreachable!() };
+
         match &mut vis.kind {
-            ast::VisibilityKind::Restricted { path, id, .. } => {
-                let Some(res) = self.def_res.node_res(*id) else {
+            ast::VisibilityKind::Restricted { path, id: _, .. } => {
+                // NOTE: rustc now finalizes (and thus produce partial resolutions) for visibility paths
+                //       only in error cases. See https://github.com/rust-lang/rust/pull/158689.
+                //       The computed visibilities can still be queried however.
+                let ty::Visibility::Restricted(mod_id) = self.tcx.visibility(owner_def_id) else {
                     span_bug!(vis.span, "restricted visibility path `{}` cannot be resolved", ast::print::path_to_string(path));
                 };
+                let res = hir::Res::Def(self.tcx.def_kind(mod_id), mod_id.to_def_id());
                 let None = self.adjust_path_from_expansion(path, res, None) else {
                     span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
                 };
@@ -1792,6 +1826,7 @@ fn register_builtin_macros(syntax_extensions: &mut Vec<SyntaxExtension>) {
             allow_internal_unsafe: false,
             local_inner_macros: false,
             collapse_debuginfo: true,
+            diagnostic_opaque: false,
         }
     }
 
@@ -1807,9 +1842,9 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     let cstore = CStore::from_tcx(tcx);
 
     // Find all loaded proc macro syntax extensions.
-    cstore.all_proc_macro_def_ids()
+    cstore.all_proc_macro_def_ids(tcx)
         .filter_map(|def_id| {
-            match cstore.load_macro_untracked(def_id, tcx) {
+            match cstore.load_macro_untracked(tcx, def_id) {
                 LoadedMacro::ProcMacro(syntax_extension) => Some(syntax_extension),
                 // TODO: Generate syntax extensions from regular macros.
                 LoadedMacro::MacroDef { def: _, ident: _, attrs: _, span: _, edition: _ } => None,
@@ -1820,7 +1855,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     // Find the prelude module of this crate, whose contents are available in every module.
     let prelude_mod = tcx.hir_root_module().item_ids.iter().find_map(|&item_id| {
         let hir::ItemKind::Use(use_path, hir::UseKind::Glob) = tcx.hir_item(item_id).kind else { return None; };
-        if !tcx.hir_attrs(item_id.hir_id()).iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::prelude_import)) { return None; }
+        if !hir::find_attr!(tcx.hir_attrs(item_id.hir_id()), PreludeImport) { return None; };
 
         // HACK: The resolutions on the prelude import use path are all `Err`, so we resolve the def manually,
         //       making use of crude assumptions about the built-in prelude import generation.
@@ -1828,16 +1863,16 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
         if use_path.segments[0].ident.name == kw::PathRoot { crate_segment_idx = 1; }
         let crate_name = use_path.segments[crate_segment_idx].ident.name;
         let Some(cnum) = crate_res.crate_by_visible_name(crate_name) else { span_bug!(use_path.span, "cannot find crate referenced by prelude import path"); };
-        let mut def_id = cnum.as_def_id();
+        let mut mod_id = cnum.as_mod_id();
         for segment in use_path.segments.iter().skip(crate_segment_idx + 1) {
-            let Some(mod_child_def_id) = tcx.module_children(def_id).iter()
+            let Some(mod_child_mod_id) = tcx.module_children(mod_id).iter()
                 .filter(|mod_child| mod_child.ident.name == segment.ident.name)
-                .find_map(|mod_child| mod_child.res.mod_def_id())
+                .find_map(|mod_child| mod_child.res.mod_def_id().map(hir::ModId::new_unchecked))
             else { span_bug!(use_path.span, "cannot find module referenced by prelude import path"); };
-            def_id = mod_child_def_id;
+            mod_id = mod_child_mod_id;
         }
 
-        Some(def_id)
+        Some(mod_id)
     });
 
     let mut sanitizer = MacroExpansionSanitizer {
@@ -1850,6 +1885,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
         current_scope: Some(LOCAL_CRATE.as_def_id()),
         current_typeck_ctx: None,
         macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
+        next_vis_owner: None,
         protected_idents: Default::default(),
     };
     sanitizer.visit_crate(krate);

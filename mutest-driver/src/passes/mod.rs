@@ -3,8 +3,8 @@ use std::convert::Infallible;
 use std::ops::{ControlFlow, FromResidual, Residual, Try};
 
 use rustc_interface::Config as CompilerConfig;
+use rustc_session::Session;
 use rustc_session::config::{CrateType, ExternEntry, ExternLocation, Externs, Input};
-use rustc_session::parse::ParseSess;
 use rustc_span::Symbol;
 use rustc_span::source_map::RealFileLoader;
 
@@ -81,15 +81,13 @@ pub fn copy_compiler_settings(config: &CompilerConfig) -> CompilerConfig {
         output_dir: config.output_dir.clone(),
         ice_file: config.ice_file.clone(),
         file_loader: Some(Box::new(RealFileLoader)),
-        locale_resources: config.locale_resources.clone(),
         lint_caps: config.lint_caps.clone(),
         psess_created: None,
-        hash_untracked_state: None,
+        track_state: None,
         register_lints: None,
         override_queries: None,
         extra_symbols: config.extra_symbols.clone(),
         make_codegen_backend: None,
-        registry: rustc_driver::diagnostics_registry(),
         using_internal_features: config.using_internal_features,
     }
 }
@@ -123,8 +121,8 @@ pub fn parse_compiler_args(args: &[String]) -> (Option<CompilerConfig>, Vec<Crat
     (callbacks.config, callbacks.crate_types)
 }
 
-pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_fingerprint: Option<&str>) {
-    parse_sess.env_depinfo.get_mut().insert((
+pub fn track_invocation_fingerprint(sess: &Session, invocation_fingerprint: Option<&str>) {
+    sess.env_depinfo.borrow_mut().insert((
         Symbol::intern("MUTEST_FINGERPRINT"),
         invocation_fingerprint.map(Symbol::intern),
     ));
@@ -133,8 +131,8 @@ pub fn track_invocation_fingerprint(parse_sess: &mut ParseSess, invocation_finge
 pub fn base_compiler_config_from_parts(compiler_config: &CompilerConfig, invocation_fingerprint: Option<String>) -> CompilerConfig {
     let mut compiler_config = copy_compiler_settings(compiler_config);
 
-    compiler_config.psess_created = Some(Box::new(move |parse_sess| {
-        track_invocation_fingerprint(parse_sess, invocation_fingerprint.as_deref());
+    compiler_config.track_state = Some(Box::new(move |sess| {
+        track_invocation_fingerprint(sess, invocation_fingerprint.as_deref());
     }));
 
     compiler_config.extra_symbols = mutest_emit::codegen::symbols::sym::EXTRA_SYMBOLS.to_vec();

@@ -10,7 +10,7 @@ use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileNameDisplayPreference, Ident, MacroKind, Symbol, path, sym};
+use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, MacroKind, Symbol, path, sym};
 
 pub enum TestKind {
     Test,
@@ -209,7 +209,7 @@ fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_loweri
 
         let (source_file, lo_line, lo_col, hi_line, hi_col) = sess.source_map().span_to_location_info(ident.span);
         let file_name = match source_file {
-            Some(source_file) => source_file.name.display(FileNameDisplayPreference::Remapped).to_string(),
+            Some(source_file) => source_file.name.prefer_remapped_unconditionally().to_string(),
             None => "no-location".to_owned(),
         };
 
@@ -321,29 +321,23 @@ pub fn collect_and_mark_embedded_tests(sess: &Session, krate: &mut ast::Crate, d
 }
 
 pub fn is_marked_or_in_cfg_test<'tcx>(tcx: TyCtxt<'tcx>, id: hir::HirId) -> bool {
-    fn is_cfg_test_meta_item(meta_item_inner: &ast::MetaItemInner) -> bool {
-        let ast::MetaItemInner::MetaItem(meta_item) = meta_item_inner else { return false };
-        match &meta_item.kind {
-            ast::MetaItemKind::List(meta_item_list) => {
-                match meta_item.name() {
-                    Some(n) if n == sym::any => meta_item_list.iter().any(|meta_item| is_cfg_test_meta_item(meta_item)),
-                    Some(n) if n == sym::all => meta_item_list.iter().any(|meta_item| is_cfg_test_meta_item(meta_item)),
-                    Some(n) if n == sym::not && let [meta_item] = &meta_item_list[..] => !is_cfg_test_meta_item(meta_item),
-                    _ => false,
-                }
-            }
-            ast::MetaItemKind::Word => meta_item.has_name(sym::test),
-            ast::MetaItemKind::NameValue(_) => false,
+    fn is_cfg_test_entry(cfg_entry: &hir::attrs::CfgEntry) -> bool {
+        match cfg_entry {
+            hir::attrs::CfgEntry::All(cfg_entries, _) => cfg_entries.iter().any(is_cfg_test_entry),
+            hir::attrs::CfgEntry::Any(cfg_entries, _) => cfg_entries.iter().any(is_cfg_test_entry),
+            hir::attrs::CfgEntry::Not(cfg_entry, _) => !is_cfg_test_entry(cfg_entry),
+            hir::attrs::CfgEntry::Bool(_, _) => false,
+            hir::attrs::CfgEntry::NameValue { name, value: None, span: _ } => *name == sym::test,
+            hir::attrs::CfgEntry::NameValue { name: _, value: Some(_), span: _ } => false,
+            hir::attrs::CfgEntry::Version(_, _) => false,
         }
     }
 
     iter::once(id).chain(tcx.hir_parent_id_iter(id)).any(|hir_id| {
-        tcx.hir_attrs(hir_id).iter().any(|attr| {
-            // NOTE: `cfg(true)` attributes now leave `cfg_trace(true)` attributes behind after expansion.
-            //       This is how we can detect the original cfgs in the source code.
-            //       See https://github.com/rust-lang/rust/pull/138844.
-            if !attr.has_name(sym::cfg_trace) { return false; }
-            attr.meta_item_list().iter().flatten().any(is_cfg_test_meta_item)
-        })
+        // NOTE: `cfg(true)` attributes now leave `cfg_trace(true)` attributes behind after expansion.
+        //       This is how we can detect the original cfgs in the source code.
+        //       See https://github.com/rust-lang/rust/pull/138844.
+        let Some(cfg_entries) = hir::find_attr!(tcx, hir_id, CfgTrace(cfg_entries) => cfg_entries) else { return false; };
+        cfg_entries.iter().any(|(cfg_entry, _)| is_cfg_test_entry(cfg_entry))
     })
 }

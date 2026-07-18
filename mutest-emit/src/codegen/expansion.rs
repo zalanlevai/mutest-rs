@@ -4,7 +4,6 @@ use std::path::{self, Path, PathBuf};
 
 use itertools::Itertools;
 use rustc_middle::ty::TyCtxt;
-use rustc_query_system::ich::StableHashingContext;
 use rustc_session::Session;
 use rustc_session::parse::ParseSess;
 use rustc_span::{ExpnData, LocalExpnId};
@@ -42,7 +41,7 @@ impl<'tcx> TcxExpansionExt for TyCtxt<'tcx> {
             None,
             None,
         );
-        LocalExpnId::fresh(expn_data, StableHashingContext::new(self.sess, self.untracked()))
+        self.with_stable_hashing_context(|hcx| LocalExpnId::fresh(expn_data, hcx))
     }
 }
 
@@ -80,9 +79,10 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(allocator_api)]
         #![feature(cfg_target_thread_local)]
         #![feature(core_intrinsics)]
+        #![feature(core_io)]
         #![feature(error_in_core)]
-        #![feature(derive_clone_copy)]
-        #![feature(derive_eq)]
+        #![feature(derive_clone_copy_internals)]
+        #![feature(derive_eq_internals)]
         #![feature(coverage_attribute)]
         #![feature(hint_must_use)]
         #![feature(never_type)]
@@ -91,6 +91,11 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
         #![feature(structural_match)]
         #![feature(thread_local)]
         #![feature(trivial_clone)]
+
+        // NOTE: Sanitization of paths causes paths to the AtomicT types to resolve to Atomic<T>,
+        //       which are currently behind the `generic_atomic` feature.
+        //       See https://github.com/rust-lang/rust/pull/153015.
+        #![feature(generic_atomic)]
     }
 
     // NOTE: Some features are only valid if the alloc crate is loaded.
@@ -101,7 +106,7 @@ pub fn insert_generated_code_prelude_attrs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut 
     }
 
     // NOTE: Some features are only valid if the std crate is loaded.
-    if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::std) {
         ensure_attrs! {
             #![feature(print_internals)]
             #![feature(libstd_sys_internals)]
@@ -122,7 +127,7 @@ pub fn insert_generated_code_crate_refs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::std) {
         // NOTE: For std-dependent crates, we often rewrite paths through alloc,
         //       which is the actual definition crate.
         //       However, these references can only be resolved correctly if an explicit
@@ -342,7 +347,7 @@ pub fn load_modules(sess: &Session, krate: &mut ast::Crate) {
         FileName::Real(name) => {
             name.into_local_path().expect("attempting to resolve a file path in an external file")
         }
-        other => PathBuf::from(other.prefer_local().to_string()),
+        other => PathBuf::from(other.prefer_local_unconditionally().to_string()),
     };
     let dir_path = file_path.parent().unwrap_or(&file_path).to_owned();
 
@@ -360,6 +365,7 @@ fn clone_important_attrs(attrs: &[ast::Attribute]) -> ThinVec<ast::Attribute> {
         .filter_map(|attr| {
             match attr.kind {
                 ast::AttrKind::Normal(_) => Some(attr.clone()),
+                ast::AttrKind::Synthetic(_) => None,
                 ast::AttrKind::DocComment(_, _) => None,
             }
         })

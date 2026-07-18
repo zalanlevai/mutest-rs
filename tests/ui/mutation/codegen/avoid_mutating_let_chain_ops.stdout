@@ -1,55 +1,55 @@
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:12:16: 12:20
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:10:16: 10:20
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:12:24: 12:29
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:10:24: 10:29
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:13:8: 13:13
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:11:8: 11:13
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:13:17: 13:22
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:11:17: 11:22
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:13:34: 13:38
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:11:34: 11:38
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:13:42: 13:47
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:11:42: 11:47
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:16:22: 16:26
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:14:22: 14:26
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:16:30: 16:35
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:14:30: 14:35
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:20:14: 20:19
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:18:14: 18:19
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:20:23: 20:28
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:18:23: 18:28
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:20:40: 20:44
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:18:40: 18:44
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:20:48: 20:53
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:18:48: 18:53
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:24:19: 24:23
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:22:19: 22:23
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:24:27: 24:32
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:22:27: 22:32
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:25:11: 25:16
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:23:11: 23:16
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:25:20: 25:25
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:23:20: 23:25
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:25:37: 25:41
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:23:37: 23:41
   <-(0)- test
 
-[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:25:45: 25:50
+[bool_expr_negate] negate boolean expression in mutable_fn at tests/ui/mutation/codegen/avoid_mutating_let_chain_ops.rs:23:45: 23:50
   <-(0)- test
 
 18 mutations; 18 safe; 0 unsafe (0 tainted)

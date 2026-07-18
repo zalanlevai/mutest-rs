@@ -1,7 +1,7 @@
 use std::env;
 use std::time::{Duration, Instant};
 
-use rustc_hash::{FxHashSet, FxHashMap};
+use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
 use rustc_middle::bug;
@@ -35,6 +35,7 @@ pub struct AnalysisPassResult {
     pub mutation_batching_duration: Duration,
     pub codegen_duration: Duration,
     pub write_duration: Duration,
+    pub input_file_name: FileName,
     pub generated_crate_code: String,
     pub specialized_external_mutant_crate: Option<(String, SpecializedMutantCrateCompilationRequest)>,
 }
@@ -97,7 +98,7 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
         code = rustc_ast_pretty::pprust::print_crate(
             tcx.sess.source_map(),
             generated_crate_ast,
-            tcx.sess.io.input.source_name(),
+            tcx.sess.io.input.file_name(tcx.sess),
             "".to_owned(),
             &NoAnn,
             true,
@@ -147,6 +148,8 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     };
 
     let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
+        let sess = &compiler.sess;
+
         let t_start = Instant::now();
         let mut pass_result = AnalysisPassResult {
             duration: Duration::ZERO,
@@ -158,11 +161,10 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             mutation_batching_duration: Duration::ZERO,
             codegen_duration: Duration::ZERO,
             write_duration: Duration::ZERO,
+            input_file_name: sess.io.input.file_name(sess),
             generated_crate_code: String::new(),
             specialized_external_mutant_crate: None,
         };
-
-        let sess = &compiler.sess;
 
         let mut crate_ast = passes::parse(sess);
         // NOTE: We must register our custom tool attribute namespace before the
@@ -177,13 +179,13 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
 
         let result = create_and_enter_global_ctxt(compiler, crate_ast.clone(), |tcx| -> Flow<AnalysisPassResult, ErrorGuaranteed> {
             let (mut generated_crate_ast, def_res) = {
-                let (resolver, expanded_crate_ast) = &*tcx.resolver_for_lowering().borrow();
-                let def_res = mutest_emit::analysis::ast_lowering::DefResolutions::from_resolver(resolver);
+                let (resolver, expanded_crate_ast) = tcx.resolver_for_lowering();
+                let def_res = mutest_emit::analysis::ast_lowering::DefResolutions::from_resolver(&*resolver.borrow());
 
                 // TODO: Generate code based on the original, unexpanded AST instead of the
                 //       expanded AST which may contain invalid code that is not equivalent due
                 //       to macro hygiene.
-                let generated_crate_ast = (**expanded_crate_ast).clone();
+                let generated_crate_ast = expanded_crate_ast.borrow().clone();
 
                 (generated_crate_ast, def_res)
             };

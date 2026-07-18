@@ -3,7 +3,7 @@ use std::collections::hash_map;
 use std::hash::{Hash, Hasher};
 use std::iter;
 
-use rustc_hash::{FxHashSet, FxHashMap};
+use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_middle::bug;
 use rustc_middle::mir;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
@@ -301,7 +301,7 @@ impl Targeting {
                     // NOT `fn;`
                     && tcx.is_mir_available(def_id)
                     // NOT `#[mutest::skip]` functions
-                    && !tool_attr::skip(tcx.get_all_attrs(def_id));
+                    && !tool_attr::skip(hir::attrs::HasAttrs::get_attrs(def_id, &tcx));
 
                 if !targeted { return None; }
 
@@ -420,7 +420,10 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
                         generic_args = inner_generic_args;
                     }
 
-                    let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(generic_args));
+                    // See https://github.com/rust-lang/rust/pull/158632.
+                    let generic_args = generic_args.no_bound_vars().unwrap();
+
+                    let generic_args = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(tcx, generic_args));
 
                     if safety != hir::Safety::Unsafe {
                         safety = tcx.fn_sig(def_id).skip_binder().safety();
@@ -430,10 +433,10 @@ pub fn mir_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx>, gen
                 }
 
                 &ty::TyKind::FnPtr(fn_sig_tys, fn_header) => {
-                    let fn_sig_tys = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(fn_sig_tys));
+                    let fn_sig_tys = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(tcx, fn_sig_tys));
 
                     if safety != hir::Safety::Unsafe {
-                        safety = fn_header.safety;
+                        safety = fn_header.safety();
                     }
 
                     Some(Call { kind: CallKind::Ptr(fn_sig_tys.with(fn_header)), safety, span })
@@ -456,8 +459,8 @@ pub fn drop_glue_callees<'tcx>(tcx: TyCtxt<'tcx>, body_mir: &'tcx mir::Body<'tcx
             }
         })
         .map(move |&dropped_ty| {
-            let dropped_ty = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(dropped_ty));
-            ty::Instance::resolve_drop_in_place(tcx, dropped_ty)
+            let dropped_ty = instance.instantiate_mir_and_normalize_erasing_regions(tcx, typing_env, ty::EarlyBinder::bind(tcx, dropped_ty));
+            ty::Instance::resolve_drop_glue(tcx, dropped_ty)
         })
         .flat_map(move |drop_in_place| tcx.mir_inliner_callees(drop_in_place.def))
         .map(move |&(def_id, generic_args)| {
@@ -539,7 +542,7 @@ pub fn instantiate_generic_args<'tcx, T>(tcx: TyCtxt<'tcx>, foldable: T, generic
 where
     T: ty::TypeFoldable<TyCtxt<'tcx>>,
 {
-    ty::EarlyBinder::bind(foldable).instantiate(tcx, generic_args)
+    ty::EarlyBinder::bind(tcx, foldable).instantiate(tcx, generic_args).skip_normalization()
 }
 
 pub fn reachable_fns<'ast, 'tcx, 'ent>(

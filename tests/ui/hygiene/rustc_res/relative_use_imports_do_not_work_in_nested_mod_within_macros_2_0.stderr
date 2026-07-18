@@ -3,14 +3,18 @@ error[E0432]: unresolved import `super::super::f`
    |
 20 |                     use super::super::f;
    |                         ^^^^^^^^^^^^^^-
-   |                         |             |
-   |                         |             help: a similar name exists in the module: `m`
-   |                         no `f` in `def::inner`
+   |                                       |
+   |                                       no `f` in `def::inner`
 ...
 30 | m!();
    | ---- in this macro invocation
    |
    = note: this error originates in the macro `def::inner::m` which comes from the expansion of the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: a similar name exists in the module
+   |
+20 -                     use super::super::f;
+20 +                     use super::super::m;
+   |
 
 error: aborting due to 1 previous error
 

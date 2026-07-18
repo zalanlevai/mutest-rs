@@ -1,10 +1,8 @@
-#![feature(array_windows)]
 #![feature(decl_macro)]
-#![feature(if_let_guard)]
 
 #![feature(rustc_private)]
+extern crate rustc_data_structures;
 extern crate rustc_driver;
-extern crate rustc_hash;
 extern crate rustc_interface;
 extern crate rustc_session;
 extern crate rustc_span;
@@ -21,7 +19,7 @@ use mutest_driver::passes::external_mutant::RustcInvocation;
 use mutest_driver_cli::{UnstableFlag, UnstableOption};
 use mutest_emit::analysis::hir::Safety;
 use mutest_emit::codegen::mutation::{OperatorRef, UnsafeTargeting};
-use rustc_hash::FxHashSet;
+use rustc_data_structures::fx::FxHashSet;
 use rustc_interface::Config as CompilerConfig;
 use rustc_session::EarlyDiagCtxt;
 use rustc_session::config::{CrateType, ErrorOutputType, Input};
@@ -38,8 +36,8 @@ struct RustcCallbacks {
 impl rustc_driver::Callbacks for RustcCallbacks {
     fn config(&mut self, config: &mut CompilerConfig) {
         let args = self.mutest_args.take();
-        config.psess_created = Some(Box::new(move |parse_sess| {
-            mutest_driver::passes::track_invocation_fingerprint(parse_sess, args.as_deref());
+        config.track_state = Some(Box::new(move |sess| {
+            mutest_driver::passes::track_invocation_fingerprint(sess, args.as_deref());
         }));
     }
 }
@@ -146,7 +144,7 @@ const UNSTABLE_OPTIONS: &[UnstableOption] = mutest_driver_cli::extend_const_slic
 
 const BUG_REPORT_URL: &str = "https://github.com/zalanlevai/mutest-rs/issues/new";
 
-pub fn main() {
+pub fn main() -> process::ExitCode {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
     let mut args = rustc_driver::args::raw_args(&early_dcx);
 
@@ -168,9 +166,9 @@ pub fn main() {
         args.remove(marker_arg_position);
         args[0] = "rustc".to_owned();
 
-        process::exit(rustc_driver::catch_with_exit_code(|| {
+        return rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut DefaultCallbacks)
-        }));
+        });
     }
 
     // Parser for non-rustc, mutest-specific arguments provided through MUTEST_ARGS / MUTEST_ENCODED_ARGS.
@@ -191,15 +189,15 @@ pub fn main() {
         // NOTE: The exit calls are actually unreachable, but it is good to have them just in case.
         if args.iter().any(|arg| arg == "-V" || arg == "--version") {
             let _ = mutest_command.get_matches_from(["--version"]);
-            process::exit(0);
+            return process::ExitCode::SUCCESS;
         }
         if args.iter().any(|arg| arg == "-h") {
             let _ = mutest_command.get_matches_from(["-h"]);
-            process::exit(0);
+            return process::ExitCode::SUCCESS;
         }
         if args.iter().any(|arg| arg == "--help") {
             let _ = mutest_command.get_matches_from(["--help"]);
-            process::exit(0);
+            return process::ExitCode::SUCCESS;
         }
     }
 
@@ -229,9 +227,9 @@ pub fn main() {
 
     // Fall back to a rustc invocation if mutest is not "enabled" for the given crate based on invocation.
     if info_query || (cargo_invocation && !primary_package) || proc_macro_target || (bin_target && !test_target) {
-        process::exit(rustc_driver::catch_with_exit_code(|| {
+        return rustc_driver::catch_with_exit_code(|| {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str })
-        }));
+        });
     }
 
     let mutest_arg_matches = mutest_command.get_matches_from(mutest_args.unwrap_or_default());
@@ -239,14 +237,14 @@ pub fn main() {
     let unstable_flags = mutest_arg_matches.get_many::<String>("Z").into_iter().flatten().map(String::as_str).collect::<Vec<_>>();
     if unstable_flags.contains(&"help") {
         mutest_driver_cli::print_unstable_flags_help(UNSTABLE_FLAGS);
-        process::exit(0);
+        return process::ExitCode::SUCCESS;
     }
     mutest_driver_cli::check_unstable_flags(&unstable_flags, UNSTABLE_FLAGS);
     if !unstable_flags.contains(&"unstable-options") {
         mutest_driver_cli::check_unstable_options(&mutest_arg_matches, UNSTABLE_OPTIONS);
     }
 
-    process::exit(rustc_driver::catch_with_exit_code(|| {
+    rustc_driver::catch_with_exit_code(|| {
         let (Some(compiler_config), crate_types) = mutest_driver::passes::parse_compiler_args(&args) else {
             early_dcx.early_fatal("no compiler configuration was generated");
         };
@@ -684,5 +682,5 @@ pub fn main() {
         };
 
         mutest_driver::run(config).unwrap();
-    }));
+    })
 }
