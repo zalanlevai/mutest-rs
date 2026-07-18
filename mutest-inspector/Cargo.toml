@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 axum = "0.8"
 memory-serve = "2"
 
-tree-sitter-highlight = "0.25"
+tree-sitter-highlight = "0.26"
 tree-sitter-rust = "0.24"
 
 pulldown-cmark-escape = "0.11"

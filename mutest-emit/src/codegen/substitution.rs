@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
 use thin_vec::{ThinVec, thin_vec};

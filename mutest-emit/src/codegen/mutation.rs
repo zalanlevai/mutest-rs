@@ -2,7 +2,8 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 use std::marker::PhantomData;
 
-use rustc_hash::{FxHashSet, FxHashMap};
+use rand::prelude::*;
+use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 use smallvec::{SmallVec, smallvec};
@@ -238,7 +239,7 @@ impl<'trg, 'm> Mut<'trg, 'm> {
     }
 
     pub fn display_location(&self, sess: &Session) -> String {
-        sess.source_map().span_to_embeddable_string(self.span)
+        sess.source_map().span_to_diagnostic_string(self.span)
     }
 
     pub fn undetected_diagnostic(&self, sess: &Session) -> String {
@@ -560,7 +561,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
             ast::ExprKind::Match(expr, arms, _) => {
                 self.visit_expr(expr);
                 for arm in arms {
-                    if let Some(guard) = &arm.guard { self.visit_expr(guard); }
+                    if let Some(guard) = &arm.guard { self.visit_expr(&guard.cond); }
                     if let Some(body) = &arm.body { self.visit_expr(body); }
                 }
             }
@@ -892,8 +893,6 @@ fn choose_random_mutation_batch<'trg, 'm, 'a>(
     batch_max_mutations_count: usize,
     rng: &mut impl rand::Rng,
 ) -> Option<&'a mut MutationBatch<'trg, 'm>> {
-    use rand::prelude::*;
-
     if mutation_batches.is_empty() { return None; }
 
     // Unsafe mutations are isolated into their own mutation batch.
@@ -922,9 +921,8 @@ pub fn batch_mutations_greedy<'trg, 'm>(
 ) -> Vec<MutationBatch<'trg, 'm>> {
     let mut mutations_in_consideration_order = mutations.iter().collect::<Vec<_>>();
 
-    use GreedyMutationBatchingOrderingHeuristic::*;
     match ordering_heuristic {
-        Some(ConflictsAsc | ConflictsDesc) => {
+        Some(GreedyMutationBatchingOrderingHeuristic::ConflictsAsc | GreedyMutationBatchingOrderingHeuristic::ConflictsDesc) => {
             let mutation_conflict_heuristic = mutations.iter()
                 .map(|mutation| {
                     let mut conflict_heuristic = 0_usize;
@@ -939,13 +937,12 @@ pub fn batch_mutations_greedy<'trg, 'm>(
                 .collect::<FxHashMap<_, _>>();
 
             mutations_in_consideration_order.sort_by(|a, b| Ord::cmp(&mutation_conflict_heuristic.get(&a.id), &mutation_conflict_heuristic.get(&b.id)));
-            if let Some(ConflictsDesc) = ordering_heuristic {
+            if let Some(GreedyMutationBatchingOrderingHeuristic::ConflictsDesc) = ordering_heuristic {
                 mutations_in_consideration_order.reverse();
             }
         }
 
-        Some(Random) => {
-            use rand::prelude::*;
+        Some(GreedyMutationBatchingOrderingHeuristic::Random) => {
             let Some(ref mut rng) = rng else { panic!("random ordering requested but rng not provided") };
 
             mutations_in_consideration_order.shuffle(rng);
@@ -1051,8 +1048,6 @@ pub fn optimize_batches_simulated_annealing<'trg, 'm>(
         batch_max_mutations_count: usize,
         rng: &mut impl rand::Rng,
     ) -> StateChange {
-        use rand::prelude::*;
-
         let (random_batch, random_mutation, new_random_batch) = loop {
             let Some(random_batch) = mutation_batches.choose(rng) else { unreachable!(); };
             let Some(random_mutation) = random_batch.mutations.choose(rng) else { unreachable!(); };

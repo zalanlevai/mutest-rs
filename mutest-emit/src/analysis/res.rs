@@ -1,15 +1,14 @@
 use std::num::NonZeroUsize;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_session::config::ExternLocation;
-use rustc_session::search_paths::PathKind;
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 
 use crate::analysis::call_graph::{Call, CallKind};
-use crate::analysis::hir::{self, CRATE_DEF_ID, LOCAL_CRATE};
+use crate::analysis::hir::{self, CRATE_DEF_ID, CRATE_MOD_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
 use crate::analysis::ty::{self, Ty, TyCtxt};
@@ -35,14 +34,9 @@ impl<'tcx> CrateResolutions<'tcx> {
         let crate_sources = tcx.crates(()).iter()
             .filter_map(|&cnum| {
                 let crate_source = tcx.used_crate_source(cnum);
-                let extern_crate_source_paths = [&crate_source.dylib, &crate_source.rlib, &crate_source.rmeta].into_iter().flatten()
-                    .filter(|(_, path_kind)| matches!(path_kind, PathKind::ExternFlag))
-                    .map(|(path, _)| path.clone())
-                    .collect::<SmallVec<[_; 3]>>();
-                match &extern_crate_source_paths[..] {
-                    [] => None,
-                    _ => Some((cnum, extern_crate_source_paths)),
-                }
+                let mut extern_crate_source_paths = crate_source.paths().cloned().peekable();
+                extern_crate_source_paths.peek()?;
+                Some((cnum, extern_crate_source_paths.collect::<SmallVec<[_; 3]>>()))
             })
             .collect::<FxHashMap<_, _>>();
 
@@ -74,9 +68,9 @@ impl<'tcx> CrateResolutions<'tcx> {
                 (Symbol::intern(name), renamed_cnum)
             })
             .collect::<FxHashMap<_, _>>();
-        if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_core)) {
+        if !hir::find_attr!(tcx, crate, NoCore) {
             extern_crate_name_to_cnum.insert(sym::core, None);
-            if !tcx.hir_krate_attrs().iter().any(|attr| hir::attr::is_word_attr(attr, None, sym::no_std)) {
+            if !hir::find_attr!(tcx, crate, NoStd) {
                 extern_crate_name_to_cnum.insert(sym::alloc, None);
                 extern_crate_name_to_cnum.insert(sym::std, None);
             }
@@ -123,7 +117,7 @@ pub fn lookup_mod_child<'tcx>(tcx: TyCtxt<'tcx>, mod_def_id: hir::DefId, res: hi
 #[derive(Clone, Debug)]
 pub struct ItemChild {
     pub ident: Ident,
-    pub vis: ty::Visibility<hir::DefId>,
+    pub vis: ty::Visibility<hir::ModId>,
     pub res: Res,
     pub reexport: Option<Reexport>,
 }
@@ -284,6 +278,8 @@ pub fn callee<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr
     match expr.kind {
         hir::ExprKind::Call(expr, _) => {
             let &ty::TyKind::FnDef(def_id, generic_args) = typeck.node_type(expr.hir_id).kind() else { return None; };
+            // See https://github.com/rust-lang/rust/pull/158632.
+            let generic_args = generic_args.no_bound_vars().unwrap();
             Some((def_id, generic_args))
         }
 
@@ -472,7 +468,7 @@ impl<'tcx> DefPath<'tcx> {
             }
         }
 
-        (qself, ast::Path { span: DUMMY_SP, segments, tokens: None })
+        (qself, ast::Path { span: DUMMY_SP, segments })
     }
 }
 
@@ -501,7 +497,7 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     };
     for (i, &def_id) in relative_def_id_path.iter().enumerate().rev() {
         let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(def_id) else { continue; };
-        let implementer_ty = tcx.type_of(def_id).instantiate_identity();
+        let implementer_ty = tcx.type_of(def_id).instantiate_identity().skip_normalization();
 
         relative_def_id_path = &relative_def_id_path[(i + 1)..];
         root = DefPathRootKind::Ty(implementer_ty);
@@ -526,9 +522,9 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
                 | hir::DefKind::Struct | hir::DefKind::Enum | hir::DefKind::Union | hir::DefKind::Variant | hir::DefKind::TyAlias
                 | hir::DefKind::ForeignMod | hir::DefKind::ForeignTy
                 | hir::DefKind::Trait | hir::DefKind::Impl { .. } | hir::DefKind::TraitAlias
-                | hir::DefKind::Fn | hir::DefKind::Const | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
-                | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst
-                | hir::DefKind::AnonConst | hir::DefKind::InlineConst
+                | hir::DefKind::Fn | hir::DefKind::Const { .. } | hir::DefKind::Static { .. } | hir::DefKind::Ctor(..)
+                | hir::DefKind::AssocTy | hir::DefKind::AssocFn | hir::DefKind::AssocConst { .. }
+                | hir::DefKind::AnonConst
                 | hir::DefKind::Closure
             );
             while is_transparent(tcx.def_kind(scope)) && let Some(parent_scope) = tcx.opt_parent(scope) {
@@ -557,7 +553,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
 }
 
 pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span, limit: Option<NonZeroUsize>) -> SmallVec<[DefPath<'tcx>; 1]> {
-    let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
+    let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|&(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
         // NOTE: Such paths will never be accessible outside of the scope of the assoc item.
@@ -566,7 +562,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
         // `..::{impl#?}::$assoc_item` path.
         Some((0, impl_parent_def_id)) => {
             let hir::DefKind::Impl { of_trait: false } = tcx.def_kind(impl_parent_def_id) else { unreachable!("encountered trait impl in def path") };
-            let implementer_ty = tcx.type_of(impl_parent_def_id).instantiate_identity();
+            let implementer_ty = tcx.type_of(impl_parent_def_id).instantiate_identity().skip_normalization();
 
             let ident = tcx.opt_item_ident(def_id).unwrap();
             let def_path = DefPath::new(DefPathRootKind::Ty(implementer_ty), vec![DefPathSegment { def_id, ident, reexport: None }]);
@@ -650,7 +646,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
             for child in children {
                 let visible = false
                     || child.vis == ty::Visibility::Public
-                    || child.vis == ty::Visibility::Restricted(CRATE_DEF_ID.to_def_id())
+                    || child.vis == ty::Visibility::Restricted(CRATE_MOD_ID.to_mod_id())
                     || scope.is_some_and(|scope| child.vis.is_accessible_from(scope, tcx));
 
                 if !visible { continue; }

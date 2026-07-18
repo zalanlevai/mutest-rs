@@ -1,4 +1,3 @@
-#![feature(if_let_guard)]
 #![feature(trim_prefix_suffix)]
 
 use std::collections::HashSet;

@@ -137,7 +137,7 @@ impl MutationBatchingRandomness {
 
         match self.seed {
             Some(seed) => StdRng::from_seed(seed),
-            None => StdRng::from_os_rng(),
+            None => rand::make_rng(),
         }
     }
 }

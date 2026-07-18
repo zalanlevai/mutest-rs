@@ -1,5 +1,4 @@
 #![feature(decl_macro)]
-#![feature(if_let_guard)]
 #![feature(iter_array_chunks)]
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
@@ -14,7 +13,6 @@ extern crate rustc_driver;
 extern crate rustc_errors;
 extern crate rustc_feature;
 extern crate rustc_graphviz;
-extern crate rustc_hash;
 extern crate rustc_interface;
 extern crate rustc_lint_defs;
 extern crate rustc_middle;

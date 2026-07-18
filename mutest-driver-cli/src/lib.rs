@@ -1,5 +1,4 @@
 #![feature(decl_macro)]
-#![feature(if_let_guard)]
 
 use std::path::PathBuf;
 use std::process;

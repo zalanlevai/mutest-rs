@@ -1,5 +1,3 @@
-#![feature(if_let_guard)]
-
 use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
