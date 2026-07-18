@@ -1,15 +1,27 @@
 //@ print-tests
 //@ print-targets
 //@ print-mutations
-//@ run: fail
+//@ build
 //@ stdout
+//@ no-harness
+//@ rustc-flags: --target aarch64-unknown-none
 //@ mutest-flags: -Z embedded
+
+#![no_std]
+#![no_main]
+
+#![feature(abort_immediate)]
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
 
 // HACK: Stub out the runtime dependencies of the embedded_test macro expansion.
 mod embedded_test {
     pub mod export {
         pub fn check_outcome((): ()) -> ! {
-            std::process::exit(0);
+            core::process::abort_immediate();
         }
     }
 }

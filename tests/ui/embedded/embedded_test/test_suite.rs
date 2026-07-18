@@ -1,5 +1,13 @@
 //@ ignore
 
+#![no_std]
+#![no_main]
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
 struct Peripherals;
 
 fn mutable_fn(a: u32, b: u32) -> u32 {
