@@ -1,3 +1,4 @@
+use mutest_emit::analysis::diagnostic;
 use mutest_emit::analysis::hir;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::harness::mk_crate_kind_const;
@@ -18,7 +19,7 @@ pub fn embed_rustc_invocation(krate: &mut ast::Crate, rustc_invocation: &RustcIn
         let vis = ast::mk::vis_pub(DUMMY_SP);
         let ident = Ident::new(Symbol::intern("RUSTC_ARGS"), DUMMY_SP);
         let ty = ast::mk::ty_ref(DUMMY_SP, ast::mk::ty_ident(DUMMY_SP, None, Ident::new(sym::str, DUMMY_SP)), None);
-        let expr = ast::mk::expr_str(DUMMY_SP, &rustc_args_str);
+        let expr = ast::mk::expr_str(DUMMY_SP, &diagnostic::escape_literal(&rustc_args_str));
         ast::mk::item_const(DUMMY_SP, vis, ident, ty, expr)
     };
 
@@ -29,7 +30,7 @@ pub fn embed_rustc_invocation(krate: &mut ast::Crate, rustc_invocation: &RustcIn
         let vis = ast::mk::vis_pub(DUMMY_SP);
         let ident = Ident::new(Symbol::intern("RUSTC_ENV_VARS"), DUMMY_SP);
         let ty = ast::mk::ty_ref(DUMMY_SP, ast::mk::ty_ident(DUMMY_SP, None, Ident::new(sym::str, DUMMY_SP)), None);
-        let expr = ast::mk::expr_str(DUMMY_SP, &rustc_env_vars_str);
+        let expr = ast::mk::expr_str(DUMMY_SP, &diagnostic::escape_literal(&rustc_env_vars_str));
         ast::mk::item_const(DUMMY_SP, vis, ident, ty, expr)
     };
 

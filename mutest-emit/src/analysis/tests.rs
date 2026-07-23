@@ -7,6 +7,7 @@ use rustc_session::Session;
 use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::ast_lowering;
+use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
@@ -219,7 +220,7 @@ fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_loweri
             }),
 
             ast::mk::expr_struct_field(sp, Ident::new(sym::source_file, sp), {
-                ast::mk::expr_str(sp, &file_name)
+                ast::mk::expr_str(sp, &diagnostic::escape_literal(&file_name))
             }),
             ast::mk::expr_struct_field(sp, Ident::new(sym::start_line, sp), {
                 ast::mk::expr_usize(sp, lo_line)
