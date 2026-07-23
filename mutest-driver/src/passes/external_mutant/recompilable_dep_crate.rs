@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use rustc_interface::{Linker, create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::Config as CompilerConfig;
 use rustc_interface::interface::Result as CompilerResult;
+use rustc_lint_defs::Level as LintLevel;
 use rustc_session::config::{OptLevel, OutputFilenames};
 
 use crate::passes::external_mutant::RustcInvocation;
@@ -29,6 +30,9 @@ pub fn compile_recompilable_dep_crate(compiler_config: &CompilerConfig, rustc_in
     //       needed for linking or binary codegen.
     //       This is needed to create the full call graph from an external crate.
     compiler_config.opts.unstable_opts.always_encode_mir = true;
+
+    // Disable lints on generated crate code.
+    compiler_config.opts.lint_cap = Some(LintLevel::Allow);
 
     let compilation_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<RecompilableDepCrateCompilationResult> {
         let t_start = Instant::now();
