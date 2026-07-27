@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::hash_map;
 use std::collections::vec_deque::VecDeque;
 use std::num::NonZeroUsize;
@@ -645,13 +646,6 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
         None => {}
     }
 
-    let extern_crates = tcx.hir_crate_items(()).definitions()
-        .filter(|&def_id| matches!(tcx.def_kind(def_id), hir::DefKind::ExternCrate))
-        .filter_map(|def_id| {
-            let Some(cnum) = tcx.extern_mod_stmt_cnum(def_id) else { return None; };
-            Some((def_id, cnum))
-        });
-
     let (root_def_id, root_def_path) = match def_id.as_local() {
         Some(_) => {
             let root_def_id = CRATE_DEF_ID.to_def_id();
@@ -664,40 +658,67 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
             (root_def_id, root_def_path)
         }
         None => 'root: {
-            let mut reachable_extern_crates = extern_crates
-                .filter(|&(_extern_crate_def_id, cnum)| cnum == def_id.krate)
-                .filter(|&(extern_crate_def_id, _cnum)| {
-                    false
-                        || tcx.opt_local_parent(extern_crate_def_id) == Some(CRATE_DEF_ID)
-                        || scope.is_some_and(|scope| tcx.is_descendant_of(extern_crate_def_id.to_def_id(), scope))
-                });
-            let Some((reachable_extern_crate_def_id, _cnum)) = reachable_extern_crates.next() else {
-                let visible_parent_map = tcx.visible_parent_map(());
-                let mut visible_def_id = def_id;
-                while let Some(&visible_parent) = visible_parent_map.get(&visible_def_id) {
-                    visible_def_id = visible_parent;
-                    if let Some(cnum) = visible_def_id.as_crate_root() {
-                        let crate_name = crate_res.visible_crate_name(cnum);
-                        if !crate_res.is_in_extern_prelude(crate_name) { continue; }
-
-                        let root_def_path = DefPath::new(DefPathRootKind::Global(cnum), vec![]);
-                        break 'root (visible_def_id, root_def_path);
-                    }
+            // NOTE: Lazily compute this once and only when needed upon first access.
+            let visible_extern_crate_defs = OnceCell::new();
+            let crate_to_def_path = |cnum| {
+                // First, check if the crate is in the extern prelude through an `--extern` option.
+                let crate_name = crate_res.visible_crate_name(cnum);
+                if crate_res.is_in_extern_prelude(crate_name) {
+                    let root_def_path = DefPath::new(DefPathRootKind::Global(cnum), vec![]);
+                    return Some(Some(root_def_path));
                 }
 
-                span_bug!(span, "expected `{}` to be reached through another crate in the extern prelude", tcx.def_path_str(def_id));
+                // Otherwise, check if there is a visible `extern crate` item we can use to refer to the crate instead.
+                let visible_extern_crate_defs = visible_extern_crate_defs.get_or_init(|| {
+                    tcx.hir_crate_items(()).definitions()
+                        .filter(|&def_id| matches!(tcx.def_kind(def_id), hir::DefKind::ExternCrate))
+                        .filter_map(|def_id| Some((def_id, tcx.extern_mod_stmt_cnum(def_id)?)))
+                        .filter(|&(extern_crate_def_id, _cnum)| {
+                            false
+                                || tcx.opt_local_parent(extern_crate_def_id) == Some(CRATE_DEF_ID)
+                                || scope.is_some_and(|scope| tcx.is_descendant_of(extern_crate_def_id.to_def_id(), scope))
+                        })
+                        .collect::<Vec<_>>()
+                });
+                if let Some(&(visible_extern_crate_def_id, _cnum)) = visible_extern_crate_defs.iter().find(|&&(_, extern_crate_def_cnum)| extern_crate_def_cnum == cnum) {
+                    let Some(mut root_def_path) = DefPath::from_def_parent_path(tcx, visible_extern_crate_def_id.to_def_id()) else { return Some(None) };
+
+                    if let Some(scope) = scope && tcx.is_descendant_of(visible_extern_crate_def_id.to_def_id(), scope) {
+                        let scope_def_id_path = def_id_path(tcx, scope);
+                        root_def_path.segments.splice(0..(scope_def_id_path.len() - 1), []);
+                        root_def_path.root = DefPathRootKind::Local;
+                    }
+
+                    return Some(Some(root_def_path));
+                }
+
+                None
             };
 
-            let root_def_id = def_id.krate.as_def_id();
-            let Some(mut root_def_path) = DefPath::from_def_parent_path(tcx, reachable_extern_crate_def_id.to_def_id()) else { return smallvec![] };
-
-            if let Some(scope) = scope && tcx.is_descendant_of(reachable_extern_crate_def_id.to_def_id(), scope) {
-                let scope_def_id_path = def_id_path(tcx, scope);
-                root_def_path.segments.splice(0..(scope_def_id_path.len() - 1), []);
-                root_def_path.root = DefPathRootKind::Local;
+            // NOTE: The visible_parent_map does not have entries for direct dependency crates.
+            match def_id.as_crate_root() {
+                Some(cnum) => match crate_to_def_path(cnum) {
+                    Some(Some(root_def_path)) => { break 'root (def_id, root_def_path); }
+                    Some(None) => { return smallvec![]; }
+                    None => {}
+                },
+                None => {
+                    let visible_parent_map = tcx.visible_parent_map(());
+                    let mut visible_def_id = def_id;
+                    while let Some(&visible_parent) = visible_parent_map.get(&visible_def_id) {
+                        visible_def_id = visible_parent;
+                        if let Some(cnum) = visible_def_id.as_crate_root() {
+                            match crate_to_def_path(cnum) {
+                                Some(Some(root_def_path)) => { break 'root (visible_def_id, root_def_path); }
+                                Some(None) => { return smallvec![]; }
+                                None => {}
+                            }
+                        }
+                    }
+                }
             }
 
-            (root_def_id, root_def_path)
+            span_bug!(span, "expected `{}` to be reached through another crate either through the extern prelude or an `extern crate` item", tcx.def_path_str(def_id));
         }
     };
 
