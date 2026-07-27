@@ -1,3 +1,5 @@
+use std::collections::hash_map;
+use std::collections::vec_deque::VecDeque;
 use std::num::NonZeroUsize;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -550,6 +552,76 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     }
 
     Ok(def_path)
+}
+
+/// Query override for `visible_parent_map` with our fix applied from
+/// https://github.com/rust-lang/rust/pull/159881.
+/// See `tests/ui/hygiene/paths/doc_hidden_reexport_of_transitive_dep_item`.
+///
+/// Do not use directly, instead call `TyCtxt::visible_parent_map` as normal.
+/// A query override is applied for any "active" invocations of mutest-driver.
+// TODO: Remove once our fix is accepted into upstream and
+//       we upgrade to a version of the toolchain with the fix applied.
+pub fn visible_parent_map<'tcx>(tcx: TyCtxt<'tcx>) -> hir::DefIdMap<hir::DefId> {
+    let mut visible_parent_map: hir::DefIdMap<hir::DefId> = Default::default();
+    let mut fallback_map: Vec<(hir::DefId, hir::DefId)> = Default::default();
+
+    let bfs_queue = &mut VecDeque::new();
+
+    for &cnum in tcx.crates(()) {
+        if tcx.missing_extern_crate_item(cnum) { continue; }
+        bfs_queue.push_back(cnum.as_def_id());
+    }
+
+    let mut add_child = |bfs_queue: &mut VecDeque<_>, child: &ModChild, parent: hir::DefId| {
+        if !child.vis.is_public() { return; }
+
+        if let Some(def_id) = child.res.opt_def_id() {
+            let mut fallback = false;
+            if child.ident.name == kw::Underscore {
+                fallback = true;
+            }
+            if tcx.is_doc_hidden(parent) {
+                fallback = true;
+            }
+            if child.reexport_chain.first().and_then(|r| r.id()).is_some_and(|id| tcx.is_doc_hidden(id)) {
+                fallback = true;
+            }
+
+            match visible_parent_map.entry(def_id) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    if !fallback {
+                        if def_id.is_local() && entry.get().is_local() {
+                            entry.insert(parent);
+                        }
+                    }
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    if fallback {
+                        fallback_map.push((def_id, parent));
+                    } else {
+                        entry.insert(parent);
+                    }
+
+                    if child.res.module_like_def_id().is_some() {
+                        bfs_queue.push_back(def_id);
+                    }
+                }
+            }
+        }
+    };
+
+    while let Some(def) = bfs_queue.pop_front() {
+        for child in tcx.module_children(def).iter() {
+            add_child(bfs_queue, child, def);
+        }
+    }
+
+    for (child, parent) in fallback_map {
+        visible_parent_map.entry(child).or_insert(parent);
+    }
+
+    visible_parent_map
 }
 
 pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span, limit: Option<NonZeroUsize>) -> SmallVec<[DefPath<'tcx>; 1]> {
