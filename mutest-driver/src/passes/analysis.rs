@@ -51,7 +51,6 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
 ) {
     // HACK: See below.
     mutest_emit::codegen::expansion::insert_generated_code_crate_refs(tcx, generated_crate_ast);
-    mutest_emit::codegen::expansion::insert_generated_code_prelude_attrs(tcx, generated_crate_ast);
 
     if opts.crate_kind.provides_tests() {
         mutest_emit::codegen::entry_point::clean_generated_entry_points(generated_crate_ast);

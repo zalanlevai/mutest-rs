@@ -4,7 +4,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
-use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::fx::{FxHashSet, FxIndexSet};
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
@@ -164,6 +164,11 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     /// We do not want to sanitize some idents (mostly temporarily) in the AST.
     /// During the visit we keep track of these so that they can be exluded from sanitization.
     protected_idents: FxHashSet<Ident>,
+
+    /// Keep track of the seen expansions.
+    seen_expn_ids: FxHashSet<ExpnId>,
+    /// Collect the unstable features enabled by each macro expansion.
+    allow_internal_unstables: FxIndexSet<Symbol>,
 }
 
 impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
@@ -1339,6 +1344,8 @@ pub fn sanitize_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::CrateResolutions<
         macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
         next_vis_owner: None,
         protected_idents: Default::default(),
+        seen_expn_ids: Default::default(),
+        allow_internal_unstables: Default::default(),
     };
 
     if descend_into_args {
@@ -1788,6 +1795,16 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         sanitize_standalone_ident_if_from_expansion(ident, IdentResKind::Def);
     }
 
+    fn visit_span(&mut self, span: &mut Span) {
+        let expn_id = span.ctxt().outer_expn();
+        if !self.seen_expn_ids.insert(expn_id) { return; }
+
+        let expn_data = expn_id.expn_data();
+        if let Some(allow_internal_unstable) = expn_data.allow_internal_unstable {
+            self.allow_internal_unstables.extend(&*allow_internal_unstable);
+        }
+    }
+
     fn visit_vis(&mut self, vis: &mut ast::Visibility) {
         let Some(owner_node_id) = self.next_vis_owner.take() else {
             span_bug!(vis.span, "encountered visibility with unknown owner node");
@@ -1887,22 +1904,83 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
         macros_2_0_top_level_relative_path_res_hack: Macros2_0TopLevelRelativePathResHack::NotInMacros2_0Scope,
         next_vis_owner: None,
         protected_idents: Default::default(),
+        seen_expn_ids: Default::default(),
+        allow_internal_unstables: Default::default(),
     };
     sanitizer.visit_crate(krate);
 
     let g = &tcx.sess.psess.attr_id_generator;
 
-    // NOTE: Sanitization of paths may cause paths in struct expressions and patterns to become fully qualified paths,
-    //       which are currently only supported with the `more_qualified_paths` feature.
-    //       See https://github.com/rust-lang/rust/issues/86935.
-    // #![feature(more_qualified_paths)]
-    if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, sym::more_qualified_paths)) {
-        let feature_more_qualified_paths_attr = ast::mk::attr_inner(g, DUMMY_SP,
-            Ident::new(sym::feature, DUMMY_SP),
-            ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(sym::more_qualified_paths, ast::token::IdentIsRaw::No)),
-            ])),
-        );
-        krate.attrs.push(feature_more_qualified_paths_attr);
+    for &allow_internal_unstable in &sanitizer.allow_internal_unstables {
+        // #![feature($allow_internal_unstable)]
+        if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, allow_internal_unstable)) {
+            let feature_allow_internal_unstable_attr = ast::mk::attr_inner(g, DUMMY_SP,
+                Ident::new(sym::feature, DUMMY_SP),
+                ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                    ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(allow_internal_unstable, ast::token::IdentIsRaw::No)),
+                ])),
+            );
+            krate.attrs.push(feature_allow_internal_unstable_attr);
+        }
+    }
+
+    // NOTE: While `#[allow_internal_unstable($features)] features from macro expansions are rendered above,
+    //       we still have to manually write out some features that are required by
+    //       some of the paths we generate during path sanitization.
+    macro ensure_attrs($(#![$meta:ident($kind:ident)])+) {
+        $(
+            let kind = Symbol::intern(stringify!($kind));
+            if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::$meta, kind)) {
+                let attr = ast::mk::attr_inner(g, DUMMY_SP,
+                    Ident::new(sym::$meta, DUMMY_SP),
+                    ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
+                        ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(kind, ast::token::IdentIsRaw::No)),
+                    ])),
+                );
+                krate.attrs.push(attr);
+            }
+        )+
+    }
+
+    ensure_attrs! {
+        // NOTE: Sanitization of paths to items taking an allocator generic type argument
+        //       reveals the allocator API, which is currently behind the `allocator_api` feature.
+        //       See https://github.com/rust-lang/rust/issues/32838.
+        #![feature(allocator_api)]
+        // NOTE: Sanization of paths to items re-exported from the `core::io` module
+        //       reveal the module, which is currently behind the `core_io` feature.
+        //       See https://github.com/rust-lang/rust/issues/154046.
+        #![feature(core_io)]
+        // NOTE: Sanitization of paths causes paths to the AtomicT types to resolve to Atomic<T>,
+        //       which is currently behind the `generic_atomic` feature.
+        //       See https://github.com/rust-lang/rust/pull/153015.
+        #![feature(generic_atomic)]
+    }
+
+    // NOTE: Some features are only valid if the alloc crate is loaded.
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::alloc) {
+        ensure_attrs! {
+            // NOTE: Sanization of paths to items re-exported from the `alloc::io` module
+            //       reveal the module, which is currently behind the `alloc_io` feature.
+            //       See https://github.com/rust-lang/rust/issues/154046.
+            #![feature(alloc_io)]
+        }
+    }
+
+    // NOTE: Some features are only valid if the std crate is loaded.
+    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::std) {
+        ensure_attrs! {
+            // NOTE: Sanitization of paths to `std::mpsc` items re-exported from the `std::mpmc` module
+            //       reveal the module, which is currently behind the `mpmc_channel` feature.
+            //       See https://github.com/rust-lang/rust/issues/126840.
+            #![feature(mpmc_channel)]
+        }
+    }
+
+    ensure_attrs! {
+        // NOTE: Sanitization of paths may cause paths in struct expressions and patterns to become fully qualified paths,
+        //       which are currently only supported with the `more_qualified_paths` feature.
+        //       See https://github.com/rust-lang/rust/issues/86935.
+        #![feature(more_qualified_paths)]
     }
 }
