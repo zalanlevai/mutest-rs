@@ -695,25 +695,27 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
                 None
             };
 
+            // First, check if this path points to a direct dependency extern crate.
             // NOTE: The visible_parent_map does not have entries for direct dependency crates.
-            match def_id.as_crate_root() {
-                Some(cnum) => match crate_to_def_path(cnum) {
+            if let Some(cnum) = def_id.as_crate_root() {
+                match crate_to_def_path(cnum) {
                     Some(Some(root_def_path)) => { break 'root (def_id, root_def_path); }
                     Some(None) => { return smallvec![]; }
                     None => {}
-                },
-                None => {
-                    let visible_parent_map = tcx.visible_parent_map(());
-                    let mut visible_def_id = def_id;
-                    while let Some(&visible_parent) = visible_parent_map.get(&visible_def_id) {
-                        visible_def_id = visible_parent;
-                        if let Some(cnum) = visible_def_id.as_crate_root() {
-                            match crate_to_def_path(cnum) {
-                                Some(Some(root_def_path)) => { break 'root (visible_def_id, root_def_path); }
-                                Some(None) => { return smallvec![]; }
-                                None => {}
-                            }
-                        }
+                }
+            }
+
+            // Otherwise, check the `visible_parent_map` to
+            // find a visible parent to the transitive dependency through direct dependency crates.
+            let visible_parent_map = tcx.visible_parent_map(());
+            let mut visible_def_id = def_id;
+            while let Some(&visible_parent) = visible_parent_map.get(&visible_def_id) {
+                visible_def_id = visible_parent;
+                if let Some(cnum) = visible_def_id.as_crate_root() {
+                    match crate_to_def_path(cnum) {
+                        Some(Some(root_def_path)) => { break 'root (visible_def_id, root_def_path); }
+                        Some(None) => { return smallvec![]; }
+                        None => {}
                     }
                 }
             }
