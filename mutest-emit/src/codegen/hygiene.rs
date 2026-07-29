@@ -1044,7 +1044,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 // indicating that we are dealing with a module re-export resolution.
                 if let [.., parent_mod_path_segment, _] = &path.segments[..]
                     && let Some(hir::Res::Def(hir::DefKind::Mod, parent_mod_def_id)) = self.def_res.node_res(parent_mod_path_segment.id)
-                    && parent_mod_def_id != self.tcx.parent(def_id)
+                    && Some(parent_mod_def_id) != self.tcx.opt_parent(def_id)
                 {
                     // HACK: Deal with module re-export paths like we do with item paths.
                     break 'arm;
