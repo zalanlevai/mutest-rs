@@ -14,7 +14,7 @@ use crate::analysis::hir;
 use crate::analysis::tests::Test;
 use crate::codegen::ast;
 use crate::codegen::ast::mut_visit::MutVisitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, FileName, Ident, MacroKind, Span, Symbol, kw, sym};
+use crate::codegen::symbols::{ExpnKind, FileName, Ident, MacroKind, Span, Symbol, kw, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
 pub trait TcxExpansionExt {
@@ -49,28 +49,6 @@ pub const GENERATED_CODE_PRELUDE: &str = r#"
 #![allow(unused_features)]
 #![allow(unused_imports)]
 "#;
-
-pub fn insert_generated_code_crate_refs<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crate) {
-    let expn_id = tcx.expansion_for_ast_pass(
-        AstPass::StdImports,
-        DUMMY_SP,
-        &[sym::rustc_attrs],
-    );
-    let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
-
-    if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::std) {
-        // NOTE: For std-dependent crates, we often rewrite paths through alloc,
-        //       which is the actual definition crate.
-        //       However, these references can only be resolved correctly if an explicit
-        //       `extern crate alloc;` declaration is present in the crate root.
-        //       In such cases, we ensure that an explicit reference to the alloc crate exists,
-        //       whether from user code or from our code generation.
-        // extern crate alloc;
-        if !krate.items.iter().any(|item| ast::inspect::is_extern_crate_decl(item, sym::alloc)) {
-            krate.items.push(ast::mk::item_extern_crate(def_site, sym::alloc, None));
-        }
-    }
-}
 
 #[derive(Copy, Clone)]
 enum DirOwnership {

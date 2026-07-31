@@ -74,7 +74,6 @@ impl<'tcx> CrateResolutions<'tcx> {
         if !hir::find_attr!(tcx, crate, NoCore) {
             extern_crate_name_to_cnum.insert(sym::core, None);
             if !hir::find_attr!(tcx, crate, NoStd) {
-                extern_crate_name_to_cnum.insert(sym::alloc, None);
                 extern_crate_name_to_cnum.insert(sym::std, None);
             }
         }

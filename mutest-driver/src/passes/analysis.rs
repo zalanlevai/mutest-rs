@@ -49,9 +49,6 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
     entry_points: EntryPoints<'ent>,
     meta_mutant: MetaMutant<'trg, 'm>,
 ) {
-    // HACK: See below.
-    mutest_emit::codegen::expansion::insert_generated_code_crate_refs(tcx, generated_crate_ast);
-
     if opts.crate_kind.provides_tests() {
         mutest_emit::codegen::entry_point::clean_generated_entry_points(generated_crate_ast);
 
@@ -87,9 +84,6 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
     };
     mutest_emit::codegen::harness::generate_harness(tcx, cargo_metadata.as_ref(), opts.unstable_flags.embedded, entry_points, meta_mutant, generated_crate_ast);
 
-    // HACK: The generated code is currently based on the expanded AST and contains references to the internals
-    //       of macro expansions. These are patched over using a static attribute prelude (here) and a static
-    //       set of crate references (above).
     struct NoAnn;
     impl rustc_ast_pretty::pprust::state::PpAnn for NoAnn {}
     pass_result.generated_crate_code = format!("{prelude}\n{code}",
