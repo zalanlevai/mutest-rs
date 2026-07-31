@@ -158,6 +158,13 @@ pub fn base_compiler_config_from_parts(compiler_config: &CompilerConfig, invocat
         externs.insert(key.clone(), entry.clone());
     }
     // Externs for some std macros may have to be loaded.
+    externs.insert("alloc".to_owned(), ExternEntry {
+        location: ExternLocation::FoundInLibrarySearchDirectories,
+        is_private_dep: false,
+        add_prelude: true,
+        nounused_dep: false,
+        force: false,
+    });
     externs.insert("std_detect".to_owned(), ExternEntry {
         location: ExternLocation::FoundInLibrarySearchDirectories,
         is_private_dep: false,
