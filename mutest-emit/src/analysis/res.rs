@@ -673,9 +673,11 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
                         .filter(|&def_id| matches!(tcx.def_kind(def_id), hir::DefKind::ExternCrate))
                         .filter_map(|def_id| Some((def_id, tcx.extern_mod_stmt_cnum(def_id)?)))
                         .filter(|&(extern_crate_def_id, _cnum)| {
-                            false
-                                || tcx.opt_local_parent(extern_crate_def_id) == Some(CRATE_DEF_ID)
-                                || scope.is_some_and(|scope| tcx.is_descendant_of(extern_crate_def_id.to_def_id(), scope))
+                            let mod_scope = scope.map(|scope| match tcx.def_kind(scope) {
+                                hir::DefKind::Mod => scope,
+                                _ => tcx.parent_module_from_def_id(scope.expect_local()).to_def_id(),
+                            });
+                            tcx.visibility(extern_crate_def_id).is_accessible_from(mod_scope.unwrap_or(LOCAL_CRATE.as_def_id()), tcx)
                         })
                         .collect::<Vec<_>>()
                 });
