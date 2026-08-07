@@ -671,6 +671,14 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         ty_ast
     }
 
+    fn sanitize_const(&self, ct: ty::Const<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> ast::AnonConst {
+        let Some(const_ast) = ty::print::const_ast(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ct, binding_item_def_id, true) else {
+            span_bug!(span, "cannot construct AST representation of constant `{ct:?}`");
+        };
+
+        const_ast
+    }
+
     fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], binding_item_def_id: hir::DefId, span: Span) -> Option<Box<ast::GenericArgs>> {
         let args_ast = generic_args.into_iter()
             .filter_map(|generic_arg| {
@@ -683,8 +691,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         let ty_ast = self.sanitize_ty(ty, binding_item_def_id, span);
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
                     }
-                    ty::GenericArgKind::Const(_) => {
-                        None // TODO
+                    ty::GenericArgKind::Const(ct) => {
+                        let const_ast = self.sanitize_const(ct, binding_item_def_id, span);
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Const(const_ast)))
                     }
                 }
             })

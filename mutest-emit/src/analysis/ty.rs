@@ -889,4 +889,28 @@ pub mod print {
         };
         printer.print_region(region).ok().flatten()
     }
+
+    pub fn const_ast<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        crate_res: &res::CrateResolutions<'tcx>,
+        def_res: &ast_lowering::DefResolutions,
+        scope: Option<hir::DefId>,
+        sp: Span,
+        ct: ty::Const<'tcx>,
+        binding_item_def_id: hir::DefId,
+        sanitize_macro_expns: bool,
+    ) -> Option<ast::AnonConst> {
+        let mut printer = AstTyPrinter {
+            tcx,
+            crate_res,
+            def_res,
+            scope,
+            sp,
+            def_path_handling: DefPathHandling::FullyQualified,
+            opaque_ty_handling: OpaqueTyHandling::Infer,
+            sanitize_macro_expns,
+            binding_item_def_id,
+        };
+        printer.print_const(ct).ok()
+    }
 }
