@@ -58,6 +58,13 @@ macro m() {
     }
     fn mul_f32<T: std::ops::Mul<f32>>() -> Result<(), T::Output> { Ok(()) }
 
+    // TEST: Transplant const bounds from type parameter predicates.
+    trait Aligned<const N: usize> {
+        type Error: Error;
+    }
+    fn align_8<T: Aligned<8>>() -> Result<(), T::Error> { Ok(()) }
+    fn align<const M: usize, T: Aligned<M>>() -> Result<(), T::Error> { Ok(()) }
+
     // TEST: Do not transplant anything if no bounds are available for the trait.
     trait DefaultWithIndirection<'de>: Default {
         type Error;
