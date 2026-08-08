@@ -1554,7 +1554,25 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
         if is_macro_helper_attr(&self.syntax_extensions, attr) {
             // Disable attribute by overriding it with an empty doc-comment.
             // This is easier than modifying every visit function to properly remove the attribute nodes.
-            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, sym::empty)
+            attr.kind = ast::AttrKind::DocComment(ast::token::CommentKind::Line, sym::empty);
+            return;
+        }
+
+        // The `no_mangle`, `export_name` and `link_section` attributes have been "made" unsafe
+        // and are required to be marked unsafe starting in edition 2024.
+        // See https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-attributes.html.
+        // Previous editions allow, but do not require marking these three attributes as unsafe.
+        // NOTE: All other unsafe attributes were unsafe when they were stabilized.
+        if self.tcx.sess.edition().at_least_rust_2024()
+            && let ast::AttrKind::Normal(normal_attr) = &mut attr.kind
+            && let Some(attr_name) = normal_attr.item.name()
+            && (attr_name == sym::no_mangle || attr_name == sym::export_name || attr_name == sym::link_section)
+            && let ast::Safety::Default = normal_attr.item.unsafety
+        {
+            // NOTE: Attributes have already been validated (in e.g., edition 2024 contexts),
+            //       so we simply make this adjustment in all remaining cases (pre-2024 edition expansions).
+            normal_attr.item.unsafety = ast::Safety::Unsafe(DUMMY_SP);
+            return;
         }
     }
 
