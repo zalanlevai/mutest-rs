@@ -1,5 +1,4 @@
 #![feature(decl_macro)]
-#![feature(iter_array_chunks)]
 #![feature(iter_collect_into)]
 #![feature(iter_intersperse)]
 #![feature(try_trait_v2)]
