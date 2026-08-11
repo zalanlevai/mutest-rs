@@ -8,12 +8,13 @@ use rustc_data_structures::smallvec::{SmallVec, smallvec};
 use rustc_middle::bug;
 use rustc_middle::mir;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
+use rustc_middle::ty::TyCtxt;
 
 use crate::analysis::ast_lowering;
 use crate::analysis::hir;
 use crate::analysis::res;
 use crate::analysis::tests::{self, Test, TestKind};
-use crate::analysis::ty::{self, TyCtxt};
+use crate::analysis::ty;
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::mutation::UnsafeTargeting;

@@ -8,13 +8,14 @@ use rustc_data_structures::smallvec::{SmallVec, smallvec};
 use rustc_data_structures::thin_vec::ThinVec;
 use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
+use rustc_middle::ty::TyCtxt;
 use rustc_session::config::ExternLocation;
 
 use crate::analysis::call_graph::{Call, CallKind};
 use crate::analysis::hir::{self, CRATE_DEF_ID, CRATE_MOD_ID, LOCAL_CRATE};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::hir::def::{DefKind, Res};
-use crate::analysis::ty::{self, Ty, TyCtxt};
+use crate::analysis::ty::{self, Ty};
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
