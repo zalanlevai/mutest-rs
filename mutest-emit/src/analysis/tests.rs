@@ -2,9 +2,9 @@ use std::fmt::{self, Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter;
 
+use rustc_data_structures::thin_vec::{ThinVec, thin_vec};
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
-use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::ast_lowering;
 use crate::analysis::diagnostic;

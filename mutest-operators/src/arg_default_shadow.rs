@@ -4,8 +4,8 @@ use mutest_emit::analysis::ty;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::{Ident, path};
-use mutest_emit::thin_vec::thin_vec;
-use mutest_emit::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::thin_vec::thin_vec;
 
 fn find_ident_pats<'ast>(pat: &'ast ast::Pat) -> Vec<&'ast ast::Pat> {
     fn find_ident_pats_impl<'ast>(pat: &'ast ast::Pat, ident_pats: &mut Vec<&'ast ast::Pat>) {

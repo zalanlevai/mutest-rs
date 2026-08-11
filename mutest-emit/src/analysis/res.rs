@@ -4,11 +4,11 @@ use std::collections::vec_deque::VecDeque;
 use std::num::NonZeroUsize;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_data_structures::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::thin_vec::ThinVec;
 use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_session::config::ExternLocation;
-use smallvec::{SmallVec, smallvec};
-use thin_vec::ThinVec;
 
 use crate::analysis::call_graph::{Call, CallKind};
 use crate::analysis::hir::{self, CRATE_DEF_ID, CRATE_MOD_ID, LOCAL_CRATE};

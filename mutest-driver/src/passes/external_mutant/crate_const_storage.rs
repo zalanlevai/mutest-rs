@@ -3,8 +3,8 @@ use mutest_emit::analysis::hir;
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::harness::mk_crate_kind_const;
 use mutest_emit::codegen::symbols::{DUMMY_SP, Ident, Symbol, sym};
+use rustc_data_structures::thin_vec::thin_vec;
 use rustc_middle::ty::TyCtxt;
-use thin_vec::thin_vec;
 
 use crate::passes::external_mutant::RustcInvocation;
 

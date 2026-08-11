@@ -4,10 +4,10 @@ use std::marker::PhantomData;
 
 use rand::prelude::*;
 use rustc_data_structures::fx::{FxHashSet, FxHashMap};
+use rustc_data_structures::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::thin_vec::ThinVec;
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
-use smallvec::{SmallVec, smallvec};
-use thin_vec::ThinVec;
 
 use crate::analysis::ast_lowering;
 use crate::analysis::call_graph::{Target, TargetKind, UnsafeSource, Unsafety};

@@ -157,9 +157,9 @@ impl<'ast> DefItem<'ast> {
 
 pub mod mk {
     use rustc_ast as ast;
+    use rustc_data_structures::thin_vec::{ThinVec, thin_vec};
     use rustc_span::{Span, Symbol, sym};
     use rustc_span::symbol::{Ident, kw};
-    use thin_vec::{ThinVec, thin_vec};
 
     pub fn angle_bracketed_args(sp: Span, args: Vec<ast::GenericArg>) -> Option<Box<ast::GenericArgs>> {
         if args.is_empty() { return None; }

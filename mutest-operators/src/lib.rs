@@ -1,6 +1,7 @@
 #![feature(decl_macro)]
 
 #![feature(rustc_private)]
+extern crate rustc_data_structures;
 
 mod arg_default_shadow;
 pub use arg_default_shadow::*;

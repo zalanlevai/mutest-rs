@@ -1,8 +1,8 @@
 use std::iter;
 
+use rustc_data_structures::thin_vec::{ThinVec, thin_vec};
 use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
-use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::call_graph::{EntryPoints, TargetReachability, Unsafety};
 use crate::analysis::diagnostic;

@@ -5,7 +5,7 @@ use mutest_emit::analysis::ty::{self, Ty, TyCtxt};
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
 use mutest_emit::codegen::symbols::sym;
-use mutest_emit::smallvec::smallvec;
+use rustc_data_structures::smallvec::smallvec;
 
 #[derive(Clone, Copy, Debug)]
 pub enum OpKind {
