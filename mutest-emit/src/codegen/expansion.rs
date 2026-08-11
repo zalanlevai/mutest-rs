@@ -1,6 +1,7 @@
-use std::sync::LazyLock;
-use std::{iter, mem};
+use std::iter;
+use std::mem;
 use std::path::{self, Path, PathBuf};
+use std::sync::LazyLock;
 
 use itertools::Itertools;
 use rustc_data_structures::smallvec::{SmallVec, smallvec};

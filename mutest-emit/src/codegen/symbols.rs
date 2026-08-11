@@ -1,5 +1,6 @@
 pub use rustc_span::*;
 pub use rustc_span::symbol::Ident;
+pub use rustc_span::symbol::kw;
 
 use std::cmp::{Ord, Ordering};
 use std::mem;
@@ -85,10 +86,6 @@ pub mod sym {
         tests,
         undetected_diagnostic,
     }
-}
-
-pub mod kw {
-    pub use rustc_span::symbol::kw::*;
 }
 
 macro paths {

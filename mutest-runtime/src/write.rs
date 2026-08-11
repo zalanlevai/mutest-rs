@@ -9,8 +9,8 @@ use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
 use crate::config::WriteOptions;
-use crate::harness::{MutationAnalysisResults, MutationTestResult};
 use crate::flakiness::MutationFlakinessMatrix;
+use crate::harness::{MutationAnalysisResults, MutationTestResult};
 use crate::metadata::MutationMeta;
 use crate::test_runner;
 

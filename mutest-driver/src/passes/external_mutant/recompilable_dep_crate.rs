@@ -7,9 +7,9 @@ use rustc_interface::interface::Result as CompilerResult;
 use rustc_lint_defs::Level as LintLevel;
 use rustc_session::config::{OptLevel, OutputFilenames};
 
+use crate::passes::base_compiler_config_from_parts;
 use crate::passes::external_mutant::RustcInvocation;
 use crate::passes::external_mutant::crate_const_storage;
-use crate::passes::base_compiler_config_from_parts;
 
 pub struct RecompilableDepCrateCompilationResult {
     pub duration: Duration,

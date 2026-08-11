@@ -1,6 +1,6 @@
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::iter;
 use std::path::PathBuf;

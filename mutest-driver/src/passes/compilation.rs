@@ -8,7 +8,7 @@ use rustc_lint_defs::Level as LintLevel;
 use rustc_session::config::{Input, OutputFilenames};
 
 use crate::config::Config;
-use crate::inject::{inject_test_crate_shim_if_no_target_std, inject_runtime_crate_and_deps};
+use crate::inject::{inject_runtime_crate_and_deps, inject_test_crate_shim_if_no_target_std};
 use crate::passes::base_compiler_config;
 use crate::passes::analysis::AnalysisPassResult;
 use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationResult;

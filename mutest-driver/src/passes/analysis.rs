@@ -1,6 +1,11 @@
 use std::env;
 use std::time::{Duration, Instant};
 
+use mutest_emit::analysis::call_graph::{EntryPointAssocs, EntryPoints, Targeting, TargetReachability};
+use mutest_emit::analysis::hir;
+use mutest_emit::codegen::ast;
+use mutest_emit::codegen::harness::{CargoMetadata, CargoTargetKind, MetaMutant};
+use mutest_emit::codegen::symbols::{Symbol, span_diagnostic_ord};
 use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_interface::{create_and_enter_global_ctxt, passes, run_compiler};
 use rustc_interface::interface::Result as CompilerResult;
@@ -10,14 +15,9 @@ use rustc_session::config::OptLevel;
 use rustc_span::{ErrorGuaranteed, FileName};
 use rustc_span::edition::Edition;
 use rustc_span::fatal_error::FatalError;
-use mutest_emit::analysis::call_graph::{EntryPointAssocs, EntryPoints, Targeting, TargetReachability};
-use mutest_emit::analysis::hir;
-use mutest_emit::codegen::ast;
-use mutest_emit::codegen::harness::{CargoMetadata, CargoTargetKind, MetaMutant};
-use mutest_emit::codegen::symbols::{Symbol, span_diagnostic_ord};
 
 use crate::config::{self, Config};
-use crate::inject::{inject_test_crate_shim_if_no_target_std, inject_runtime_crate_and_deps};
+use crate::inject::{inject_runtime_crate_and_deps, inject_test_crate_shim_if_no_target_std};
 use crate::passes::{Flow, base_compiler_config};
 use crate::passes::external_mutant::{ExternalTargets, StableTarget};
 use crate::passes::external_mutant::crate_const_storage;

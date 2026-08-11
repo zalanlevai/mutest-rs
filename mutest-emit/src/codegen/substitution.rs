@@ -7,9 +7,9 @@ use crate::codegen::ast;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::cancellation;
 use crate::codegen::expansion::TcxExpansionExt;
+use crate::codegen::mutation::{Mut, MutId, Subst, SubstDef, SubstLoc};
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
-use crate::codegen::mutation::{Mut, MutId, Subst, SubstDef, SubstLoc};
 
 pub fn conflicting_substs(a: &SubstDef, b: &SubstDef) -> bool {
     match (&a.substitute, &b.substitute) {
