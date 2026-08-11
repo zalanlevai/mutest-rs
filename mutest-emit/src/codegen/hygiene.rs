@@ -11,14 +11,14 @@ use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::span_bug;
-use rustc_middle::ty::TypingMode;
+use rustc_middle::ty::{TyCtxt, TypingMode};
 use rustc_span::edition::Edition;
 use rustc_trait_selection::traits::{ImplSource, Obligation, ObligationCause, SelectionContext};
 
 use crate::analysis::ast_lowering;
 use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};
 use crate::analysis::res;
-use crate::analysis::ty::{self, Ty, TyCtxt};
+use crate::analysis::ty::{self, Ty};
 use crate::codegen::ast;
 use crate::codegen::ast::mut_visit::MutVisitor;
 use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};

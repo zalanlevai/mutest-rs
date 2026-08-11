@@ -6,6 +6,7 @@ use rand::prelude::*;
 use rustc_data_structures::fx::{FxHashSet, FxHashMap};
 use rustc_data_structures::smallvec::{SmallVec, smallvec};
 use rustc_data_structures::thin_vec::ThinVec;
+use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 
@@ -14,7 +15,6 @@ use crate::analysis::call_graph::{Target, TargetKind, UnsafeSource, Unsafety};
 use crate::analysis::diagnostic;
 use crate::analysis::hir;
 use crate::analysis::res;
-use crate::analysis::ty::TyCtxt;
 use crate::codegen::ast;
 use crate::codegen::ast::visit::Visitor;
 use crate::codegen::expansion::TcxExpansionExt;

@@ -8,10 +8,9 @@ use rustc_data_structures::sync::HashMapExt;
 use rustc_data_structures::thin_vec::ThinVec;
 use rustc_data_structures::unord::UnordItems;
 use rustc_middle::span_bug;
-use rustc_middle::ty::ResolverAstLowering;
+use rustc_middle::ty::{TyCtxt, ResolverAstLowering};
 
 use crate::analysis::hir;
-use crate::analysis::ty::TyCtxt;
 use crate::analysis::res;
 use crate::codegen::ast;
 use crate::codegen::symbols::{DUMMY_SP, Span};
