@@ -2,8 +2,8 @@ use std::any::Any;
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::panic;
-use std::sync::atomic::{self, AtomicU32, AtomicUsize};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{self, AtomicU32, AtomicUsize};
 use std::sync::mpsc;
 use std::thread::{self, ThreadId};
 

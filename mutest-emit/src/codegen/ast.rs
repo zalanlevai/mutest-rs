@@ -1,5 +1,4 @@
 pub use rustc_ast::*;
-
 pub use rustc_ast::token::TokenKind;
 pub use rustc_ast::tokenstream::*;
 
@@ -1108,10 +1107,6 @@ pub mod print {
     use rustc_ast as ast;
     use rustc_ast::DUMMY_NODE_ID;
     use rustc_span::DUMMY_SP;
-
-    pub fn stmt_to_string(stmt: &ast::Stmt) -> String {
-        State::new().stmt_to_string(stmt)
-    }
 
     pub fn qpath_to_string(qself: Option<&ast::QSelf>, path: &ast::Path) -> String {
         match qself {
