@@ -5,10 +5,10 @@ use std::ops::Deref;
 use itertools::Itertools;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::HashMapExt;
+use rustc_data_structures::thin_vec::ThinVec;
 use rustc_data_structures::unord::UnordItems;
 use rustc_middle::span_bug;
 use rustc_middle::ty::ResolverAstLowering;
-use thin_vec::ThinVec;
 
 use crate::analysis::hir;
 use crate::analysis::ty::TyCtxt;

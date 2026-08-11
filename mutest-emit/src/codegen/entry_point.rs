@@ -1,6 +1,6 @@
+use rustc_data_structures::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::thin_vec::thin_vec;
 use rustc_middle::ty::TyCtxt;
-use smallvec::{SmallVec, smallvec};
-use thin_vec::thin_vec;
 
 use crate::codegen::ast;
 use crate::codegen::ast::entry::EntryPointType;

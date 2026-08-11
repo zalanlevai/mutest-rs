@@ -3,12 +3,12 @@ use std::{iter, mem};
 use std::path::{self, Path, PathBuf};
 
 use itertools::Itertools;
+use rustc_data_structures::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::thin_vec::ThinVec;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
 use rustc_session::parse::ParseSess;
 use rustc_span::{ExpnData, LocalExpnId};
-use smallvec::{SmallVec, smallvec};
-use thin_vec::ThinVec;
 
 use crate::analysis::hir;
 use crate::analysis::tests::Test;

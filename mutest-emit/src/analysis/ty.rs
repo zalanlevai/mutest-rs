@@ -45,11 +45,11 @@ pub use print::ast_repr;
 pub mod print {
     use std::iter;
 
+    use rustc_data_structures::thin_vec::{ThinVec, thin_vec};
     use rustc_infer::infer::TyCtxtInferExt;
     use rustc_middle::mir;
     use rustc_middle::ty::{self, Ty, TyCtxt};
     use rustc_session::cstore::{ExternCrate, ExternCrateSource};
-    use thin_vec::{ThinVec, thin_vec};
 
     use crate::analysis::ast_lowering;
     use crate::analysis::hir::{self, LOCAL_CRATE};

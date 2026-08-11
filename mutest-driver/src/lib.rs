@@ -20,8 +20,6 @@ extern crate rustc_span;
 extern crate rustc_target;
 
 extern crate itertools;
-extern crate smallvec;
-extern crate thin_vec;
 
 pub mod cargo_package_config;
 pub mod config;

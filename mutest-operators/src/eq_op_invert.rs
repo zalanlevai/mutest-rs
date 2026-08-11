@@ -1,7 +1,7 @@
 use mutest_emit::{Mutation, Operator};
 use mutest_emit::codegen::ast;
 use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef, SubstLoc};
-use mutest_emit::smallvec::smallvec;
+use rustc_data_structures::smallvec::smallvec;
 
 pub const EQ_OP_INVERT: &str = "eq_op_invert";
 

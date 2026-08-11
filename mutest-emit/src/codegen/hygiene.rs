@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
 use rustc_data_structures::fx::{FxHashSet, FxIndexSet};
+use rustc_data_structures::smallvec::{SmallVec, smallvec};
+use rustc_data_structures::thin_vec::{ThinVec, thin_vec};
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
@@ -12,8 +14,6 @@ use rustc_middle::span_bug;
 use rustc_middle::ty::TypingMode;
 use rustc_span::edition::Edition;
 use rustc_trait_selection::traits::{ImplSource, Obligation, ObligationCause, SelectionContext};
-use smallvec::{SmallVec, smallvec};
-use thin_vec::{ThinVec, thin_vec};
 
 use crate::analysis::ast_lowering;
 use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};

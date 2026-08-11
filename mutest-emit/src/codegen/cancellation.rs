@@ -1,4 +1,4 @@
-use thin_vec::thin_vec;
+use rustc_data_structures::thin_vec::thin_vec;
 
 use crate::codegen::ast;
 use crate::codegen::symbols::{Span, Symbol, path, sym};
