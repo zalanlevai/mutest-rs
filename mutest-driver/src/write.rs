@@ -18,6 +18,26 @@ use crate::passes::analysis::AnalysisPassResult;
 use crate::passes::compilation::CompilationPassResult;
 use crate::passes::external_mutant::specialized_crate::SpecializedMutantCrateCompilationResult;
 
+fn span_from_rustc(sess: &rustc_session::Session, span: rustc_span::Span) -> Option<mutest_json::Span> {
+    static CURRENT_DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
+        std::env::current_dir().expect("cannot read current directory")
+    });
+
+    let (Some(source_file), begin_line, begin_col, end_line, end_col) = sess.source_map().span_to_location_info(span) else { return None; };
+
+    let rustc_span::FileName::Real(file_name) = &source_file.name else { return None; };
+
+    let mut path = file_name.local_path()?;
+    // Remove workspace directory prefix if the span points to a workspace file.
+    // NOTE: rustc uses absolute paths for any remote crate's spans, including workspace-local ones.
+    if let Ok(local_path) = path.strip_prefix(&*CURRENT_DIR) {
+        path = local_path;
+    }
+    let path = path.to_owned();
+
+    Some(mutest_json::Span { path, begin: (begin_line, begin_col), end: (end_line, end_col) })
+}
+
 fn write_metadata<T: serde::Serialize>(write_opts: &WriteOptions, file_name: &str, data: &T) {
     let file = fs::File::create(write_opts.out_dir.join(file_name)).expect("cannot create metadata file");
     let mut buffered_file = BufWriter::new(file);
@@ -36,7 +56,7 @@ pub fn write_tests<'tcx>(write_opts: &WriteOptions, tcx: TyCtxt<'tcx>, tests: &[
             .map(|test| {
                 mutest_json::tests::Test {
                     name: test.path_str(),
-                    span: mutest_json::Span::from_rustc_span(tcx.sess, test.item.span).expect("invalid span"),
+                    span: span_from_rustc(tcx.sess, test.item.span).expect("invalid span"),
                     ignore: test.ignore,
                 }
             })
@@ -71,7 +91,7 @@ pub fn write_call_graph<'tcx, 'ent>(
                     def_id: json_def_id,
                     name: tcx.opt_item_name(def_id).map(|symbol| symbol.as_str().to_owned()),
                     path: tcx.def_path_str(def_id),
-                    span: mutest_json::Span::from_rustc_span(tcx.sess, tcx.def_span(def_id)),
+                    span: span_from_rustc(tcx.sess, tcx.def_span(def_id)),
                 });
 
                 json_def_id
@@ -121,7 +141,7 @@ pub fn write_call_graph<'tcx, 'ent>(
 
             let call_instances = json_entry_point.calls.entry(json_callee_id).or_default();
             call_instances.push(mutest_json::call_graph::CallInstance {
-                span: mutest_json::Span::from_rustc_span(tcx.sess, call.span),
+                span: span_from_rustc(tcx.sess, call.span),
                 safety: match call.safety {
                     hir::Safety::Safe => mutest_json::Safety::Safe,
                     hir::Safety::Unsafe => mutest_json::Safety::Unsafe,
@@ -145,7 +165,7 @@ pub fn write_call_graph<'tcx, 'ent>(
 
                 let call_instances = callee_calls.entry(json_callee_id).or_default();
                 call_instances.push(mutest_json::call_graph::CallInstance {
-                    span: mutest_json::Span::from_rustc_span(tcx.sess, call.span),
+                    span: span_from_rustc(tcx.sess, call.span),
                     safety: match call.safety {
                         hir::Safety::Safe => mutest_json::Safety::Safe,
                         hir::Safety::Unsafe => mutest_json::Safety::Unsafe,
@@ -239,22 +259,22 @@ pub fn write_mutations<'tcx, 'trg>(
         let mutation_id = json_mutations.next_index();
         assert_eq!(mutation_id, mutest_json::mutations::MutationId(mutation.id.index()), "mutations are not supplied in id order");
 
-        let origin_span = mutest_json::Span::from_rustc_span(tcx.sess, mutation.span).expect("invalid span");
+        let origin_span = span_from_rustc(tcx.sess, mutation.span).expect("invalid span");
 
         let substs = mutation.substs.iter()
             .map(|subst| {
                 mutest_json::mutations::Substitution {
                     location: match &subst.location {
                         SubstLoc::InsertBefore(_, span) => {
-                            let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                            let subst_span = span_from_rustc(tcx.sess, *span).expect("invalid span");
                             mutest_json::mutations::SubstitutionLocation::InsertBefore(subst_span)
                         }
                         SubstLoc::InsertAfter(_, span) => {
-                            let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                            let subst_span = span_from_rustc(tcx.sess, *span).expect("invalid span");
                             mutest_json::mutations::SubstitutionLocation::InsertAfter(subst_span)
                         }
                         SubstLoc::Replace(_, span) => {
-                            let subst_span = mutest_json::Span::from_rustc_span(tcx.sess, *span).expect("invalid span");
+                            let subst_span = span_from_rustc(tcx.sess, *span).expect("invalid span");
                             mutest_json::mutations::SubstitutionLocation::Replace(subst_span)
                         }
                     },
