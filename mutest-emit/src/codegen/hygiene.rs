@@ -548,6 +548,11 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         self.current_typeck_ctx.filter(|typeck| typeck.hir_owner == owner_id)
     }
 
+    fn is_inside_body(&self, hir_id: hir::HirId) -> bool {
+        // HACK: This is the heuristic we use below for falling back from `FnCtxt` to `ItemCtxt` lowerings.
+        self.typeck_for(hir_id.owner).is_some_and(|typeck| typeck.node_type_opt(hir_id).is_some())
+    }
+
     fn lookup_hir_node_ty(&self, ty_hir: &hir::Ty<'tcx>) -> Ty<'tcx> {
         if let Some(typeck) = self.typeck_for(ty_hir.hir_id.owner) {
             if let Some(ty) = typeck.node_type_opt(ty_hir.hir_id) {
@@ -661,39 +666,95 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         ty::print::region_ast(self.tcx, span, region, binding_item_def_id, true)
     }
 
-    fn sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Box<ast::Ty> {
+    fn try_sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<Box<ast::Ty>> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(ty_ast) = ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true, binding_item_def_id) else {
+        ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true, binding_item_def_id)
+    }
+
+    #[inline]
+    fn sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Box<ast::Ty> {
+        let Some(ty_ast) = self.try_sanitize_ty(ty, binding_item_def_id, span) else {
             span_bug!(span, "cannot construct AST representation of type `{ty:?}`");
         };
-
         ty_ast
     }
 
-    fn sanitize_const(&self, ct: ty::Const<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> ast::AnonConst {
-        let Some(const_ast) = ty::print::const_ast(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ct, binding_item_def_id, true) else {
-            span_bug!(span, "cannot construct AST representation of constant `{ct:?}`");
-        };
-
-        const_ast
+    fn try_sanitize_const(&self, ct: ty::Const<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<ast::AnonConst> {
+        ty::print::const_ast(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ct, binding_item_def_id, true)
     }
 
-    fn sanitize_generic_args(&self, generic_args: &[ty::GenericArg<'tcx>], binding_item_def_id: hir::DefId, span: Span) -> Option<Box<ast::GenericArgs>> {
-        let args_ast = generic_args.into_iter()
-            .filter_map(|generic_arg| {
+    /// Hygienically print the generic arguments corresponding to the definition referenced by a path segment, such as a trait.
+    /// This is used to qualify trait generics that are revealed in newly generated qualified paths.
+    ///
+    /// This function expects the provided generic arguments to only be the ones correspnding to the definition named by the path segment
+    /// (including Self, if any), i.e., the owned parameters of the generics of the definition, excluding any parent generics.
+    ///
+    /// In the case of an unrepresentable default generic argument, it and all following default generic arguments will be elided,
+    /// if they form a trailing sequence.
+    /// In bodies, with `allow_infer_args` set, all other unrepresentable generic arguments for which elision is not possible
+    /// will be replaced with an `_` infer arg.
+    ///
+    /// Elision behavior based on `rustdoc::clean::utils::clean_middle_generic_args` and `rustdoc::clean::utils::can_elide_generic_arg`.
+    fn sanitize_generic_args(&self, def_id: hir::DefId, generic_args: &[ty::GenericArg<'tcx>], binding_item_def_id: hir::DefId, allow_infer_args: bool, span: Span) -> Option<Box<ast::GenericArgs>> {
+        if generic_args.is_empty() { return None; }
+
+        let generics = self.tcx.generics_of(def_id);
+        let own_params = &generics.own_params[(generics.has_self as usize)..generics.count()];
+        let own_args = &generic_args[(generics.has_self as usize)..generics.count()];
+
+        let mut sanitized_args = own_args.iter()
+            .map(|generic_arg| {
                 match generic_arg.kind() {
                     ty::GenericArgKind::Lifetime(region) => {
                         let lifetime = self.sanitize_region(region, binding_item_def_id, span)?;
-                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Lifetime(lifetime)))
+                        Some(ast::GenericArg::Lifetime(lifetime))
                     }
                     ty::GenericArgKind::Type(ty) => {
-                        let ty_ast = self.sanitize_ty(ty, binding_item_def_id, span);
-                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast)))
+                        let ty_ast = self.try_sanitize_ty(ty, binding_item_def_id, span)?;
+                        Some(ast::GenericArg::Type(ty_ast))
                     }
                     ty::GenericArgKind::Const(ct) => {
-                        let const_ast = self.sanitize_const(ct, binding_item_def_id, span);
-                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Const(const_ast)))
+                        let const_ast = self.try_sanitize_const(ct, binding_item_def_id, span)?;
+                        Some(ast::GenericArg::Const(const_ast))
+                    }
+                }
+            })
+            .collect::<ThinVec<_>>();
+
+        // Find the sequence of default generic arguments at the end of the generic argument list that could be elided.
+        let default_suffix_len = iter::zip(own_params, own_args).rev()
+            .take_while(|&(generic_param, &generic_arg)| {
+                generic_param.default_value(self.tcx).is_some_and(|default_value| {
+                    let default_value = default_value.instantiate(self.tcx, generic_args).skip_normalization();
+                    generic_arg == default_value
+                })
+            })
+            .count();
+        let default_suffix_start_own_idx = own_args.len() - default_suffix_len;
+        // Apply elision from the first unrepresentable default generic argument in the suffix.
+        if let Some(elision_start_suffix_idx) = sanitized_args[default_suffix_start_own_idx..].iter().position(|arg_ast| arg_ast.is_none()) {
+            sanitized_args.truncate(default_suffix_start_own_idx + elision_start_suffix_idx);
+        }
+
+        let args_ast = iter::zip(iter::zip(own_params, own_args), sanitized_args)
+            .flat_map(|((generic_param, &generic_arg), generic_arg_ast)| {
+                match generic_arg_ast {
+                    Some(generic_arg_ast) => Some(ast::AngleBracketedArg::Arg(generic_arg_ast)),
+                    None if let ty::GenericArgKind::Lifetime(_) = generic_arg.kind() => None,
+                    None if allow_infer_args => {
+                        let mut diagnostic = self.tcx.dcx().struct_span_warn(span, format!("replacing unrepresentable generic argument `{} = {:?}` with `_`", self.tcx.def_path_str(generic_param.def_id), generic_arg));
+                        if let Some(default_value) = generic_param.default_value(self.tcx) {
+                            let default_value = default_value.instantiate(self.tcx, generic_args).skip_normalization();
+                            if generic_arg == default_value {
+                                diagnostic.note("default value cannot be elided, as it is followed by non-default generic arguments");
+                            }
+                        }
+                        diagnostic.emit();
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ast::mk::ty(span, ast::TyKind::Infer))))
+                    }
+                    None => {
+                        span_bug!(span, "cannot construct AST representation of generic argument `{} = {:?}`", self.tcx.def_path_str(generic_param.def_id), generic_arg);
                     }
                 }
             })
@@ -707,7 +768,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     /// Extract bound params from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
-    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, span: Span) -> Option<Box<ast::GenericArgs>> {
+    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, allow_infer_args: bool, span: Span) -> Option<Box<ast::GenericArgs>> {
         let (parent_def_id, generic_predicates, param_index) = match param_res {
             // `Self::$assoc` in `impl<'a, 'b> Trait<'a, 'b> for T`
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
@@ -767,7 +828,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return None;
         };
 
-        self.sanitize_generic_args(&trait_predicate.trait_ref.args[1..], parent_def_id, span)
+        self.sanitize_generic_args(trait_predicate.trait_ref.def_id, trait_predicate.trait_ref.args, parent_def_id, allow_infer_args, span)
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<Box<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
@@ -864,15 +925,12 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(node_hir_id)[..]) {
                                     // Inferred generic args for the trait.
                                     Some(node_args @ [_, ..]) => {
-                                        let trait_generics = self.tcx.generics_of(parent_def_id);
-                                        let trait_args = &node_args[(trait_generics.has_self as usize)..trait_generics.count()];
-
-                                        self.sanitize_generic_args(trait_args, node_hir_id.owner.to_def_id(), qself_ty_hir.span)
+                                        self.sanitize_generic_args(parent_def_id, node_args, node_hir_id.owner.to_def_id(), true, qself_ty_hir.span)
                                     }
 
                                     // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
                                     _ if let Some(parent_path_segment_res) = parent_path_segment_res => {
-                                        self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, qself_ty_hir.span)
+                                        self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, self.is_inside_body(node_hir_id), qself_ty_hir.span)
                                     }
 
                                     _ => None,
