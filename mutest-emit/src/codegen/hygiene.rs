@@ -855,6 +855,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                 let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { span_bug!(path.span, "no corresponding qualified path in HIR") };
 
+                // NOTE: In the case of expression patterns, type-dependent information
+                //       is associated with the pattern expression node, not the pattern node itself.
+                let typeck_node_hir_id = match self.tcx.hir_node(node_hir_id) {
+                    hir::Node::Pat(pat_hir) if let hir::PatKind::Expr(pat_expr_hir) = &pat_hir.kind => pat_expr_hir.hir_id,
+                    _ => node_hir_id,
+                };
+
                 match qpath_hir {
                     // NOTE: This corresponds to the already handled case where
                     //       a non-qualified path has a concrete AST resolution.
@@ -863,7 +870,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     | hir::QPath::Resolved(Some(qself_ty_hir), _)
                     | hir::QPath::TypeRelative(qself_ty_hir, _) => {
                         let mut qres = match self.typeck_for(node_hir_id.owner) {
-                            Some(typeck) => typeck.qpath_res(&qpath_hir, node_hir_id),
+                            Some(typeck) => typeck.qpath_res(&qpath_hir, typeck_node_hir_id),
                             None => {
                                 match qpath_hir {
                                     hir::QPath::Resolved(_, path_hir) => path_hir.res,
@@ -873,19 +880,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         };
                         if let hir::Res::Err = qres {
                             'fixup: {
-                                let node_hir = self.tcx.hir_node(node_hir_id);
-
-                                // NOTE: In the case of expression patterns, the type dependent def
-                                //       is associated with the pattern expression node, not the pattern node itself.
-                                if let hir::Node::Pat(pat_hir) = node_hir && let hir::PatKind::Expr(pat_expr_hir) = &pat_hir.kind {
-                                    // NOTE: Patterns can only be found in bodies.
-                                    let Some(typeck) = self.typeck_for(node_hir_id.owner) else { unreachable!() };
-                                    qres = typeck.qpath_res(&qpath_hir, pat_expr_hir.hir_id);
-                                }
-
                                 if !matches!(qres, hir::Res::Err) { break 'fixup; }
 
-                                match node_hir {
+                                match self.tcx.hir_node(node_hir_id) {
                                     hir::Node::Ty(ty_hir) => {
                                         // HACK: `ItemCtxt` and its `lower_ty` method are no longer public,
                                         //       so we have to use the only remaining accessible workaround,
@@ -925,7 +922,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                 // Extract param args for the trait reference in the qualified path.
                                 // These param args come from type-inference, if available, or
                                 // from bound params in local trait bounds in the current scope.
-                                let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(node_hir_id)[..]) {
+                                let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(typeck_node_hir_id)[..]) {
                                     // Inferred generic args for the trait.
                                     Some(node_args @ [_, ..]) => {
                                         self.sanitize_generic_args(parent_def_id, node_args, node_hir_id.owner.to_def_id(), true, qself_ty_hir.span)
@@ -933,7 +930,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                     // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
                                     _ if let Some(parent_path_segment_res) = parent_path_segment_res => {
-                                        self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, self.is_inside_body(node_hir_id), qself_ty_hir.span)
+                                        self.extract_local_trait_bound_params(parent_def_id, parent_path_segment_res, self.is_inside_body(typeck_node_hir_id), qself_ty_hir.span)
                                     }
 
                                     _ => None,
@@ -966,9 +963,6 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                         // Qualifed path with explicit trait qualification.
                                         Some(hir::Res::Def(hir::DefKind::Trait, _)) => {
-                                            // let user_provided_ty = typeck.user_provided_types().get(node_hir_id);
-                                            // println!("  user_provided_ty = {user_provided_ty:?}");
-
                                             let Some(canonical_user_ty) = typeck.user_provided_types().get(node_hir_id) else {
                                                 // NOTE: This only happens if the path is not in a body.
                                                 //       In this case, we do not need to make adjustments to the res
