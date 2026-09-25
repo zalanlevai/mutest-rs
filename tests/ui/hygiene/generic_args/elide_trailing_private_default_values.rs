@@ -24,6 +24,11 @@ mod traits {
     }
 }
 
+impl<T> traits::Trait<T> for () {
+    type Type = ();
+    fn foo() -> Self::Type {}
+}
+
 mod other {
     impl crate::traits::MarkerOnlyTrait for i32 {
         type Type = ();

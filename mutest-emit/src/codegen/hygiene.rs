@@ -412,14 +412,17 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
         // Ensure that the def is in the current scope, otherwise it really is not visible from here.
         let Some(current_scope) = self.current_scope else {
-            span_bug!(span, "{} is not accessible in this crate", self.tcx.def_path_str(def_id));
+            span_bug!(span, "`{}` is not accessible in this crate", self.tcx.def_path_str(def_id));
         };
         match res::locally_visible_def_path(self.tcx, def_id, current_scope) {
             Ok(visible_path) => { return visible_path; }
             Err(adjusted_scope) => {
-                span_bug!(span, "{def} is not defined in the scope {scope} and is not otherwise accessible here",
+                span_bug!(span, "`{def}` is not defined in {scope} and is not otherwise accessible here",
                     def = self.tcx.def_path_str(def_id),
-                    scope = self.tcx.def_path_str(adjusted_scope),
+                    scope = match adjusted_scope.is_top_level_module() {
+                        true => "the crate root".to_owned(),
+                        false => format!("the scope `{}`", self.tcx.def_path_str(adjusted_scope)),
+                    },
                 );
             }
         }
@@ -435,7 +438,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         diagnostic.span_label(span, "no corresponding HIR node found");
         diagnostic.note(format!("body resolutions from {scope}",
             scope = match self.current_scope {
-                Some(scope) =>  self.tcx.def_path_debug_str(scope),
+                Some(scope) => format!("`{}`", self.tcx.def_path_debug_str(scope)),
                 None => "<unknown scope>".to_owned(),
             },
         ));
