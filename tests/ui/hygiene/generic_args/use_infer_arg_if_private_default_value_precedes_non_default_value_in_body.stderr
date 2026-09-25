@@ -1,18 +1,34 @@
 warning: replacing unrepresentable generic argument `traits::TraitWithPrivateMarkerAndConst::M = traits::private::Marker` with `_`
-  --> tests/ui/hygiene/generic_args/use_infer_arg_if_private_default_value_precedes_non_default_value_in_body.rs:45:9
+  --> tests/ui/hygiene/generic_args/use_infer_arg_if_private_default_value_precedes_non_default_value_in_body.rs:49:9
    |
-45 |         u8::foo();
+49 |         u8::foo();
+   |         ^^
+   |
+   = note: default value cannot be elided, as it is followed by non-default generic arguments
+
+warning: replacing unrepresentable generic argument `traits::TraitWithPrivateMarkerAndConst::M = traits::private::Marker` with `_`
+  --> tests/ui/hygiene/generic_args/use_infer_arg_if_private_default_value_precedes_non_default_value_in_body.rs:50:20
+   |
+50 |         match () { u8::FOO => {} }
+   |                    ^^
+   |
+   = note: default value cannot be elided, as it is followed by non-default generic arguments
+
+warning: replacing unrepresentable generic argument `traits::TraitWithPrivateMarkerAndTy::M = traits::private::Marker` with `_`
+  --> tests/ui/hygiene/generic_args/use_infer_arg_if_private_default_value_precedes_non_default_value_in_body.rs:53:9
+   |
+53 |         u8::bar();
    |         ^^
    |
    = note: default value cannot be elided, as it is followed by non-default generic arguments
 
 warning: replacing unrepresentable generic argument `traits::TraitWithPrivateMarkerAndTy::M = traits::private::Marker` with `_`
-  --> tests/ui/hygiene/generic_args/use_infer_arg_if_private_default_value_precedes_non_default_value_in_body.rs:47:9
+  --> tests/ui/hygiene/generic_args/use_infer_arg_if_private_default_value_precedes_non_default_value_in_body.rs:54:20
    |
-47 |         u8::bar();
-   |         ^^
+54 |         match () { u8::BAR => {} }
+   |                    ^^
    |
    = note: default value cannot be elided, as it is followed by non-default generic arguments
 
-warning: 2 warnings emitted
+warning: 4 warnings emitted
 
