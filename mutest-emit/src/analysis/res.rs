@@ -16,7 +16,8 @@ use crate::analysis::hir::{self, CRATE_DEF_ID, CRATE_MOD_ID, LOCAL_CRATE, DefKin
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::ty::{self, Ty};
 use crate::codegen::ast;
-use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
+use crate::codegen::symbols::{ExpnKind, DUMMY_SP, Ident, Span, Symbol, sym, kw};
+use crate::codegen::symbols::hygiene::AstPass;
 
 pub struct CrateResolutions<'tcx> {
     tcx: TyCtxt<'tcx>,
@@ -474,7 +475,7 @@ impl<'tcx> DefPath<'tcx> {
     }
 }
 
-pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId) -> Option<DefPath<'tcx>> {
+pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId, enforce_vis: bool) -> Option<DefPath<'tcx>> {
     if !tcx.is_descendant_of(def_id, scope) { return None; }
 
     if def_id == scope {
@@ -508,6 +509,10 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
 
     let mut def_path = DefPath::new(root, Vec::with_capacity(relative_def_id_path.len()));
     for &def_id in relative_def_id_path {
+        if enforce_vis {
+            if !tcx.visibility(def_id).is_accessible_from(scope, tcx) { return None; }
+        }
+
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
         let name = tcx.opt_item_name(def_id).unwrap_or(sym::empty);
         def_path.segments.push(DefPathSegment { def_id, ident: Ident::new(name, span), reexport: None });
@@ -517,6 +522,13 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
 }
 
 pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut scope: hir::DefId) -> Result<DefPath<'tcx>, hir::DefId> {
+    // HACK: The built-in test harness expansion generates a `#[rustc_main]` function
+    //       that generates paths to (and through) private items,
+    //       which are only valid because of hygiene and cannot be replicated in user-written Rust code.
+    //       We leave these as-is, and do not force visibility constraints on them.
+    let is_in_generated_test_main = hir::find_attr!(tcx, scope, RustcMain)
+        && matches!(tcx.def_span(scope).ctxt().outer_expn_data().kind, ExpnKind::AstPass(AstPass::TestHarness));
+
     if !tcx.is_descendant_of(def_id, scope) {
         'fail: {
             // For some scopes, we can make an adjustment and try to find a relative path from the parent scope.
@@ -544,7 +556,8 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
         scope = tcx.parent(scope);
     }
 
-    let mut def_path = relative_def_path(tcx, def_id, scope).unwrap();
+    let enforce_vis = !is_in_generated_test_main;
+    let Some(mut def_path) = relative_def_path(tcx, def_id, scope, enforce_vis) else { return Err(scope); };
 
     if let hir::DefKind::Impl { of_trait: _ } = tcx.def_kind(scope) {
         let ident = Ident::new(kw::SelfUpper, DUMMY_SP);
