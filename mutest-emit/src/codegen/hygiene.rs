@@ -771,7 +771,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     /// Extract bound params from local trait bounds corresponding to the parameter,
     /// which must be appended to the trait subpath if the parameter is in a qualified self position:
     /// `<T as Trait<'a, 'b>>::$assoc where T: Trait<'a, 'b>`.
-    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, allow_infer_args: bool, span: Span) -> Option<Box<ast::GenericArgs>> {
+    fn extract_local_trait_bound_params(&self, trait_def_id: hir::DefId, param_res: hir::Res<ast::NodeId>, allow_infer_args: bool, span: Span) -> Option<Option<Box<ast::GenericArgs>>> {
         let (parent_def_id, generic_predicates, param_index) = match param_res {
             // `Self::$assoc` in `impl<'a, 'b> Trait<'a, 'b> for T`
             hir::Res::SelfTyAlias { alias_to: impl_def_id, is_trait_impl: true, .. } => {
@@ -831,7 +831,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             return None;
         };
 
-        self.sanitize_generic_args(trait_predicate.trait_ref.def_id, trait_predicate.trait_ref.args, parent_def_id, allow_infer_args, span)
+        Some(self.sanitize_generic_args(trait_predicate.trait_ref.def_id, trait_predicate.trait_ref.args, parent_def_id, allow_infer_args, span))
     }
 
     fn sanitize_qualified_path(&mut self, qself: &mut Option<Box<ast::QSelf>>, path: &mut ast::Path, node_id: ast::NodeId) -> hir::Res<ast::NodeId> {
@@ -916,16 +916,16 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                     _ => None,
                                 };
 
-                                // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
-                                let _ = self.sanitize_path(path, qres.expect_non_local(), None);
-
                                 // Extract param args for the trait reference in the qualified path.
                                 // These param args come from type-inference, if available, or
                                 // from bound params in local trait bounds in the current scope.
-                                let generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(typeck_node_hir_id)[..]) {
+                                // If either source is available, the inferred generic args
+                                // replace the trait generic args in the original path.
+                                // Elision of all generic arguments is represented by `Some(None)`.
+                                let inferred_generic_args_ast = match self.typeck_for(node_hir_id.owner).map(|typeck| &typeck.node_args(typeck_node_hir_id)[..]) {
                                     // Inferred generic args for the trait.
                                     Some(node_args @ [_, ..]) => {
-                                        self.sanitize_generic_args(parent_def_id, node_args, node_hir_id.owner.to_def_id(), true, qself_ty_hir.span)
+                                        Some(self.sanitize_generic_args(parent_def_id, node_args, node_hir_id.owner.to_def_id(), true, qself_ty_hir.span))
                                     }
 
                                     // Bound params from local trait bounds corresponding to parameter types to the trait subpath.
@@ -935,10 +935,22 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                                     _ => None,
                                 };
+
+                                // Discard trait generic args in the original path before path sanitization
+                                // if we are replacing them with inferred generic args.
+                                if let Some(_) = &inferred_generic_args_ast && let [parent_path_segments @ .., _] = &mut path.segments[..] {
+                                    for parent_path_segment in parent_path_segments {
+                                        parent_path_segment.args = None;
+                                    }
+                                }
+
+                                // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
+                                let _ = self.sanitize_path(path, qres.expect_non_local(), None);
+
                                 // Append param args to the trait reference in the qualified path.
-                                if let Some(generic_args_ast) = generic_args_ast {
+                                if let Some(generic_args_ast) = inferred_generic_args_ast {
                                     let [.., parent_path_segment, _] = &mut path.segments[..] else { unreachable!() };
-                                    parent_path_segment.args = Some(generic_args_ast);
+                                    parent_path_segment.args = generic_args_ast;
                                 }
 
                                 *qself = Some(Box::new(ast::QSelf {
@@ -989,7 +1001,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                             let infcx = self.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
                                             let mut selcx = SelectionContext::new(&infcx);
                                             let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else {
-                                                span_bug!(path.span, "cannot resolve impl for `{qself_ty}` of the trait of the associated item {}", self.tcx.def_path_str(trait_item_def_id))
+                                                span_bug!(path.span, "cannot resolve impl for `{}` of the trait of the associated item `{}`", qself_ty, self.tcx.def_path_str(trait_item_def_id))
                                             };
                                             let assoc_item_impl_def_id = data.impl_def_id;
 
@@ -1027,13 +1039,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                                     trait_predicate.trait_ref.def_id == assoc_item_trait_def_id
                                                         && trait_predicate.self_ty() == trait_ref.skip_binder().self_ty()
                                                 })
-                                            else { span_bug!(path.span, "cannot find trait predicate related to the trait of associated item {}", self.tcx.def_path_str(trait_item_def_id)) };
+                                            else { span_bug!(path.span, "cannot find trait predicate related to the trait of associated item `{}`", self.tcx.def_path_str(trait_item_def_id)) };
 
                                             let param_env = self.tcx.param_env(impl_def_id);
                                             let infcx = self.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
                                             let mut selcx = SelectionContext::new(&infcx);
                                             let Ok(Some(ImplSource::UserDefined(data))) = selcx.select(&Obligation::new(self.tcx, ObligationCause::dummy(), param_env, assoc_item_trait_predicate)) else {
-                                                span_bug!(path.span, "cannot resolve impl for `Self` of the trait of the associated item {}", self.tcx.def_path_str(trait_item_def_id))
+                                                span_bug!(path.span, "cannot resolve impl for `Self` of the trait of the associated item `{}`", self.tcx.def_path_str(trait_item_def_id))
                                             };
                                             let assoc_item_impl_def_id = data.impl_def_id;
 
@@ -1049,6 +1061,14 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
                             hir::DefKind::Impl { of_trait: false } => {
                                 let qself_ty_ast = self.sanitize_ty(qself_ty, node_hir_id.owner.to_def_id(), qself_ty_hir.span);
+
+                                // Discard self ty generic args in the original path.
+                                // NOTE: The parent path segment corresponds to the self ty, which we replace entirely after path sanitization.
+                                if let [parent_path_segments @ .., _] = &mut path.segments[..] {
+                                    for parent_path_segment in parent_path_segments {
+                                        parent_path_segment.args = None;
+                                    }
+                                }
 
                                 // NOTE: We always add a qualified self type, so we can safely ignore the indicator return value.
                                 let _ = self.sanitize_path(path, qres.expect_non_local(), None);
