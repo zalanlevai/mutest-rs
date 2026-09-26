@@ -1,0 +1,63 @@
+warning: replacing unrepresentable generic argument `traits::Trait::T = traits::private::A` with `_`
+  --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:36:14
+   |
+36 |             <u8 as Trait<private::A>>::foo();
+   |              ^^
+...
+43 |     crate::traits::m!();
+   |     ------------------- in this macro invocation
+   |
+   = note: this warning originates in the macro `crate::traits::m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: replacing unrepresentable generic argument `traits::Trait::T = traits::private::A` with `_`
+  --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:37:25
+   |
+37 |             match () { <u8 as Trait<private::A>>::FOO => {} }
+   |                         ^^
+...
+43 |     crate::traits::m!();
+   |     ------------------- in this macro invocation
+   |
+   = note: this warning originates in the macro `crate::traits::m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: 2 warnings emitted
+
+error[E0283]: type annotations needed
+  --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:61:9
+   |
+61 |         <u8 as crate::traits::Trait<_>>::foo();
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot infer type of the type parameter `T` declared on the trait `Trait`
+   |
+note: multiple `impl`s satisfying `u8: traits::Trait<_>` found
+  --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:40:5
+   |
+40 |     impl Trait<crate::traits::private::A> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+44 |     impl Trait<crate::traits::private::B> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0283]: type annotations needed
+  --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:62:20
+   |
+62 |         match () { <u8 as crate::traits::Trait<_>>::FOO => {} }
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot infer type
+   |
+note: multiple `impl`s satisfying `u8: traits::Trait<_>` found
+  --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:40:5
+   |
+40 |     impl Trait<crate::traits::private::A> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+44 |     impl Trait<crate::traits::private::B> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: associated constants cannot be accessed directly on a `trait`, they can only be accessed through a specific `impl`
+help: use the fully qualified path to an implementation
+   |
+62 -         match () { <u8 as crate::traits::Trait<_>>::FOO => {} }
+62 +         match () { <Type as traits::Trait>::FOO => {} }
+   |
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0283`.

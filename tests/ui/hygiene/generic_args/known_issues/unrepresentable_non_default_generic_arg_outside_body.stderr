@@ -1,0 +1,14 @@
+error: cannot represent generic argument `traits::Trait::T = traits::private::Marker` after expansion
+  --> tests/ui/hygiene/generic_args/known_issues/unrepresentable_non_default_generic_arg_outside_body.rs:32:27
+   |
+32 |             fn assoc() -> Self::Assoc {}
+   |                           ^^^^
+...
+38 |     crate::traits::m!();
+   |     ------------------- in this macro invocation
+   |
+   = note: in the scope `expn::<impl traits::Subtrait for ()>::assoc`
+   = note: this error originates in the macro `crate::traits::m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: aborting due to 1 previous error
+

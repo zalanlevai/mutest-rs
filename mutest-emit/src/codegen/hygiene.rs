@@ -439,7 +439,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         diagnostic.note(format!("body resolutions from {scope}",
             scope = match self.current_scope {
                 Some(scope) => format!("`{}`", self.tcx.def_path_debug_str(scope)),
-                None => "<unknown scope>".to_owned(),
+                None => "unknown scope".to_owned(),
             },
         ));
         diagnostic.note(format!("expected at {}", std::panic::Location::caller()));
@@ -757,7 +757,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                         Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ast::mk::ty(span, ast::TyKind::Infer))))
                     }
                     None => {
-                        span_bug!(span, "cannot construct AST representation of generic argument `{} = {:?}`", self.tcx.def_path_str(generic_param.def_id), generic_arg);
+                        let mut diagnostic = self.tcx.dcx().struct_span_fatal(span, format!("cannot represent generic argument `{} = {:?}` after expansion", self.tcx.def_path_str(generic_param.def_id), generic_arg));
+                        diagnostic.note(match self.current_scope {
+                            None => "in unknown scope".to_owned(),
+                            Some(scope) if scope.is_top_level_module() => "in the crate root".to_owned(),
+                            Some(scope) => format!("in the scope `{}`", self.tcx.def_path_str(scope)),
+                        });
+                        diagnostic.emit();
                     }
                 }
             })

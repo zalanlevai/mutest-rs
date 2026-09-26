@@ -1,0 +1,45 @@
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for implementations
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:35:25
+   |
+35 | impl Trait<<u8 as Trait<_>>::Assoc> for u8 {
+   |                         ^ not allowed in type signatures
+
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for return types
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:18:29
+   |
+18 | fn ret_ty() -> <u8 as Trait<_>>::Assoc { 0 }
+   |                             ^ not allowed in type signatures
+
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for functions
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:21:29
+   |
+21 | fn param_ty(_: <u8 as Trait<_>>::Assoc) {}
+   |                             ^ not allowed in type signatures
+
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for functions
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:24:50
+   |
+24 | fn where_clause<T>() where T: Trait<<u8 as Trait<_>>::Assoc> {}
+   |                                                  ^ not allowed in type signatures
+
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for structs
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:28:25
+   |
+28 |     field: <u8 as Trait<_>>::Assoc,
+   |                         ^ not allowed in type signatures
+
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for constants
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:32:27
+   |
+32 | const CONST: <u8 as Trait<_>>::Assoc = 0;
+   |                           ^ not allowed in type signatures
+
+error[E0121]: the placeholder `_` is not allowed within types on item signatures for associated types
+  --> tests/ui/hygiene/generic_args/rustc_res/infer_args_not_allowed_outside_bodies.rs:41:31
+   |
+41 |     type Assoc = <u8 as Trait<_>>::Assoc;
+   |                               ^ not allowed in type signatures
+
+error: aborting due to 7 previous errors
+
+For more information about this error, try `rustc --explain E0121`.
