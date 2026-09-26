@@ -1,0 +1,35 @@
+warning: replacing unrepresentable generic type argument `def::private::Marker` with `_`
+  --> tests/ui/hygiene/generic_args/discard_explicit_inherent_impl_self_ty_or_trait_generic_args_of_type_relative_paths.rs:43:21
+   |
+43 |             let _ = Wrapper::<private::Marker>::wrap(make_private_marker());
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^ encountered definition `def::private::Marker` with no visible path
+...
+53 |     crate::def::m!();
+   |     ---------------- in this macro invocation
+   |
+   = note: this warning originates in the macro `crate::def::m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: replacing unrepresentable generic argument `def::Trait::T = def::private::Marker` with `_`
+  --> tests/ui/hygiene/generic_args/discard_explicit_inherent_impl_self_ty_or_trait_generic_args_of_type_relative_paths.rs:46:14
+   |
+46 |             <u8 as Trait<private::Marker>>::foo();
+   |              ^^
+...
+53 |     crate::def::m!();
+   |     ---------------- in this macro invocation
+   |
+   = note: this warning originates in the macro `crate::def::m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: replacing unrepresentable generic argument `def::Trait::T = def::private::Marker` with `_`
+  --> tests/ui/hygiene/generic_args/discard_explicit_inherent_impl_self_ty_or_trait_generic_args_of_type_relative_paths.rs:47:25
+   |
+47 |             match () { <u8 as Trait<private::Marker>>::FOO => {} }
+   |                         ^^
+...
+53 |     crate::def::m!();
+   |     ---------------- in this macro invocation
+   |
+   = note: this warning originates in the macro `crate::def::m` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: 3 warnings emitted
+
