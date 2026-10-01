@@ -348,18 +348,25 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                     // NOTE: The rest of the intra-target filtering happens later.
                     if !opts.mutation_filters.is_empty() {
                         targets.retain(|target| opts.mutation_filters.iter().any(|filter| match filter {
-                            config::MutationFilter::File(path, line_range) => {
+                            config::MutationFilter::File(path, file_region) => {
                                 let target_span = tcx.def_span(target.def_id());
                                 let FileName::Real(target_file_name) = sess.source_map().span_to_filename(target_span) else { return false; };
                                 if target_file_name.local_path() != Some(path) { return false; }
 
-                                if let Some((start_line_no, end_line_no)) = *line_range && let Some(target_local_def_id) = target.def_id().as_local() {
+                                if let Some(file_region) = *file_region && let Some(target_local_def_id) = target.def_id().as_local() {
                                     let target_span_with_body = tcx.hir_span_with_body(tcx.local_def_id_to_hir_id(target_local_def_id));
                                     let lo_loc = sess.source_map().lookup_char_pos(target_span_with_body.lo());
                                     let hi_loc = sess.source_map().lookup_char_pos(target_span_with_body.hi());
 
-                                    let end_line_no = end_line_no.unwrap_or(start_line_no);
-                                    if !(lo_loc.line <= end_line_no && start_line_no <= hi_loc.line) { return false; }
+                                    match file_region {
+                                        config::FileRegionFilter::Lines(start_line_no, end_line_no) => {
+                                            let end_line_no = end_line_no.unwrap_or(start_line_no);
+                                            if !(lo_loc.line <= end_line_no && start_line_no <= hi_loc.line) { return false; }
+                                        }
+                                        config::FileRegionFilter::Span(_, start_line_no, _, end_line_no, _) => {
+                                            if !(lo_loc.line <= end_line_no && start_line_no <= hi_loc.line) { return false; }
+                                        }
+                                    }
                                 }
 
                                 true
@@ -469,13 +476,21 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 // NOTE: Targets are already filtered, so this only applies intra-target filtering.
                 mutations.retain(|mutation| opts.mutation_filters.iter().any(|filter| {
                     match filter {
-                        config::MutationFilter::File(path, line_range) => {
-                            let (Some(source_file), lo_line, _, hi_line, _) = sess.source_map().span_to_location_info(mutation.span) else { return false; };
+                        config::MutationFilter::File(path, file_region) => {
+                            let (Some(source_file), lo_line, lo_col, hi_line, hi_col) = sess.source_map().span_to_location_info(mutation.span) else { return false; };
                             let FileName::Real(file_name) = &source_file.name else { return false; };
-                            file_name.local_path() == Some(path) && match *line_range {
+                            file_name.local_path() == Some(path) && match *file_region {
                                 None => true,
-                                Some((line_no, None)) => lo_line <= line_no && line_no <= hi_line,
-                                Some((start_line_no, Some(end_line_no))) => lo_line <= end_line_no && start_line_no <= hi_line,
+                                Some(config::FileRegionFilter::Lines(line_no, None)) => lo_line <= line_no && line_no <= hi_line,
+                                Some(config::FileRegionFilter::Lines(start_line_no, Some(end_line_no))) => lo_line <= end_line_no && start_line_no <= hi_line,
+                                Some(config::FileRegionFilter::Span(config::FileSpanFilterMode::Contains, start_line_no, start_col, end_line_no, end_col)) => {
+                                    true
+                                        && (start_line_no < lo_line || (lo_line == start_line_no && start_col <= lo_col))
+                                        && (hi_line < end_line_no || (hi_line == end_line_no && hi_col <= end_col))
+                                }
+                                Some(config::FileRegionFilter::Span(config::FileSpanFilterMode::Eq, start_line_no, start_col, end_line_no, end_col)) => {
+                                    (lo_line == start_line_no && lo_col == start_col) && (hi_line == end_line_no && hi_col == end_col)
+                                }
                             }
                         }
                         config::MutationFilter::Def(def_path_str) => {

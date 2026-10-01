@@ -251,7 +251,10 @@ pub fn command(name: &'static str) -> clap::Command {
             .help("\
                 Filter mutations to only the ones specified by any of the filters. Multiple may be specified, seperated by commas. The following filters are available:\n\
                 * `def:<ITEM_PATH_TO_DEF>`: Only mutate the specified definition. The full canonical item path must be specified (e.g., `def:foo::bar::baz`, `def:Struct::function`, `def:<Struct as Trait>::function`).\n\
-                * `file:<PATH_TO_FILE>[:<LINE>[:<END_LINE>]]`: Only mutate the specified file, or the specified part of the file (e.g., `file:src/lib.rs`, `file:src/lib.rs:21`, `file:src/lib.rs:21:25`).\
+                * `file:<PATH_TO_FILE>[:<FILE_REGION_FILTER>]`: Only mutate the specified file, or the specified part of the file (e.g., `file:src/lib.rs`, `file:src/lib.rs:21`, `file:src/lib.rs:21..25`, `file:src/lib.rs:21:37..25:9`). \
+                  `FILE_REGION_FILTER` may be either of the form `<LINE>[..<END_LINE>]` designating one line or a range of lines, or `<START_LINE>:<START_COL>..<END_LINE>:<END_COL>[!]` designating a span. \
+                  A span filter matches any mutation within the specified span by default. The `!` suffix in a span filter changes it to only match mutations whose span exactly matches the span designated by the filter. \
+                  In both forms, the `: ` separator may also be used instead of the `..` separator to designate a line range or span.\
             ")
         )
         .next_help_heading("Mutation-Parallelism Options")

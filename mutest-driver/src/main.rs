@@ -513,28 +513,54 @@ pub fn main() -> process::ExitCode {
                         config::MutationFilter::Def(def_path_str.to_owned())
                     }
                     _ if let Some(file_spec) = filter.strip_prefix("file:") => {
-                        let mut file_path_str = file_spec;
-                        let mut line_range_str = None;
-                        if let Some((file_spec_rest, line_no_str_part)) = file_spec.rsplit_once(':') {
-                            if let Some((file_path_str_part, start_line_no_str_part)) = file_spec_rest.rsplit_once(':') {
-                                file_path_str = file_path_str_part;
-                                line_range_str = Some((start_line_no_str_part, Some(line_no_str_part)));
-                            } else {
-                                file_path_str = file_spec_rest;
-                                line_range_str = Some((line_no_str_part, None));
-                            }
+                        let Some((file_path_str, mut file_region_spec)) = file_spec.split_once(':') else {
+                            return config::MutationFilter::File(PathBuf::from(file_spec), None);
+                        };
+
+                        let mut filter_mode = None;
+                        if let Some(file_region_spec_no_mode) = file_region_spec.strip_suffix('!') {
+                            file_region_spec = file_region_spec_no_mode;
+                            filter_mode = Some(config::FileSpanFilterMode::Eq);
                         }
 
-                        let line_range = line_range_str.map(|(line_no_str, end_line_no_str)| -> Result<_, std::num::ParseIntError> {
-                            let line_no = line_no_str.parse::<usize>()?;
-                            let end_line_no = end_line_no_str.map(|end_line_no_str| end_line_no_str.parse::<usize>()).transpose()?;
-                            Ok((line_no, end_line_no))
-                        }).transpose();
-                        let line_range = match line_range {
-                            Ok(line_range) => line_range,
-                            Err(_error) => early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")),
+                        // NOTE: Two range separators are supported with identical meaning:
+                        //       * ': ', which is emitted by rustc for spans (outside of diagnostics, when emitting the entire span).
+                        //       * '..', which is simlar to Rust's range syntax and is useful for interactive shell use
+                        //         because it does not contain a whitespace character.
+                        let file_region = match file_region_spec.split_once("..").or_else(|| file_region_spec.split_once(": ")) {
+                            None => {
+                                let line_no_str = file_region_spec;
+                                let Ok(line_no) = line_no_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+
+                                if let Some(_) = filter_mode { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) }
+                                config::FileRegionFilter::Lines(line_no, None)
+                            }
+                            Some((start_loc_spec, end_loc_spec)) => {
+                                match (start_loc_spec.split_once(':'), end_loc_spec.split_once(':')) {
+                                    (None, None) => {
+                                        let start_line_no_str = start_loc_spec;
+                                        let end_line_no_str = end_loc_spec;
+                                        let Ok(start_line_no) = start_line_no_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+                                        let Ok(end_line_no) = end_line_no_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+
+                                        if let Some(_) = filter_mode { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) }
+                                        config::FileRegionFilter::Lines(start_line_no, Some(end_line_no))
+                                    }
+                                    (Some((start_line_no_str, start_col_str)), Some((end_line_no_str, end_col_str))) => {
+                                        let Ok(start_line_no) = start_line_no_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+                                        let Ok(start_col) = start_col_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+                                        let Ok(end_line_no) = end_line_no_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+                                        let Ok(end_col) = end_col_str.parse::<usize>() else { early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")) };
+
+                                        let filter_mode = filter_mode.unwrap_or(config::FileSpanFilterMode::Contains);
+                                        config::FileRegionFilter::Span(filter_mode, start_line_no, start_col, end_line_no, end_col)
+                                    }
+                                    _ => early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")),
+                                }
+                            }
                         };
-                        config::MutationFilter::File(PathBuf::from(file_path_str), line_range)
+
+                        config::MutationFilter::File(PathBuf::from(file_path_str), Some(file_region))
                     }
                     _ => early_dcx.early_fatal(format!("invalid mutation filter argument: `{filter}`")),
                 }

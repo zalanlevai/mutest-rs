@@ -155,11 +155,28 @@ pub enum MutationParallelism {
     DynamicScheduling,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum FileSpanFilterMode {
+    Contains,
+    Eq,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum FileRegionFilter {
+    /// `15` or `15..17` (or `15: 17`).
+    Lines(usize, Option<usize>),
+    /// `15:12..15:25[!]` or `15:12: 15:25[!]`
+    Span(FileSpanFilterMode, usize, usize, usize, usize),
+}
+
 #[derive(Clone, Debug)]
 pub enum MutationFilter {
-    /// `file:path/to/src.rs` or `file:path/to/src.rs:15` or `file:path/to/src.rs:15:17`.
-    File(PathBuf, Option<(usize, Option<usize>)>),
-    /// `def:path::to::function` or `def:<impl path::to::Trait for path::to::Type>::function`, using fully-qualified (without root crate) Rust item paths.
+    /// File, or part of file (in the form of either a line, a line range, or a span):
+    /// `file:path/to/src.rs` or `file:path/to/src.rs:<FILE_REGION_FILTER>`.
+    File(PathBuf, Option<FileRegionFilter>),
+    /// Mutable function definition:
+    /// `def:path::to::function` or `def:<impl path::to::Trait for path::to::Type>::function`,
+    /// using fully-qualified (without root crate) Rust item paths.
     Def(String),
 }
 
