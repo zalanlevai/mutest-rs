@@ -1,6 +1,6 @@
+//@ rustc
 //@ build: fail
 //@ stderr
-//@ mutest-flags: -Z no-sanitize-macro-expns
 
 //! This test shows that `_` infer arguments cannot be used outside of bodies.
 

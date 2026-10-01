@@ -1,6 +1,6 @@
+//@ rustc
 //@ build: fail
 //@ stderr
-//@ mutest-flags: -Z no-sanitize-macro-expns
 
 #![feature(decl_macro)]
 

@@ -1,6 +1,6 @@
+//@ rustc
 //@ build
 //@ stderr: empty
-//@ mutest-flags: -Z no-sanitize-macro-expns
 
 //! This test shows that elided generic args in qualified paths
 //! resolve to the default value of the corresponding generic parameters,
