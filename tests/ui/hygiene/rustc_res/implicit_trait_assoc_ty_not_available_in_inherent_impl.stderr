@@ -7,7 +7,7 @@ error[E0223]: ambiguous associated type
 help: use fully-qualified syntax
    |
 15 -     fn copy(&self) -> Self::Target { self.0 }
-15 +     fn copy(&self) -> <DerefOnly as std::ops::Deref>::Target { self.0 }
+15 +     fn copy(&self) -> <DerefOnly as Deref>::Target { self.0 }
    |
 15 -     fn copy(&self) -> Self::Target { self.0 }
 15 +     fn copy(&self) -> <DerefOnly as std::ops::Receiver>::Target { self.0 }

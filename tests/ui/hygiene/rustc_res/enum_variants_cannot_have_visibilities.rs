@@ -1,6 +1,6 @@
+//@ rustc
 //@ build: fail
 //@ stderr
-//@ mutest-flags: -Z no-sanitize-macro-expns
 
 mod inner {
     pub enum Variants {

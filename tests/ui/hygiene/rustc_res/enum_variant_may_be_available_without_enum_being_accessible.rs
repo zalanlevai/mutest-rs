@@ -1,6 +1,7 @@
+//@ rustc
 //@ build
 //@ stderr: empty
-//@ mutest-flags: -Z no-sanitize-macro-expns
+//@ rustc-flags: --test
 
 mod def {
     mod inner {
