@@ -2,11 +2,10 @@
 //@ print-mutations
 //@ stdout
 //@ stderr: empty
-//@ mutest-flags: -v --filter-mutations=file:tests/ui/mutation/filter/filter_by_file_line_range.rs:8..9
+//@ mutest-flags: -v --filter-mutations=file:tests/ui/mutation/filter/filter_by_exact_file_span.rs:8:8..8:24!
 
 fn mutable_fn(a: i32, b: i32) -> i32 {
-    if a == 0 { return -b; }
-    if b == 0 { return -a; }
+    if a == 1 || b == 1 { return a * b; }
     a + b
 }
 
