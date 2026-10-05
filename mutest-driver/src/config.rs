@@ -184,7 +184,6 @@ pub enum MutationFilter {
 pub struct UnstableFlags {
     pub verify_ast_lowering: bool,
     pub embedded: bool,
-    pub no_sanitize_macro_expns: bool,
 }
 
 pub struct Options<'op, 'm> {
