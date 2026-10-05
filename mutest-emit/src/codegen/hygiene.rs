@@ -666,13 +666,13 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn sanitize_region(&self, region: ty::Region<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<ast::Lifetime> {
-        ty::print::region_ast(self.tcx, span, region, binding_item_def_id, true)
+        ty::print::region_ast(self.tcx, span, region, binding_item_def_id)
     }
 
     fn try_sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<Box<ast::Ty>> {
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, true, binding_item_def_id)
+        ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, def_path_handling, opaque_ty_handling, binding_item_def_id)
     }
 
     #[inline]
@@ -684,7 +684,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn try_sanitize_const(&self, ct: ty::Const<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<ast::AnonConst> {
-        ty::print::const_ast(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ct, binding_item_def_id, true)
+        ty::print::const_ast(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ct, binding_item_def_id)
     }
 
     /// Hygienically print the generic arguments corresponding to the definition referenced by a path segment, such as a trait.

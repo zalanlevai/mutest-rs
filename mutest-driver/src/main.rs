@@ -678,7 +678,6 @@ pub fn main() -> process::ExitCode {
         let unstable_flag_opts = config::UnstableFlags {
             verify_ast_lowering: unstable_flags.contains(&"verify-ast-lowering"),
             embedded: unstable_flags.contains(&"embedded"),
-            no_sanitize_macro_expns: unstable_flags.contains(&"no-sanitize-macro-expns"),
         };
 
         let config = Config {

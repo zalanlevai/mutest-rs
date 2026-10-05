@@ -45,7 +45,6 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
     opts: &mut config::Options,
     pass_result: &mut AnalysisPassResult,
     generated_crate_ast: &mut ast::Crate,
-    unexpanded_crate_ast: &mut ast::Crate,
     entry_points: EntryPoints<'ent>,
     meta_mutant: MetaMutant<'trg, 'm>,
 ) {
@@ -55,12 +54,6 @@ fn perform_codegen<'tcx, 'ent, 'trg, 'm>(
         if opts.unstable_flags.embedded {
             mutest_emit::codegen::entry_point::generate_embedded_test_entry_point(tcx, generated_crate_ast);
         }
-    }
-
-    // TODO: Deprecate and remove from expansion module.
-    if opts.unstable_flags.no_sanitize_macro_expns {
-        mutest_emit::codegen::expansion::load_modules(tcx.sess, unexpanded_crate_ast);
-        mutest_emit::codegen::expansion::revert_non_local_macro_expansions(generated_crate_ast, unexpanded_crate_ast);
     }
 
     mutest_emit::codegen::substitution::resolve_syntax_ambiguities(tcx, generated_crate_ast);
@@ -137,7 +130,6 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     let sess_opts = mutest_emit::session::Options {
         verbosity: opts.verbosity,
         report_timings: opts.report_timings,
-        sanitize_macro_expns: !opts.unstable_flags.no_sanitize_macro_expns,
     };
 
     let analysis_pass = run_compiler(compiler_config, |compiler| -> CompilerResult<Option<AnalysisPassResult>> {
@@ -170,16 +162,11 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
             diagnostic.emit();
         }
 
-        let result = create_and_enter_global_ctxt(compiler, crate_ast.clone(), |tcx| -> Flow<AnalysisPassResult, ErrorGuaranteed> {
+        let result = create_and_enter_global_ctxt(compiler, crate_ast, |tcx| -> Flow<AnalysisPassResult, ErrorGuaranteed> {
             let (mut generated_crate_ast, def_res) = {
                 let (resolver, expanded_crate_ast) = tcx.resolver_for_lowering();
                 let def_res = mutest_emit::analysis::ast_lowering::DefResolutions::from_resolver(&*resolver.borrow());
-
-                // TODO: Generate code based on the original, unexpanded AST instead of the
-                //       expanded AST which may contain invalid code that is not equivalent due
-                //       to macro hygiene.
                 let generated_crate_ast = expanded_crate_ast.borrow().clone();
-
                 (generated_crate_ast, def_res)
             };
 
@@ -423,11 +410,9 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutest_emit::analysis::ast_lowering::validate_body_resolutions(&body_res, &def_res, &generated_crate_ast);
             }
 
-            if !opts.unstable_flags.no_sanitize_macro_expns {
-                let t_sanitize_macro_expns_start = Instant::now();
-                mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &crate_res, &def_res, &body_res, &mut generated_crate_ast);
-                pass_result.sanitize_macro_expns_duration = t_sanitize_macro_expns_start.elapsed();
-            }
+            let t_sanitize_macro_expns_start = Instant::now();
+            mutest_emit::codegen::hygiene::sanitize_macro_expansions(tcx, &crate_res, &def_res, &body_res, &mut generated_crate_ast);
+            pass_result.sanitize_macro_expns_duration = t_sanitize_macro_expns_start.elapsed();
 
             if let Some(external_meta_mutant_crate) = external_meta_mutant_crate {
                 let Some(rustc_invocation) = crate_const_storage::extract_rustc_invocation(tcx, external_meta_mutant_crate) else {
@@ -462,7 +447,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 let external_meta_mutant_crate_name = crate_res.visible_crate_name(external_meta_mutant_crate);
 
                 let meta_mutant = MetaMutant::External { crate_name: external_meta_mutant_crate_name };
-                perform_codegen(tcx, opts, &mut pass_result, &mut generated_crate_ast, &mut crate_ast, entry_points, meta_mutant);
+                perform_codegen(tcx, opts, &mut pass_result, &mut generated_crate_ast, entry_points, meta_mutant);
 
                 pass_result.codegen_duration = t_codegen_start.elapsed();
 
@@ -676,7 +661,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
                 mutation_parallelism,
                 unsafe_targeting: opts.unsafe_targeting,
             };
-            perform_codegen(tcx, opts, &mut pass_result, &mut generated_crate_ast, &mut crate_ast, entry_points, meta_mutant);
+            perform_codegen(tcx, opts, &mut pass_result, &mut generated_crate_ast, entry_points, meta_mutant);
 
             pass_result.codegen_duration = t_codegen_start.elapsed();
 

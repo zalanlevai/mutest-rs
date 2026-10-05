@@ -127,8 +127,6 @@ pub const UNSTABLE_FLAGS: &[UnstableFlag] = &[
     UnstableFlag::new("verify-ast-lowering", Some("Verify whether all AST nodes are mapped to their HIR counterparts.")),
     // Experimental options.
     UnstableFlag::new("embedded", Some("Enable experimental support for embedded-test tests and embedded firmware generation with no_std support using a tethered embedded mutation runtime.")),
-    // Legacy options.
-    UnstableFlag::new("no-sanitize-macro-expns", Some("Skip sanitizing the identifiers and paths in macro expansions. This is legacy behavior and is not recommended.")),
 ];
 
 pub const UNSTABLE_OPTIONS: &[UnstableOption] = &[

@@ -96,7 +96,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
     type Mutation = CallValueDefaultShadowMutation;
 
     fn try_apply(&self, mcx: &MutCtxt) -> Mutations<Self::Mutation> {
-        let MutCtxt { opts, tcx, crate_res, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
+        let MutCtxt { opts: _, tcx, crate_res, def_res, def_site: def, item_hir: f_hir, body_res, location } = *mcx;
 
         let MutLoc::FnBodyExpr(expr, _f) = location else { return Mutations::none(); };
         let Some(body_hir) = f_hir.body else { return Mutations::none(); };
@@ -117,7 +117,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         let scope = f_hir.owner_id.def_id.to_def_id();
         let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, expr_ty, def_path_handling, opaque_ty_handling, opts.sanitize_macro_expns, f_hir.owner_id.to_def_id()) else { return Mutations::none(); };
+        let Some(expr_ty_ast) = ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, expr_ty, def_path_handling, opaque_ty_handling, f_hir.owner_id.to_def_id()) else { return Mutations::none(); };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);

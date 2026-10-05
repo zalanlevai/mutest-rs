@@ -216,7 +216,6 @@ pub mod print {
         sp: Span,
         def_path_handling: DefPathHandling,
         opaque_ty_handling: OpaqueTyHandling,
-        sanitize_macro_expns: bool,
         binding_item_def_id: hir::DefId,
     }
 
@@ -361,11 +360,9 @@ pub mod print {
                 Err(format!("encountered definition `{}` with no visible path", self.tcx.def_path_str(def_id)))
             }?;
 
-            if self.sanitize_macro_expns {
-                // HACK: This is inefficient, as it resolves the path again, which already happens in `try_print_visible_def_path`.
-                // TODO: Remove most code in `try_print_visible_def_path` and just use the logic in the `hygiene` module once sanitization becomes the default.
-                hygiene::sanitize_path(self.tcx, self.crate_res, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
-            }
+            // HACK: This is inefficient, as it resolves the path again, which already happens in `try_print_visible_def_path`.
+            // TODO: Remove most code in `try_print_visible_def_path` and just use the logic in the `hygiene` module once sanitization becomes the default.
+            hygiene::sanitize_path(self.tcx, self.crate_res, self.def_res, self.scope, &mut path, hir::Res::Def(self.tcx.def_kind(def_id), def_id), false);
 
             if args.is_empty() { return Ok(path); }
             let item_args = self.tcx().generics_of(def_id).own_args(args);
@@ -399,16 +396,15 @@ pub mod print {
                     if early_param_region.name == sym::empty { return Ok(None); }
 
                     let mut ident = Ident::new(early_param_region.name, sp);
-                    if self.sanitize_macro_expns {
-                        let generic_param_def = self.tcx.generics_of(self.binding_item_def_id).region_param(early_param_region, self.tcx);
 
-                        if generic_param_def.is_anonymous_lifetime() {
-                            hygiene::generate_revealed_name_for_anonymous_region(&mut ident, generic_param_def);
-                        } else {
-                            let def_ident_span = self.tcx.def_ident_span(generic_param_def.def_id).unwrap_or(DUMMY_SP);
-                            hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
-                        }
+                    let generic_param_def = self.tcx.generics_of(self.binding_item_def_id).region_param(early_param_region, self.tcx);
+                    if generic_param_def.is_anonymous_lifetime() {
+                        hygiene::generate_revealed_name_for_anonymous_region(&mut ident, generic_param_def);
+                    } else {
+                        let def_ident_span = self.tcx.def_ident_span(generic_param_def.def_id).unwrap_or(DUMMY_SP);
+                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
                     }
+
                     Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
 
@@ -420,10 +416,10 @@ pub mod print {
                     if region_name == sym::empty || region_name == kw::UnderscoreLifetime { return Ok(None); }
 
                     let mut ident = Ident::new(region_name, sp);
-                    if self.sanitize_macro_expns {
-                        let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
-                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
-                    }
+
+                    let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+                    hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+
                     Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
 
@@ -433,10 +429,10 @@ pub mod print {
                     if region_name == sym::empty || region_name == kw::UnderscoreLifetime { return Ok(None); }
 
                     let mut ident = Ident::new(region_name, sp);
-                    if self.sanitize_macro_expns {
-                        let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
-                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
-                    }
+
+                    let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
+                    hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
+
                     Ok(Some(ast::mk::lifetime(sp, ident)))
                 }
 
@@ -581,12 +577,10 @@ pub mod print {
             match ct.kind() {
                 ty::ConstKind::Param(param_const) => {
                     let mut ident = Ident::new(param_const.name, sp);
-                    if self.sanitize_macro_expns {
-                        'sanitize: {
-                            let Some(scope) = self.scope else { break 'sanitize; };
-                            let def_ident_span = param_const.span_from_generics(self.tcx, scope);
-                            hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
-                        }
+                    'sanitize: {
+                        let Some(scope) = self.scope else { break 'sanitize; };
+                        let def_ident_span = param_const.span_from_generics(self.tcx, scope);
+                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
                     }
 
                     Ok(ast::mk::anon_const(sp, ast::mk::expr_ident(sp, ident).kind))
@@ -788,13 +782,11 @@ pub mod print {
                     }
 
                     let mut ident = Ident::new(param_ty.name, sp);
-                    if self.sanitize_macro_expns {
-                        'sanitize: {
-                            let Some(scope) = self.scope else { break 'sanitize; };
-                            if ident.name == kw::SelfUpper { break 'sanitize; }
-                            let def_ident_span = param_ty.span_from_generics(self.tcx, scope);
-                            hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
-                        }
+                    'sanitize: {
+                        let Some(scope) = self.scope else { break 'sanitize; };
+                        if ident.name == kw::SelfUpper { break 'sanitize; }
+                        let def_ident_span = param_ty.span_from_generics(self.tcx, scope);
+                        hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
                     }
                     Ok(ast::mk::ty_ident(sp, None, ident))
                 }
@@ -851,7 +843,6 @@ pub mod print {
         ty: Ty<'tcx>,
         def_path_handling: DefPathHandling,
         opaque_ty_handling: OpaqueTyHandling,
-        sanitize_macro_expns: bool,
         binding_item_def_id: hir::DefId,
     ) -> Option<Box<ast::Ty>> {
         let mut printer = AstTyPrinter {
@@ -862,7 +853,6 @@ pub mod print {
             sp,
             def_path_handling,
             opaque_ty_handling,
-            sanitize_macro_expns,
             binding_item_def_id,
         };
         printer.print_ty(ty).ok()
@@ -873,7 +863,6 @@ pub mod print {
         sp: Span,
         region: ty::Region<'tcx>,
         binding_item_def_id: hir::DefId,
-        sanitize_macro_expns: bool,
     ) -> Option<ast::Lifetime> {
         // HACK: We construct an AstTyPrinter with some unused dummy values to call the `print_region` impl.
         let mut printer = AstTyPrinter {
@@ -884,7 +873,6 @@ pub mod print {
             sp,
             def_path_handling: DefPathHandling::FullyQualified,
             opaque_ty_handling: OpaqueTyHandling::Infer,
-            sanitize_macro_expns,
             binding_item_def_id,
         };
         printer.print_region(region).ok().flatten()
@@ -898,7 +886,6 @@ pub mod print {
         sp: Span,
         ct: ty::Const<'tcx>,
         binding_item_def_id: hir::DefId,
-        sanitize_macro_expns: bool,
     ) -> Option<ast::AnonConst> {
         let mut printer = AstTyPrinter {
             tcx,
@@ -908,7 +895,6 @@ pub mod print {
             sp,
             def_path_handling: DefPathHandling::FullyQualified,
             opaque_ty_handling: OpaqueTyHandling::Infer,
-            sanitize_macro_expns,
             binding_item_def_id,
         };
         printer.print_const(ct).ok()
