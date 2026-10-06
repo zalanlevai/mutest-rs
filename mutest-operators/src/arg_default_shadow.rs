@@ -122,9 +122,8 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
                 Some(param.ty.clone())
             } else {
                 let scope = f_hir.owner_id.def_id.to_def_id();
-                let def_path_handling = ty::print::DefPathHandling::PreferVisible(ty::print::ScopedItemPaths::Trimmed);
                 let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, param_ty, def_path_handling, opaque_ty_handling, f_hir.owner_id.to_def_id())
+                ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, param_ty, opaque_ty_handling, f_hir.owner_id.to_def_id())
             }) else { continue; };
 
             // Default::default();

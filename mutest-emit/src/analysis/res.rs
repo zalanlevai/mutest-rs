@@ -410,7 +410,8 @@ impl<'tcx> DefPath<'tcx> {
         Self { root, segments }
     }
 
-    fn from_def_parent_path(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Option<Self> {
+    /// Build `DefPath` representing the definition's canonical path, without visibility checks or hygienic renaming.
+    fn canonical(tcx: TyCtxt<'tcx>, def_id: hir::DefId) -> Option<Self> {
         let [crate_def_id, def_ids @ ..] = &def_id_path(tcx, def_id)[..] else { unreachable!("empty def id path") };
 
         let segments = def_ids.into_iter()
@@ -430,7 +431,7 @@ impl<'tcx> DefPath<'tcx> {
         self.segments.iter().map(|segment| segment.def_id)
     }
 
-    pub fn ast_path(&self, crate_res: &CrateResolutions<'tcx>, ast_ty_printer: &mut ty::print::AstTyPrinter<'tcx, '_>) -> (Option<Box<ast::QSelf>>, ast::Path) {
+    pub fn unhygienic_ast_path(&self, crate_res: &CrateResolutions<'tcx>, ast_ty_printer: &mut ty::print::AstTyPrinter<'tcx, '_>) -> (Option<Box<ast::QSelf>>, ast::Path) {
         use ty::print::Printer;
 
         let mut segments = self.segments.iter().map(|segment| {
@@ -475,10 +476,14 @@ impl<'tcx> DefPath<'tcx> {
     }
 }
 
-pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir::DefId, enforce_vis: bool) -> Option<DefPath<'tcx>> {
-    if !tcx.is_descendant_of(def_id, scope) { return None; }
+/// Build a relative `DefPath` from `ancestor` to `def_id`, which must be a descendant definition
+/// contained directly or indirectly within `ancestor`.
+///
+/// If `enforce_vis` is set, ensures that each descendant path component is visible to `ancestor`.
+fn descendant_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, ancestor: hir::DefId, enforce_vis: bool) -> Option<DefPath<'tcx>> {
+    if !tcx.is_descendant_of(def_id, ancestor) { return None; }
 
-    if def_id == scope {
+    if def_id == ancestor {
         if let Some(cnum) = def_id.as_crate_root() {
             return Some(DefPath::new(DefPathRootKind::Global(cnum), vec![]));
         }
@@ -488,8 +493,8 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     }
 
     let full_def_id_path = def_id_path(tcx, def_id);
-    let scope_def_id_path = def_id_path(tcx, scope);
-    let mut relative_def_id_path = &full_def_id_path[scope_def_id_path.len()..];
+    let ancestor_def_id_path = def_id_path(tcx, ancestor);
+    let mut relative_def_id_path = &full_def_id_path[ancestor_def_id_path.len()..];
 
     // NOTE: If we find an inherent impl parent in the relative path,
     //       we modify the path to be type-relative to the type the inherent impl is for.
@@ -510,7 +515,7 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     let mut def_path = DefPath::new(root, Vec::with_capacity(relative_def_id_path.len()));
     for &def_id in relative_def_id_path {
         if enforce_vis {
-            if !tcx.visibility(def_id).is_accessible_from(scope, tcx) { return None; }
+            if !tcx.visibility(def_id).is_accessible_from(ancestor, tcx) { return None; }
         }
 
         let span = tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
@@ -521,7 +526,9 @@ pub fn relative_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, scope: hir
     Some(def_path)
 }
 
-pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut scope: hir::DefId) -> Result<DefPath<'tcx>, hir::DefId> {
+/// Build a relative `DefPath` to `def_id`, with each path component visible to `scope`,
+/// considering the entire lexical scope at `scope`, including enclosing "transparent" scopes.
+fn lexical_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut scope: hir::DefId) -> Result<DefPath<'tcx>, hir::DefId> {
     // HACK: The built-in test harness expansion generates a `#[rustc_main]` function
     //       that generates paths to (and through) private items,
     //       which are only valid because of hygiene and cannot be replicated in user-written Rust code.
@@ -557,7 +564,7 @@ pub fn locally_visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: hir::DefId, mut
     }
 
     let enforce_vis = !is_in_generated_test_main;
-    let Some(mut def_path) = relative_def_path(tcx, def_id, scope, enforce_vis) else { return Err(scope); };
+    let Some(mut def_path) = descendant_def_path(tcx, def_id, scope, enforce_vis) else { return Err(scope); };
 
     if let hir::DefKind::Impl { of_trait: _ } = tcx.def_kind(scope) {
         let ident = Ident::new(kw::SelfUpper, DUMMY_SP);
@@ -637,7 +644,23 @@ pub fn visible_parent_map<'tcx>(tcx: TyCtxt<'tcx>) -> hir::DefIdMap<hir::DefId> 
     visible_parent_map
 }
 
-pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span, limit: Option<NonZeroUsize>) -> SmallVec<[DefPath<'tcx>; 1]> {
+/// Build up to `limit` absolute `DefPath` paths to `def_id`, with each path's every path component visible to `scope`.
+///
+/// Searches the module hierarchy of module children and re-exports
+/// starting from the definition's crate root if either
+/// the definition is in the local crate,
+/// the definition is in a crate in the extern prelude,
+/// there is an accessible path to an `extern crate` item of the definition's crate, or
+/// the definition's crate is accessible through another crate.
+fn absolute_def_paths<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    crate_res: &CrateResolutions<'tcx>,
+    def_id: hir::DefId,
+    scope: Option<hir::DefId>,
+    ignore_reexport: Option<hir::DefId>,
+    span: Span,
+    limit: Option<NonZeroUsize>,
+) -> SmallVec<[DefPath<'tcx>; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|&(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
     match impl_parents.next() {
         // `..::{impl#?}::$assoc_item::..` path.
@@ -695,7 +718,7 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
                         .collect::<Vec<_>>()
                 });
                 if let Some(&(visible_extern_crate_def_id, _cnum)) = visible_extern_crate_defs.iter().find(|&&(_, extern_crate_def_cnum)| extern_crate_def_cnum == cnum) {
-                    let Some(mut root_def_path) = DefPath::from_def_parent_path(tcx, visible_extern_crate_def_id.to_def_id()) else { return Some(None) };
+                    let Some(mut root_def_path) = DefPath::canonical(tcx, visible_extern_crate_def_id.to_def_id()) else { return Some(None) };
 
                     if let Some(scope) = scope && tcx.is_descendant_of(visible_extern_crate_def_id.to_def_id(), scope) {
                         let scope_def_id_path = def_id_path(tcx, scope);
@@ -792,8 +815,115 @@ pub fn visible_def_paths<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'
     paths
 }
 
-pub fn visible_def_path<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &CrateResolutions<'tcx>, def_id: hir::DefId, scope: Option<hir::DefId>, ignore_reexport: Option<hir::DefId>, span: Span) -> Option<DefPath<'tcx>> {
-    visible_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, span, NonZeroUsize::new(1)).into_iter().next()
+/// Build an absolute `DefPath` to `def_id`, with each path component visible to `scope`.
+/// See `absolute_def_paths` for more details.
+fn absolute_def_path<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    crate_res: &CrateResolutions<'tcx>,
+    def_id: hir::DefId,
+    scope: Option<hir::DefId>,
+    ignore_reexport: Option<hir::DefId>,
+    span: Span,
+) -> Option<DefPath<'tcx>> {
+    absolute_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, span, NonZeroUsize::new(1)).into_iter().next()
+}
+
+#[derive(Clone, Copy)]
+pub enum DefPathRequestKind {
+    Def(hir::DefId),
+    ParentModPrefix(hir::ModId),
+}
+
+impl DefPathRequestKind {
+    pub fn def_id(&self) -> hir::DefId {
+        match self {
+            DefPathRequestKind::Def(def_id) => *def_id,
+            DefPathRequestKind::ParentModPrefix(mod_id) => mod_id.to_def_id(),
+        }
+    }
+}
+
+/// Build a `DefPath` to `def_id`, with each path component visible to `scope`.
+pub fn visible_def_path<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    crate_res: &CrateResolutions<'tcx>,
+    request: DefPathRequestKind,
+    scope: Option<hir::DefId>,
+    ignore_reexport: Option<hir::DefId>,
+    span: Span,
+) -> Result<DefPath<'tcx>, Option<hir::DefId>> {
+    let mut def_id = request.def_id();
+    if let hir::DefKind::Ctor(..) = tcx.def_kind(def_id) {
+        // Adjust target definition to the variant parent to avoid naming the unnamed constructor.
+        def_id = tcx.parent(def_id);
+    }
+
+    // Prefer using a direct, local path to local items within the same module as the enclosing module (or parent modules) of the current scope.
+    // NOTE: This helps avoid visibility-related resolution issues in local items, see
+    //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`, and
+    //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_child_scope_through_reexport`.
+    if let Some(scope) = scope && let Some(local_def_id) = def_id.as_local() && def_id != scope {
+        let mod_scope = match tcx.def_kind(scope) {
+            hir::DefKind::Mod => scope,
+            _ => tcx.parent_module_from_def_id(scope.expect_local()).to_def_id(),
+        };
+        let containing_mod = match request {
+            DefPathRequestKind::Def(_) => tcx.parent_module_from_def_id(local_def_id).to_def_id(),
+            DefPathRequestKind::ParentModPrefix(_) => def_id,
+        };
+
+        if containing_mod == mod_scope {
+            if let Ok(visible_path) = lexical_def_path(tcx, def_id, scope) {
+                return Ok(visible_path);
+            }
+        } else if !containing_mod.is_crate_root() {
+            let is_locally_accessible_through_supers = 'v: {
+                let mut parent_mod_scope = mod_scope;
+                let mut super_mods = vec![];
+
+                while parent_mod_scope != containing_mod {
+                    let parent_mod = tcx.parent_module_from_def_id(parent_mod_scope.expect_local()).to_def_id();
+                    if parent_mod.is_crate_root() {
+                        break 'v None;
+                    }
+
+                    super_mods.push(parent_mod);
+                    parent_mod_scope = parent_mod;
+                }
+
+                Some(super_mods)
+            };
+
+            if let Some(super_mods) = is_locally_accessible_through_supers {
+                match request {
+                    DefPathRequestKind::Def(_) => {
+                        if let Ok(mut visible_path) = lexical_def_path(tcx, def_id, containing_mod) {
+                            // Construct path to containing parent module, which are
+                            // always accessible through consecutive `super` path segments.
+                            visible_path.root = DefPathRootKind::Parent { supers: super_mods.len() };
+                            return Ok(visible_path);
+                        }
+                    }
+                    DefPathRequestKind::ParentModPrefix(_) => {
+                        // Construct direct path of `super` path segments, which is not valid by itself,
+                        // but will be valid once the caller appends the item segment(s) to it.
+                        return Ok(DefPath::new(DefPathRootKind::Parent { supers: super_mods.len() }, vec![]));
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(visible_path) = absolute_def_path(tcx, crate_res, def_id, scope, ignore_reexport, span) {
+        return Ok(visible_path);
+    }
+
+    // Ensure that the def is in the current scope, otherwise it really is not visible from here.
+    let Some(scope) = scope else { return Err(None); };
+    match lexical_def_path(tcx, def_id, scope) {
+        Ok(visible_path) => Ok(visible_path),
+        Err(adjusted_scope) => Err(Some(adjusted_scope)),
+    }
 }
 
 macro interned {
