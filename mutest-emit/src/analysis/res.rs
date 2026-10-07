@@ -432,8 +432,6 @@ impl<'tcx> DefPath<'tcx> {
     }
 
     pub fn unhygienic_ast_path(&self, crate_res: &CrateResolutions<'tcx>, ast_ty_printer: &mut ty::print::AstTyPrinter<'tcx, '_>) -> (Option<Box<ast::QSelf>>, ast::Path) {
-        use ty::print::Printer;
-
         let mut segments = self.segments.iter().map(|segment| {
             let ident = segment.ident;
             ast::PathSegment { id: ast::DUMMY_NODE_ID, ident, args: None }

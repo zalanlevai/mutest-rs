@@ -116,7 +116,7 @@ impl<'a> Operator<'a> for CallValueDefaultShadow {
         // `let _ = $expr` statement to guarantee the same callee resolution.
         let scope = f_hir.owner_id.def_id.to_def_id();
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        let Some(expr_ty_ast) = ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, expr_ty, opaque_ty_handling, f_hir.owner_id.to_def_id()) else { return Mutations::none(); };
+        let Some(expr_ty_ast) = ty::print::ty_ast(tcx, crate_res, def_res, Some(scope), def, expr_ty, opaque_ty_handling, f_hir.owner_id.to_def_id()) else { return Mutations::none(); };
 
         // Default::default()
         let default = ast::mk::expr_call_path(def, path::default(def), thin_vec![]);

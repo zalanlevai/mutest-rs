@@ -123,7 +123,7 @@ impl<'a> Operator<'a> for ArgDefaultShadow {
             } else {
                 let scope = f_hir.owner_id.def_id.to_def_id();
                 let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-                ty::ast_repr(tcx, crate_res, def_res, Some(scope), def, param_ty, opaque_ty_handling, f_hir.owner_id.to_def_id())
+                ty::print::ty_ast(tcx, crate_res, def_res, Some(scope), def, param_ty, opaque_ty_handling, f_hir.owner_id.to_def_id())
             }) else { continue; };
 
             // Default::default();
