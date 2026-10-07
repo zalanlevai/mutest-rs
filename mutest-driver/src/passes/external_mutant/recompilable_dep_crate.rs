@@ -23,7 +23,7 @@ pub fn compile_recompilable_dep_crate(compiler_config: &CompilerConfig, rustc_in
     //       during analysis regardless of final optimization level.
     compiler_config.opts.optimize = OptLevel::No;
     // NOTE: We must disable MIR optimizations to disable inlining of function calls,
-    //       which is necessary to building a complete call graph in all circumstances.
+    //       which is necessary for building a complete call graph in all circumstances.
     //       The MIR generated in this pass is not used for the final compilation anyway.
     compiler_config.opts.unstable_opts.mir_opt_level = Some(0);
     // NOTE: Ensure that the MIR of all items is encoded, regardless of whether they are

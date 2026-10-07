@@ -55,7 +55,7 @@ macro m() {
         }
     }
 
-    // TEST: Avoid writing inferred generics in contexts where it cannot be used (e.g. generic traits in impl headers).
+    // TEST: Avoid writing inferred generics in contexts where they cannot be used (e.g. generic traits in impl headers).
     struct S;
     impl PartialEq for S {
         fn eq(&self, other: &Self) -> bool { true }

@@ -24,8 +24,8 @@ pub fn embed_rustc_invocation(krate: &mut ast::Crate, rustc_invocation: &RustcIn
     };
 
     // pub const RUSTC_ENV_VARS: &str = "KEY\x1Fval\x1EKEY\x1Fval\x1E...";
-    // NOTE: Entries are separated by `\x1E`, and the key and the value of each entry is separated by an `\x1F`.
-    //       This allows for values containing `\x1F`, which is somewhat common amongst Rust tooling
+    // NOTE: Entries are separated by `\x1E`, and the key and the value of each entry are separated by an `\x1F`.
+    //       This allows for values containing `\x1F`, which is somewhat common among Rust tooling
     //       (e.g., `CARGO_ENCODED_RUSTFLAGS`, `CARGO_ENCODED_RUSTDOCFLAGS`, `MUTEST_ENCODED_ARGS`).
     let rustc_env_vars_const = {
         let rustc_env_vars_str = rustc_invocation.env_vars.iter()

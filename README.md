@@ -12,7 +12,7 @@ Generate and analyze runtime-swappable code mutants of Rust programs using a dyn
 
 ## Mutation Operators
 
-Currently, the following list of mutation operators are implemented:
+Currently, the following list of mutation operators is implemented:
 
 | Mutation Operator           | Short Description                                                      |
 | --------------------------- | ---------------------------------------------------------------------- |
@@ -33,7 +33,7 @@ Currently, the following list of mutation operators are implemented:
 | `math_op_mul_div_swap`      | Swap multiplication for division and vice versa.                       |
 | `range_limit_swap`          | Swap limit (inclusivity) of range expression.                          |
 | `relational_op_eq_swap`     | Include or remove the boundary (equality) of relational operator.      |
-| `relational_op_invert`      | Invert relation operator.                                              |
+| `relational_op_invert`      | Invert relational operator.                                              |
 
 For more information, and examples, see [docs/operators.md](docs/operators.md).
 
@@ -82,7 +82,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(mutest)"] }
 
 ### Annotating code with tool attributes
 
-mutest-rs provides [tool attributes](https://doc.rust-lang.org/reference/attributes.html#tool-attributes) that can be used to optionally annotate your code for use with the tool. Note, that these attributes are only available when running `cargo mutest`, so they need to be wrapped in `#[cfg_attr(mutest, <MUTEST_ATTRIBUTE>)]` for regular Cargo commands to run.
+mutest-rs provides [tool attributes](https://doc.rust-lang.org/reference/attributes.html#tool-attributes) that can be used to optionally annotate your code for use with the tool. Note that these attributes are only available when running `cargo mutest`, so they need to be wrapped in `#[cfg_attr(mutest, <MUTEST_ATTRIBUTE>)]` for regular Cargo commands to run.
 
 #### `#[mutest::skip]` (use `#[cfg_attr(mutest, mutest::skip)]`)
 
@@ -104,7 +104,7 @@ This attribute can be applied to
   #[cfg_attr(mutest, mutest::ignore)]
   let buff_len = mem::size_of::<u16>() * 1024;
   ```
-* expressions ([wherever the compiler supports attrbiutes on expressions](https://doc.rust-lang.org/reference/expressions.html#expression-attributes)):
+* expressions ([wherever the compiler supports attributes on expressions](https://doc.rust-lang.org/reference/expressions.html#expression-attributes)):
   ```rs
       #[cfg_attr(mutest, mutest::ignore)]
       Some(body)

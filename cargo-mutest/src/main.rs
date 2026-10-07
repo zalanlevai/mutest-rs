@@ -84,7 +84,7 @@ fn test_strip_arg() {
 }
 
 #[test]
-fn test_strip_arg_value_occurences() {
+fn test_strip_arg_value_occurrences() {
     let mut args = vec!["-Z".to_owned(), "write-json-eval-stream".to_owned()];
     strip_arg_value_occurrences(&mut args, Some("Z"), None, "write-json-eval-stream");
     assert_eq!(&[] as &[String], &args[..]);
@@ -148,7 +148,7 @@ fn cargo_command_base() -> Command {
 fn main() {
     let mut args = env::args().collect::<Vec<_>>();
     // NOTE: We determine whether we are
-    //       invoked through Cargo as a subcommand ('cargo mutest`) or as a standalone command (`cargo-mutest`)
+    //       invoked through Cargo as a subcommand (`cargo mutest`) or as a standalone command (`cargo-mutest`)
     //       based on Cargo's behavior of inserting the subcommand name after the binary path for external subcommands,
     //       see https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands.
     let bin_name = match args.get(1).map(String::as_str) == Some("mutest") {
@@ -532,7 +532,7 @@ fn run_cargo_with_mutest_driver(cargo_invocation: &CargoInvocation, matches: &cl
     if cargo_invocation.explicit_targetings_count == 0 {
         // NOTE: We specifically do not target the following:
         //       * `--bench`/`--benches`: Benchmarks, for two reasons.
-        //         First, the `#[bench]` attribute is currently a nigthly-only feature.
+        //         First, the `#[bench]` attribute is currently a nightly-only feature.
         //         Second, the semantics of running benchmarks under mutation testing
         //         are not fully clear.
         //       * `--doc`: Documentation tests, as they require a completely different

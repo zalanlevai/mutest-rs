@@ -7,7 +7,7 @@ use serde::{Serialize, Deserialize};
 pub struct TimingsInfo {
     /// Total time it took to analyze the crate, generate mutations, and compile the binary.
     pub total_duration: Duration,
-    /// Total time it took to analyze the crate, and generation mutations.
+    /// Total time it took to analyze the crate, and generate mutations.
     pub analysis_duration: Duration,
     /// Time it took to discover the crate's tests.
     pub test_discovery_duration: Duration,

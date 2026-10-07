@@ -14,7 +14,7 @@ pub macro top_level_item_in_macro_ns() {}
 
 macro m() {
     // TEST: Top-level, individual item imports.
-    mod test_top_level_invidiual_item_imports {
+    mod test_top_level_individual_item_imports {
         use inner::InTypeNs;
         use inner::IN_VALUE_NS;
         use inner::in_macro_ns;
@@ -310,7 +310,7 @@ macro m() {
         use ::dummy_crate::{foo as foo_renamed, bar as bar_renamed};
     }
 
-    // TEST: Reexport of local macro_rules macro item.
+    // TEST: Re-export of local macro_rules macro item.
     mod test_macro_rules_reexports {
         macro_rules! cstr { () => {}; }
         pub(crate) use cstr;

@@ -1,7 +1,7 @@
 //@ build
 //@ stderr: empty
 
-//! The test macro `nested_macro_to_flatten_clousre` relies on macro hygiene
+//! The test macro `nested_macro_to_flatten_closure` relies on macro hygiene
 //! to get a different closure parameter ident on each recursion level
 //! in a nested invocation to build up a multi-parameter closure to
 //! flatten an N-ary tuple.
@@ -23,11 +23,11 @@ macro_rules! noop {
 mod tests {
     #[test]
     fn test_flatten_multizip() {
-        macro nested_macro_to_flatten_clousre {
+        macro nested_macro_to_flatten_closure {
             ($p:pat => $tup:expr) => { |$p| $tup },
             // The `b` identifier should be a different identifier on each recursion level because of hygiene.
             ($p:pat => ($($tup:tt)*), $_iter:expr $(, $tail:expr)*) => {
-                nested_macro_to_flatten_clousre!(($p, b) => ($($tup)*, b) $(, $tail)*)
+                nested_macro_to_flatten_closure!(($p, b) => ($($tup)*, b) $(, $tail)*)
             },
         }
 
@@ -36,7 +36,7 @@ mod tests {
             ($first:expr $(, $rest:expr )* $(,)*) => {
                 zip_macro!($first)
                     $(.zip($rest))*
-                    .map(nested_macro_to_flatten_clousre!(a => (a) $(, $rest)*))
+                    .map(nested_macro_to_flatten_closure!(a => (a) $(, $rest)*))
             },
         }
 
@@ -65,7 +65,7 @@ mod tests {
             ($first:expr $(, $rest:expr )* $(,)*) => {
                 zip_macro_complex!($first)
                     $(.zip($rest))*
-                    .map(nested_macro_to_flatten_clousre!(a => (a) $(, $rest)*))
+                    .map(nested_macro_to_flatten_closure!(a => (a) $(, $rest)*))
             },
         }
 

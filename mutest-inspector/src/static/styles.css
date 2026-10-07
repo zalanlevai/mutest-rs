@@ -630,7 +630,7 @@ section.text {
     .mutation {
         &:has(+ .line) {
             /* Gap after each group. */
-            /* NOTE: This needs to be a before pseudo-element because the table layout does not support margins. */
+            /* NOTE: This needs to be an after pseudo-element because the table layout does not support margins. */
             &::after {
                 content: "";
                 display: table-row;

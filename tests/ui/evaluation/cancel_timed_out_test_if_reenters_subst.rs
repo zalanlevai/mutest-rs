@@ -12,7 +12,7 @@
 //! we instead inject "cancellation points" into the generated program.
 //!
 //! This test specficically tests the most important cancellation point for correctness:
-//! triggered by a mutated test thread re-entering any active code subsitution point
+//! triggered by a mutated test thread re-entering any active code substitution point
 //! within the program.
 //! This is important, because without this forced cancellation, such a lingering test thread
 //! would continue execution of other mutated code, leading to undefined behavior
@@ -33,7 +33,7 @@ fn needs_cancellation() {
             // NOTE: Without cancellation, the moment the second mutation is enabled,
             //       this first, lingering mutation test thread would have its behavior changed back
             //       to that of the original code, meaning that execution would enter this block.
-            //       To signify this occurance using something we can assert, we use a global variable
+            //       To signify this occurrence using something we can assert, we use a global variable
             //       to signal to the assertion on the test thread of the second, synthetic mutation.
             #[mutest::ignore]
             FIRST_MUTATION_NOT_CANCELLED_AFTER_REENTRY.store(true, atomic::Ordering::SeqCst);

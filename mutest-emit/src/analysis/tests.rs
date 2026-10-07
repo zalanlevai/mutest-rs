@@ -175,11 +175,11 @@ fn extract_and_mark_expanded_embedded_tests(sess: &Session, def_res: &ast_loweri
         let test_symbol = item;
         let item_export_name_value_str = test_symbol.attrs.iter().find_map(|attr| attr.has_name(sym::export_name).then_some(attr.value_str()).flatten()).expect("test symbol missing metadata");
 
-        let test_entry_point = items.get(i - 1).expect("test symbol not preceeded by test entry point");
+        let test_entry_point = items.get(i - 1).expect("test symbol not preceded by test entry point");
         let Some(test_entry_point_ident) = test_entry_point.kind.ident() else { panic!("encountered test entry point without ident"); };
         if !test_entry_point_ident.name.as_str().ends_with("_entrypoint") { panic!("test entry point has unexpected ident"); };
 
-        let test_item = items.get(i - 2).expect("test entry point not preceeded by test item");
+        let test_item = items.get(i - 2).expect("test entry point not preceded by test item");
         let Some(def_id) = def_res.node_id_to_def_id.get(&test_item.id).copied() else { unreachable!(); };
         let Some(ident) = test_item.kind.ident() else { panic!("encountered test item without ident"); };
 

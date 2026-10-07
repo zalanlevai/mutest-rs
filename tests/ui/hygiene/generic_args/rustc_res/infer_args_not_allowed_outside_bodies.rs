@@ -17,7 +17,7 @@ impl Trait<()> for u8 {
 // TEST: Function return type.
 fn ret_ty() -> <u8 as Trait<_>>::Assoc { 0 }
 
-// TEST: Funtion parameter type.
+// TEST: Function parameter type.
 fn param_ty(_: <u8 as Trait<_>>::Assoc) {}
 
 // TEST: Where clause.

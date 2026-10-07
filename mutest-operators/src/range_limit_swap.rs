@@ -56,7 +56,7 @@ impl<'a> Operator<'a> for RangeLimitSwap {
         //       types are different for each kind of range expression.
         //
         //       Instead, we increment/decrement the end bound of the range to emulate the same
-        //       behaviour for the common cases (integers), where this is possible.
+        //       behavior for the common cases (integers), where this is possible.
         //
         //       Eventually, we will be able to do this instead:
         //       ```

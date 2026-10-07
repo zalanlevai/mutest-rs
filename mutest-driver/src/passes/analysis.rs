@@ -121,7 +121,7 @@ pub fn run(config: &mut Config) -> CompilerResult<Option<AnalysisPassResult>> {
     //       during analysis regardless of final optimization level.
     compiler_config.opts.optimize = OptLevel::No;
     // NOTE: We must disable MIR optimizations to disable inlining of function calls,
-    //       which is necessary to building a complete call graph in all circumstances.
+    //       which is necessary for building a complete call graph in all circumstances.
     //       The MIR generated in this pass is never used for any compilation anyway.
     compiler_config.opts.unstable_opts.mir_opt_level = Some(0);
 

@@ -138,7 +138,7 @@ pub fn base_compiler_config_from_parts(compiler_config: &CompilerConfig, invocat
     compiler_config.extra_symbols = mutest_emit::codegen::symbols::sym::EXTRA_SYMBOLS.to_vec();
 
     compiler_config.override_queries = Some(|_sess, providers| {
-        // FIXME: Remove once https://github.com/rust-lang/rust/pull/159881 is accepted into usptream.
+        // FIXME: Remove once https://github.com/rust-lang/rust/pull/159881 is accepted into upstream.
         providers.queries.visible_parent_map = |tcx, ()| mutest_emit::analysis::res::visible_parent_map(tcx);
     });
 

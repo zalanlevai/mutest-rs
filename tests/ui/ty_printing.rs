@@ -17,7 +17,7 @@ enum AssertMutated<T: ?Sized> {
 }
 
 // The automatic derives for Debug, PartialEq, and Eq restrict their impls
-// based on whether T implements the respective trait, s
+// based on whether T implements the respective trait, so
 // we implement these traits ourselves.
 impl<T: ?Sized> Debug for AssertMutated<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {

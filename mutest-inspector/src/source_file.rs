@@ -25,8 +25,8 @@ pub struct SourceFile {
 pub fn nudge_span_prefix_lines(lines: &IdxSlice<LineNo, String>, span: &Span) -> usize {
     let start_line_no = LineNo(span.begin.0 as u32);
 
-    // NOTE: If span is preceeded by anything else in the same line, then we do not add prefix lines to it,
-    //       as they might pertain to the preceeding tokens.
+    // NOTE: If span is preceded by anything else in the same line, then we do not add prefix lines to it,
+    //       as they might pertain to the preceding tokens.
     // FIXME: This heuristic does not work for oddly formatted code, such as `#[test]\n#[ignore] fn test()`.
     if !lines[start_line_no].chars().take(span.begin.1 - 1).all(char::is_whitespace) { return 0; }
 
@@ -149,45 +149,45 @@ mod tests {
 
     #[test]
     fn test_nudge_span_prefix_lines() {
-        // No preceeding lines.
+        // No preceding lines.
         let mut lines = IdxVec::new();
         lines.push("    fn test() {".to_owned());
         assert_eq!(0, nudge_span_prefix_lines(&lines, &dummy_span(1, 5, 1, 12)));
 
-        // No preceeding attributes.
+        // No preceding attributes.
         let mut lines = IdxVec::new();
         lines.push("    const OTHER: () = ();".to_owned());
         lines.push("".to_owned());
         lines.push("    fn test() {".to_owned());
         assert_eq!(0, nudge_span_prefix_lines(&lines, &dummy_span(3, 5, 3, 12)));
 
-        // Span is preceeded by other tokens on the same line.
+        // Span is preceded by other tokens on the same line.
         let mut lines = IdxVec::new();
         lines.push("    #[test]".to_owned());
         lines.push("    fn test() { let _ = || ();".to_owned());
         assert_eq!(0, nudge_span_prefix_lines(&lines, &dummy_span(2, 25, 2, 27)));
 
-        // Single preceeding attribute.
+        // Single preceding attribute.
         let mut lines = IdxVec::new();
         lines.push("    #[test]".to_owned());
         lines.push("    fn test() {".to_owned());
         assert_eq!(1, nudge_span_prefix_lines(&lines, &dummy_span(2, 5, 2, 12)));
 
-        // Multiple preceeding attributes.
+        // Multiple preceding attributes.
         let mut lines = IdxVec::new();
         lines.push("    #[test]".to_owned());
         lines.push("    #[ignore]".to_owned());
         lines.push("    fn test() {".to_owned());
         assert_eq!(2, nudge_span_prefix_lines(&lines, &dummy_span(3, 5, 3, 12)));
 
-        // Preceeding attribute applies to the parent, not the node it preceeds.
+        // Preceding attribute applies to the parent, not the node it precedes.
         let mut lines = IdxVec::new();
         lines.push("    #![cfg(test)]".to_owned());
         lines.push("    #[test]".to_owned());
         lines.push("    fn test() {".to_owned());
         assert_eq!(1, nudge_span_prefix_lines(&lines, &dummy_span(3, 5, 3, 12)));
 
-        // Span is preceeded by attributes, comments, and doc comments.
+        // Span is preceded by attributes, comments, and doc comments.
         // NOTE: Comments and doc comments are ignored because they can sometimes span a lot of lines.
         let mut lines = IdxVec::new();
         lines.push("".to_owned());

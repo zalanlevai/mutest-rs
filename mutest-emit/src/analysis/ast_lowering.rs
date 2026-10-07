@@ -1126,7 +1126,7 @@ pub mod visit {
             //       To prevent this, `rustc_session::config::UnstableOptions::flatten_format_args`
             //       must be set to `false` in `config.opts.unstable_opts.flatten_format_args`.
             (ast::ExprKind::FormatArgs(_format_args_ast), hir::ExprKind::Call(_, _args_hir)) => {
-                // NOTE: This is only the case when the `format_args` has no arguments; therefore the is nothing to visit.
+                // NOTE: This is only the case when the `format_args` has no arguments; therefore there is nothing to visit.
             }
             (ast::ExprKind::FormatArgs(format_args_ast), hir::ExprKind::Block(block_hir, _)) => {
                 if let [format_arg_exprs_stmt_hir, _] = block_hir.stmts {
@@ -2198,7 +2198,7 @@ impl<'ast, 'tcx, 'op> ast::visit::Visitor<'ast> for BodyResValidator<'tcx, 'op> 
         self.check_node_id("anonymous const", anon_const.id, anon_const.value.span);
 
         match &anon_const.value.kind {
-            // NOTE: An anon const path expr is often lowered directly into a
+            // NOTE: An anon const path expr is often lowered directly into
             //       an HIR const arg with `ConstArgKind::Path`, meaning that
             //       there is no corresponding HIR id for the anon const's expr.
             //       Because of this, we skip checking the path expr's id, and

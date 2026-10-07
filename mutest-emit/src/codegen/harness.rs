@@ -13,7 +13,7 @@ use crate::codegen::mutation::{Mut, MutationBatch, MutationConflictGraph, Mutati
 use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, kw, path, sym};
 use crate::codegen::symbols::hygiene::AstPass;
 
-/// Generate an opaque identifier representing a crate definintion
+/// Generate an opaque identifier representing a crate definition
 /// that is stable across crate (and compilation session) boundaries.
 /// This means that the generated code can rely on equivalence between
 /// two opaque stable def ids to determine references to the same crate definition.

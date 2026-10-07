@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn test_have_common_detecions_and_this_has_additional_detections_subsumes() {
+    fn test_have_common_detections_and_this_has_additional_detections_subsumes() {
         assert_eq!(
             compute_mutation_subsumption(
                 [Some(MutationTestResult::Detected), Some(MutationTestResult::Detected), None],
@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn test_have_common_detections_and_other_has_additonal_detecions_subsumed() {
+    fn test_have_common_detections_and_other_has_additonal_detections_subsumed() {
         assert_eq!(
             compute_mutation_subsumption(
                 [None, Some(MutationTestResult::Undetected), Some(MutationTestResult::Detected)],

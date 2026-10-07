@@ -247,7 +247,7 @@ pub fn command(name: &'static str) -> clap::Command {
         .arg(clap::arg!(-d --depth [DEPTH] "Callees of each test function are mutated up to the specified depth.").default_value("3").value_parser(clap::value_parser!(usize)))
         .arg(clap::arg!(--"filter-mutations" [MUTATION_FILTERS]).value_delimiter(',')
             .help("\
-                Filter mutations to only the ones specified by any of the filters. Multiple may be specified, seperated by commas. The following filters are available:\n\
+                Filter mutations to only the ones specified by any of the filters. Multiple may be specified, separated by commas. The following filters are available:\n\
                 * `def:<ITEM_PATH_TO_DEF>`: Only mutate the specified definition. The full canonical item path must be specified (e.g., `def:foo::bar::baz`, `def:Struct::function`, `def:<Struct as Trait>::function`).\n\
                 * `file:<PATH_TO_FILE>[:<FILE_REGION_FILTER>]`: Only mutate the specified file, or the specified part of the file (e.g., `file:src/lib.rs`, `file:src/lib.rs:21`, `file:src/lib.rs:21..25`, `file:src/lib.rs:21:37..25:9`). \
                   `FILE_REGION_FILTER` may be either of the form `<LINE>[..<END_LINE>]` designating one line or a range of lines, or `<START_LINE>:<START_COL>..<END_LINE>:<END_COL>[!]` designating a span. \
