@@ -595,7 +595,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
 
     fn try_sanitize_ty(&self, ty: Ty<'tcx>, binding_item_def_id: hir::DefId, span: Span) -> Option<Box<ast::Ty>> {
         let opaque_ty_handling = ty::print::OpaqueTyHandling::Infer;
-        ty::ast_repr(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, opaque_ty_handling, binding_item_def_id)
+        ty::print::ty_ast(self.tcx, self.crate_res, self.def_res, self.current_scope, span, ty, opaque_ty_handling, binding_item_def_id)
     }
 
     #[inline]

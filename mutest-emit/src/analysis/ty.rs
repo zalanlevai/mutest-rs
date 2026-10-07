@@ -40,8 +40,6 @@ impl SpanFromGenericsExt for ty::ParamConst {
     }
 }
 
-pub use print::ast_repr;
-
 pub mod print {
     use std::iter;
 
@@ -58,30 +56,6 @@ pub mod print {
     use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
     use super::SpanFromGenericsExt;
-
-    pub trait Printer<'tcx> {
-        type Error;
-
-        type Type;
-        type DynExistential;
-        type Const;
-        type Region;
-        type Path;
-
-        fn path_generic_args(
-            &mut self,
-            path: Self::Path,
-            args: &[ty::GenericArg<'tcx>],
-            assoc_constraints: impl Iterator<Item = ty::ExistentialProjection<'tcx>>,
-        ) -> Result<Self::Path, Self::Error>;
-
-        fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error>;
-
-        fn print_region(&mut self, region: ty::Region<'tcx>) -> Result<Self::Region, Self::Error>;
-        fn print_const(&mut self, ct: ty::Const<'tcx>) -> Result<Self::Const, Self::Error>;
-        fn print_dyn_existential(&mut self, predicates: &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>>) -> Result<Self::DynExistential, Self::Error>;
-        fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error>;
-    }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum OpaqueTyHandling {
@@ -101,27 +75,19 @@ pub mod print {
         binding_item_def_id: hir::DefId,
     }
 
-    impl<'tcx, 'op> Printer<'tcx> for AstTyPrinter<'tcx, 'op> {
-        type Error = String;
-
-        type Type = Box<ast::Ty>;
-        type DynExistential = Box<ast::Ty>;
-        type Const = ast::AnonConst;
-        type Region = Option<ast::Lifetime>;
-        type Path = ast::Path;
-
+    impl<'tcx, 'op> AstTyPrinter<'tcx, 'op> {
         fn path_generic_args(
             &mut self,
-            mut path: Self::Path,
+            mut path: ast::Path,
             args: &[ty::GenericArg<'tcx>],
             assoc_constraints: impl Iterator<Item = ty::ExistentialProjection<'tcx>>,
-        ) -> Result<Self::Path, Self::Error> {
+        ) -> Result<ast::Path, String> {
             let sp = self.sp;
 
             let mut errors = vec![];
 
             let mut args_ast = args.iter()
-                .map(|arg: &ty::GenericArg<'tcx>| -> Result<Option<ast::AngleBracketedArg>, Self::Error> {
+                .map(|arg: &ty::GenericArg<'tcx>| -> Result<Option<ast::AngleBracketedArg>, String> {
                     match arg.kind() {
                         ty::GenericArgKind::Type(ty) => {
                             let ty_ast = match self.print_ty(ty) {
@@ -153,7 +119,7 @@ pub mod print {
                 .collect::<ThinVec<_>>();
 
             assoc_constraints
-                .map(|assoc_constraint| -> Result<_, Self::Error> {
+                .map(|assoc_constraint| -> Result<_, String> {
                     let name = self.tcx.associated_item(assoc_constraint.def_id).name();
 
                     let term_ast = match assoc_constraint.term.kind() {
@@ -190,7 +156,7 @@ pub mod print {
             Ok(path)
         }
 
-        fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<Self::Path, Self::Error> {
+        fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<ast::Path, String> {
             let Ok(def_path) = res::visible_def_path(self.tcx, self.crate_res, res::DefPathRequestKind::Def(def_id), self.scope, None, self.sp) else {
                 return Err(format!("encountered definition `{}` with no visible path", self.tcx.def_path_str(def_id)));
             };
@@ -222,7 +188,7 @@ pub mod print {
             Ok(path)
         }
 
-        fn print_region(&mut self, region: ty::Region<'tcx>) -> Result<Self::Region, Self::Error> {
+        fn print_region(&mut self, region: ty::Region<'tcx>) -> Result<Option<ast::Lifetime>, String> {
             let sp = self.sp;
 
             match region.kind() {
@@ -280,7 +246,7 @@ pub mod print {
             }
         }
 
-        fn print_const(&mut self, ct: ty::Const<'tcx>) -> Result<Self::Const, Self::Error> {
+        fn print_const(&mut self, ct: ty::Const<'tcx>) -> Result<ast::AnonConst, String> {
             fn eval_const<'tcx>(tcx: TyCtxt<'tcx>, ct: ty::Const<'tcx>, sp: Span) -> Result<ast::AnonConst, String> {
                 let infcx = tcx.infer_ctxt().build(ty::TypingMode::PostAnalysis);
                 let value = rustc_trait_selection::traits::evaluate_const(&infcx, ct, ty::ParamEnv::empty()).try_to_value().ok_or_else(|| "encountered invalid const".to_owned())?;
@@ -460,10 +426,10 @@ pub mod print {
             }
         }
 
-        fn print_dyn_existential(&mut self, predicates: &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>>) -> Result<Self::DynExistential, Self::Error> {
+        fn print_dyn_existential(&mut self, predicates: &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>>) -> Result<Box<ast::Ty>, String> {
             let sp = self.sp;
 
-            let principal = predicates.principal().map_or(Ok(None), |principal| -> Result<_, Self::Error> {
+            let principal = predicates.principal().map_or(Ok(None), |principal| -> Result<_, String> {
                 let principal = principal.skip_binder();
 
                 let def_path = self.print_def_path(principal.def_id, &[])?;
@@ -477,7 +443,7 @@ pub mod print {
                     let output_ty = projection.skip_binder().term.as_type();
 
                     let input_tys_ast = input_tys.iter().map(|ty| self.print_ty(ty)).try_collect()?;
-                    let output_ty_ast = output_ty.map_or(Result::<_, Self::Error>::Ok(None), |ty| Ok(Some(self.print_ty(ty)?)))?;
+                    let output_ty_ast = output_ty.map_or(Result::<_, String>::Ok(None), |ty| Ok(Some(self.print_ty(ty)?)))?;
                     let args = ast::mk::parenthesized_args(sp, input_tys_ast, output_ty_ast);
                     let path = ast::mk::pathx_raw(sp, def_path, vec![], Some(args));
                     return Ok(Some(ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, path)));
@@ -493,7 +459,7 @@ pub mod print {
             })?;
 
             let auto_traits = predicates.auto_traits()
-                .map(|def_id| -> Result<_, Self::Error> {
+                .map(|def_id| -> Result<_, String> {
                     let def_path = self.print_def_path(def_id, &[])?;
                     Ok(ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, def_path))
                 })
@@ -506,7 +472,7 @@ pub mod print {
             Ok(ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn)))
         }
 
-        fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error> {
+        pub fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Box<ast::Ty>, String> {
             let sp = self.sp;
 
             match *ty.kind() {
@@ -670,7 +636,7 @@ pub mod print {
         }
     }
 
-    pub fn ast_repr<'tcx>(
+    pub fn ty_ast<'tcx>(
         tcx: TyCtxt<'tcx>,
         crate_res: &res::CrateResolutions<'tcx>,
         def_res: &ast_lowering::DefResolutions,
