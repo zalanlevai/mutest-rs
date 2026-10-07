@@ -130,7 +130,7 @@ fn main() {
     }
 
     // Embed absolute paths to the compiled artifacts and dependency directories,
-    // which are used as fallback search paths if the dependencies are not embedded into binary
+    // which are used as fallback search paths if the dependencies are not embedded into the binary
     // (i.e. for local debug builds).
     let artifacts_dir_absolute_path = path::absolute(workspace_out_dir_path).expect(&format!("cannot get absolute path for `{}`", workspace_out_dir_path.display()));
     println!("cargo:rustc-env=COMPILETIME_ARTIFACTS_DIR={}", artifacts_dir_absolute_path.display());

@@ -652,7 +652,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
         }
     }
 
-    let mut alread_recorded_callers: FxHashSet<Callee<'tcx>> = Default::default();
+    let mut already_recorded_callers: FxHashSet<Callee<'tcx>> = Default::default();
 
     for distance in 0.. {
         let mut newly_found_callees: FxHashSet<Callee<'tcx>> = Default::default();
@@ -696,7 +696,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
             // `const` functions, like other `const` scopes, cannot be mutated.
             if tcx.is_const_fn(caller.def_id) { continue; }
 
-            if alread_recorded_callers.contains(&caller) { continue; }
+            if already_recorded_callers.contains(&caller) { continue; }
 
             if !tcx.is_mir_available(caller.def_id) { continue; }
             let body_mir = tcx.instance_mir(ty::InstanceKind::Item(caller.def_id));
@@ -781,7 +781,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
             callers_to_be_recorded.insert(caller);
         }
 
-        alread_recorded_callers.extend(callers_to_be_recorded);
+        already_recorded_callers.extend(callers_to_be_recorded);
 
         previously_found_callees.extend(newly_found_callees);
     }
@@ -899,7 +899,7 @@ pub fn reachable_fns<'ast, 'tcx, 'ent>(
         }
 
         for &call in callee_lookup_cache.callees_of_nested_caller(caller) {
-            // We have encontered a recursion point along this call trace; end the search along this trace.
+            // We have encountered a recursion point along this call trace; end the search along this trace.
             if call_trace.nested_calls.iter().any(|callee_in_trace| call.callee == *callee_in_trace) { continue; }
 
             call_trace.nested_calls.push(call.callee);

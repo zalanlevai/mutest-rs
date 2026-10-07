@@ -302,7 +302,7 @@ pub fn update_overlapping_groups(groups_in_files: &mut HashMap<PathBuf, Vec<Over
             }
         }
 
-        // Did not find previous overlapping or proceeding group; create new one at the end.
+        // Did not find previous overlapping or following group; create new one at the end.
         groups_in_file.push(OverlappingGroupOfMutations {
             kind: subst_group_kind,
             start_line: subst_start_line,

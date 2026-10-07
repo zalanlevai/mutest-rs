@@ -1,4 +1,4 @@
-//! Contiguous collections, indexed by specific [`Idx`] associted index types.
+//! Contiguous collections, indexed by specific [`Idx`] associated index types.
 //!
 //! The `Idx*` data structures are based on rustc's own [`rustc_index::Index*`][rustc_index] types.
 //! The primary difference is that these `Idx*` versions have support for

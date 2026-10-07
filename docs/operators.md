@@ -5,7 +5,7 @@ mutest-rs relies on a set of mutation operators to produce mutations for certain
 Following is the list of mutation operators currently implemented in mutest-rs.
 
 > [!NOTE]
-> Replacements are illustrative and are meant to show how code behaviour effectively changes with each mutation.
+> Replacements are illustrative and are meant to show how code behavior effectively changes with each mutation.
 
 ## `arg_default_shadow`
 
@@ -242,7 +242,7 @@ if self.len() < other.len() {
 
 ## `relational_op_invert`
 
-Completely invert relation operators.
+Completely invert relational operators.
 
 Replaces
 ```rs

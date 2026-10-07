@@ -2,7 +2,7 @@
 //@ stderr: empty
 //@ edition: 2021
 
-//! Since we are performing monomorphising call graph construction after type checking,
+//! Since we are performing monomorphizing call graph construction after type checking,
 //! we do so by querying monomorphic obligations.
 //! To ensure that default trait implementations are revealed by resolution,
 //! we must use parameter environments which reveal all definitions.

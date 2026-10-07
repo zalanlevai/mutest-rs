@@ -60,8 +60,8 @@ pub struct EntryPoint {
     /// The corresponding definition.
     pub def_id: DefId,
 
-    /// Calls made by the entry point, grouped by the calles it is calling,
-    /// with associated instance data for each call occurance.
+    /// Calls made by the entry point, grouped by the callees it is calling,
+    /// with associated instance data for each call occurrence.
     pub calls: HashMap<CalleeId, SmallVec<[CallInstance; 1]>>,
 }
 
@@ -90,8 +90,8 @@ pub struct Callee {
     /// Definition path with generic arguments applied.
     pub path_with_generic_args: String,
 
-    /// Calls made by the callee, grouped by the calles it is calling,
-    /// with associated instance data for each call occurance.
+    /// Calls made by the callee, grouped by the callees it is calling,
+    /// with associated instance data for each call occurrence.
     pub calls: HashMap<CalleeId, SmallVec<[CallInstance; 1]>>,
 }
 
@@ -100,7 +100,7 @@ pub struct Callee {
 pub struct CallInstance {
     /// Span of the call's location.
     pub span: Option<Span>,
-    /// Safety of the scope in which the call is in.
+    /// Safety of the scope in which the call is.
     pub safety: Safety,
 }
 

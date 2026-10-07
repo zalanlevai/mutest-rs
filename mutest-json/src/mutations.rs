@@ -24,11 +24,11 @@ pub struct MutationStats {
     /// Number of tainted mutations generated.
     pub tainted_mutations_count: usize,
 
-    /// Number of mutation conflicts amongst the mutations.
+    /// Number of mutation conflicts among the mutations.
     pub mutation_conflicts_count: usize,
-    /// Number of mutation conflicts amongst the mutations, excluding unsafe mutations.
+    /// Number of mutation conflicts among the mutations, excluding unsafe mutations.
     pub mutation_conflicts_count_excluding_unsafe: usize,
-    /// Number of mutation compatibilities amongst the mutations.
+    /// Number of mutation compatibilities among the mutations.
     pub mutation_compatibilities_count: usize,
 
     /// Number of batched mutations generated.
@@ -75,7 +75,7 @@ impl Idx for MutationId {
 }
 
 /// The location of a mutation's code substitution, describing
-/// where in the original code, and how must the code substiution be applied.
+/// where in the original code, and how the code substitution must be applied.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "kind", content = "span")]
@@ -170,7 +170,7 @@ pub struct EntryPointAssociation {
     pub tainted_call_path: bool,
 }
 
-/// Reachable, mutable definition in which mutation operators were invoked in
+/// Reachable, mutable definition in which mutation operators were invoked
 /// to generate program mutations.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Target {
@@ -183,7 +183,7 @@ pub struct Target {
     pub safety: MutationSafety,
     /// The way in which the target is reachable from entry points.
     pub reachability: TargetReachability,
-    /// Entry points (other than self) from which the target is reachable from, and
+    /// Entry points (other than self) from which the target is reachable, and
     /// data associated with each entry point.
     pub reachable_from: HashMap<String, EntryPointAssociation>,
 }

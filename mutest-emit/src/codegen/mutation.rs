@@ -566,7 +566,7 @@ impl<'tcx, 'ast, 'op, 'trg, 'm> ast::visit::Visitor<'ast> for MutationCollector<
                 }
             }
             // The `else` branch of an `if` conditional must be either another `if` conditional or a block, so we do
-            // not mutate `else` blocks directly, instead visiting its contents.
+            // not mutate `else` blocks directly, instead visiting their contents.
             ast::ExprKind::If(_, _, _) => {
                 fn inner_visit_if<'ast, T: ast::visit::Visitor<'ast, Result = ()>>(visitor: &mut T, expr: &'ast ast::Expr) {
                     let ast::ExprKind::If(cond, then, els) = &expr.kind else { unreachable!() };
@@ -1042,7 +1042,7 @@ pub fn optimize_batches_simulated_annealing<'trg, 'm>(
         }
     }
 
-    fn random_neighbour_state<'trg, 'm>(
+    fn random_neighbor_state<'trg, 'm>(
         mutation_batches: &mut Vec<MutationBatch<'trg, 'm>>,
         mutation_conflict_graph: &MutationConflictGraph<'m>,
         batch_max_mutations_count: usize,
@@ -1092,7 +1092,7 @@ pub fn optimize_batches_simulated_annealing<'trg, 'm>(
 
         let curr_energy = energy(mutation_batches, None);
 
-        let state_change = random_neighbour_state(mutation_batches, mutation_conflict_graph, batch_max_mutations_count, rng);
+        let state_change = random_neighbor_state(mutation_batches, mutation_conflict_graph, batch_max_mutations_count, rng);
         let next_energy = energy(mutation_batches, Some(state_change));
         if acceptance_probability(curr_energy, next_energy, temp) >= rng.random_range(0_f64..1_f64) {
             state_change.apply(mutation_batches);

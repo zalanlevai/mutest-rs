@@ -142,7 +142,7 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     /// Keep track of the current type checking context for type-dependent name resolution.
     current_typeck_ctx: Option<&'tcx ty::TypeckResults<'tcx>>,
 
-    /// In macros 2.0 scopes, relative paths get resolved in the scope of the macro definining module,
+    /// In macros 2.0 scopes, relative paths get resolved in the scope of the macro defining module,
     /// but only at the top-level within the macro expansion.
     /// HACK: We use a marker to determine whether we are in a macros 2.0 scope, but not in a module nested inside.
     /// NOTE: This is because rustc currently does not accept (and correctly resolve) relative paths
@@ -156,7 +156,7 @@ struct MacroExpansionSanitizer<'tcx, 'op> {
     /// This is unset by `visit_vis`.
     next_vis_owner: Option<ast::NodeId>,
     /// We do not want to sanitize some idents (mostly temporarily) in the AST.
-    /// During the visit we keep track of these so that they can be exluded from sanitization.
+    /// During the visit we keep track of these so that they can be excluded from sanitization.
     protected_idents: FxHashSet<Ident>,
 
     /// Keep track of the seen expansions.
@@ -902,7 +902,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                         // `T:Assoc` items cannot be directly resolved to any one impl assoc item.
                                         Some(hir::Res::Def(hir::DefKind::TyParam, _)) => {}
 
-                                        // Qualifed path with explicit trait qualification.
+                                        // Qualified path with explicit trait qualification.
                                         Some(hir::Res::Def(hir::DefKind::Trait, _)) => {
                                             let Some(canonical_user_ty) = typeck.user_provided_types().get(node_hir_id) else {
                                                 // NOTE: This only happens if the path is not in a body.
@@ -968,7 +968,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                                     trait_predicate.trait_ref.def_id == assoc_item_trait_def_id
                                                         && trait_predicate.self_ty() == trait_ref.skip_binder().self_ty()
                                                 })
-                                            else { span_bug!(path.span, "cannot find trait predicate related to the trait of associated item `{}`", self.tcx.def_path_str(trait_item_def_id)) };
+                                            else { span_bug!(path.span, "cannot find trait predicate related to the trait of the associated item `{}`", self.tcx.def_path_str(trait_item_def_id)) };
 
                                             let param_env = self.tcx.param_env(impl_def_id);
                                             let infcx = self.tcx.infer_ctxt().build(TypingMode::PostAnalysis);
@@ -1052,7 +1052,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         let Some(&import_def_id) = self.def_res.node_id_to_def_id.get(&import_node_id) else { unreachable!() };
 
         match res {
-            // If the whole import path (besides any glob suffix) points to a module, then the resolution is much more simple,
+            // If the whole import path (besides any glob suffix) points to a module, then the resolution is much simpler,
             // and we can simply sanitize the whole path in one go.
             hir::Res::Def(hir::DefKind::Mod, def_id) => 'arm: {
                 // NOTE: Module re-exports (e.g. `pub use alloc::vec` in `std`) point to the underlying module, but
@@ -1303,7 +1303,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // Dedupe imports based on idents introduced into namespaces.
             .dedup_by(|a, b| {
                 match (a, b) {
-                    // NOTE: Dublicate glob imports of the same module are already invalid before sanitization.
+                    // NOTE: Duplicate glob imports of the same module are already invalid before sanitization.
                     ((_, UseKind::Glob), (_, UseKind::Glob)) => false,
 
                     ((path, UseKind::Single { ident, namespace, .. }), (next_path, UseKind::Single{ ident: next_ident, namespace: next_namespace, .. })) => {
@@ -1844,7 +1844,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
 
         match &mut vis.kind {
             ast::VisibilityKind::Restricted { path, id: _, .. } => {
-                // NOTE: rustc now finalizes (and thus produce partial resolutions) for visibility paths
+                // NOTE: rustc now finalizes (and thus produces partial resolutions) for visibility paths
                 //       only in error cases. See https://github.com/rust-lang/rust/pull/158689.
                 //       The computed visibilities can still be queried however.
                 let ty::Visibility::Restricted(mod_id) = self.tcx.visibility(owner_def_id) else {
@@ -1955,7 +1955,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
         }
     }
 
-    // NOTE: While `#[allow_internal_unstable($features)] features from macro expansions are rendered above,
+    // NOTE: While `#[allow_internal_unstable($features)]` features from macro expansions are rendered above,
     //       we still have to manually write out some features that are required by
     //       some of the paths we generate during path sanitization.
     macro ensure_attrs($(#![$meta:ident($kind:ident)])+) {
@@ -1978,8 +1978,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
         //       reveals the allocator API, which is currently behind the `allocator_api` feature.
         //       See https://github.com/rust-lang/rust/issues/32838.
         #![feature(allocator_api)]
-        // NOTE: Sanization of paths to items re-exported from the `core::io` module
-        //       reveal the module, which is currently behind the `core_io` feature.
+        // NOTE: Sanitization of paths to items re-exported from the `core::io` module
+        //       reveals the module, which is currently behind the `core_io` feature.
         //       See https://github.com/rust-lang/rust/issues/154046.
         #![feature(core_io)]
         // NOTE: Sanitization of paths causes paths to the AtomicT types to resolve to Atomic<T>,
@@ -1991,8 +1991,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     // NOTE: Some features are only valid if the alloc crate is loaded.
     if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::alloc) {
         ensure_attrs! {
-            // NOTE: Sanization of paths to items re-exported from the `alloc::io` module
-            //       reveal the module, which is currently behind the `alloc_io` feature.
+            // NOTE: Sanitization of paths to items re-exported from the `alloc::io` module
+            //       reveals the module, which is currently behind the `alloc_io` feature.
             //       See https://github.com/rust-lang/rust/issues/154046.
             #![feature(alloc_io)]
         }
@@ -2002,7 +2002,7 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     if tcx.used_crates(()).iter().any(|&cnum| tcx.crate_name(cnum) == sym::std) {
         ensure_attrs! {
             // NOTE: Sanitization of paths to `std::mpsc` items re-exported from the `std::mpmc` module
-            //       reveal the module, which is currently behind the `mpmc_channel` feature.
+            //       reveals the module, which is currently behind the `mpmc_channel` feature.
             //       See https://github.com/rust-lang/rust/issues/126840.
             #![feature(mpmc_channel)]
         }

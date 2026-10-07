@@ -121,7 +121,7 @@ mod crate_kind {
     mutest_driver_cli::exclusive_opts! { pub(crate) possible_values where
         INFER = "infer"; ["Infer crate kind based on the Cargo rustc invocation."]
         MUTANT_WITH_INTERNAL_TESTS = "mutant-with-internal-tests"; ["Crate mutated against its own internal test suite."]
-        MUTABLE_DEP_FOR_EXTERNAL_TESTS = "mutable-dep-for-external-tests"; ["Crate that is used to create specialize mutants driven by an external test suite."]
+        MUTABLE_DEP_FOR_EXTERNAL_TESTS = "mutable-dep-for-external-tests"; ["Crate that is used to create specialized mutants driven by an external test suite."]
         INTEGRATION_TESTS = "integration-tests"; ["External integration test crate that links against a specialized, mutated crate."]
     }
 }
@@ -201,7 +201,7 @@ pub fn main() -> process::ExitCode {
         }
     }
 
-    // HACK: This is an imperfect list of possible info queries, but matches what clippy-driver and cargo-miri does.
+    // HACK: This is an imperfect list of possible info queries, but matches what clippy-driver and cargo-miri do.
     let info_query = args.iter().any(|arg| arg == "-vV" || arg.starts_with("--print"));
 
     let cargo_invocation = rustc_session::utils::was_invoked_from_cargo();
@@ -212,7 +212,7 @@ pub fn main() -> process::ExitCode {
         //       This is required for supporting alternative test harnesses, such as embedded-test.
         //       If ultimately no tests are discovered, we simply generate an "empty" no-op meta-mutant.
         || (args.iter().any(|arg| arg == "--cfg=test") || args.array_windows().any(|[a, b]| a == "--cfg" && b == "test"));
-    // NOTE: The crate type may be defined in source using a `#![crate_type = "..."] attribute,
+    // NOTE: The crate type may be defined in source using a `#![crate_type = "..."]` attribute,
     //       which we check for later during the pseudo-pass that we use to get the compiler-parsed compiler config.
     //       This is used for short-circuiting in the common case, where the compiler invocation has a `--crate-type` argument specified.
     let bin_target = args.iter().any(|arg| arg == "--crate-type=bin")
@@ -252,7 +252,7 @@ pub fn main() -> process::ExitCode {
         let bin_target = crate_types.contains(&CrateType::Executable);
         let proc_macro_target = crate_types.contains(&CrateType::ProcMacro);
         // Fall back to a rustc invocation if mutest is not "enabled" for the given crate based on its parsed crate type.
-        // NOTE: This includes `#![crate_type = "..."] crate root attributes.
+        // NOTE: This includes `#![crate_type = "..."]` crate root attributes.
         if proc_macro_target || (bin_target && !test_target) {
             return rustc_driver::run_compiler(&args, &mut RustcCallbacks { mutest_args: mutest_args_str });
         }
@@ -525,7 +525,7 @@ pub fn main() -> process::ExitCode {
 
                         // NOTE: Two range separators are supported with identical meaning:
                         //       * ': ', which is emitted by rustc for spans (outside of diagnostics, when emitting the entire span).
-                        //       * '..', which is simlar to Rust's range syntax and is useful for interactive shell use
+                        //       * '..', which is similar to Rust's range syntax and is useful for interactive shell use
                         //         because it does not contain a whitespace character.
                         let file_region = match file_region_spec.split_once("..").or_else(|| file_region_spec.split_once(": ")) {
                             None => {
@@ -579,7 +579,7 @@ pub fn main() -> process::ExitCode {
             let batching_algorithm_arg = mutest_arg_matches.get_one::<String>("mutant-batch-algorithm").map(String::as_str);
 
             match (batching_algorithm_arg, mutest_arg_matches.value_source("mutant-batch-algorithm"), mutation_parallelism_config) {
-                // Mutation batching is overriden through Cargo package config.
+                // Mutation batching is overridden through Cargo package config.
                 (_, None | Some(clap::parser::ValueSource::DefaultValue), Some(mutation_parallelism_config)) => {
                     match mutation_parallelism_config {
                         // Mutation batching is explicitly disabled through Cargo package config.
@@ -591,7 +591,7 @@ pub fn main() -> process::ExitCode {
                     }
                 }
 
-                // Mutation batching algorith is disabled through the CLI, either explicitly or through the defaults.
+                // Mutation batching algorithm is disabled through the CLI, either explicitly or through the defaults.
                 (None | Some(opts::NONE), _, _) => break 'mutation_parallelism None,
                 // Some mutation batching algorithm is enabled through the CLI.
                 _ => {}

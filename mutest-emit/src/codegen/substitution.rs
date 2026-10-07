@@ -32,7 +32,7 @@ fn mk_subst_match_expr(sp: Span, subst_loc_idx: usize, default: Option<Box<ast::
         })
         .collect::<ThinVec<_>>();
 
-    // NOTE: Before we evaluate any subsitution arms, we must check if the test thread is active, and
+    // NOTE: Before we evaluate any substitution arms, we must check if the test thread is active, and
     //       if not, cancel the test thread from within to ensure that it does not start executing
     //       the code of other mutations, leading to undefined behavior.
     //       See `tests/ui/evaluation/cancel_timed_out_test_if_reenters_subst`.
@@ -278,6 +278,6 @@ pub fn resolve_syntax_ambiguities<'tcx>(tcx: TyCtxt<'tcx>, krate: &mut ast::Crat
     );
     let def_site = DUMMY_SP.with_def_site_ctxt(expn_id.to_expn_id());
 
-    let mut syntax_amiguity_resolver = SyntaxAmbiguityResolver { _sess: tcx.sess, _def_site: def_site };
-    syntax_amiguity_resolver.visit_crate(krate);
+    let mut syntax_ambiguity_resolver = SyntaxAmbiguityResolver { _sess: tcx.sess, _def_site: def_site };
+    syntax_ambiguity_resolver.visit_crate(krate);
 }

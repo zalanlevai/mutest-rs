@@ -4,7 +4,7 @@
 #![feature(decl_macro)]
 
 macro m() {
-    // TEST: Path to item only accessible through a glob re-export of an "opaque" reexport
+    // TEST: Path to item only accessible through a glob re-export of an "opaque" re-export
     //       that alters the visible name of the item.
     mod m {
         mod internal {

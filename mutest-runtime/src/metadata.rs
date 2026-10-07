@@ -30,7 +30,7 @@ pub fn reachable_tests(mutation: &MutationMeta, external_tests_extra: Option<&Ex
         (EntryPoints::InternalTests(_), _) => panic!("encountered meta-mutant compiled for internal tests being run against external tests"),
 
         (EntryPoints::ExternalTests(reachable_from), Some(_external_tests_extra)) => reachable_from.keys().copied().collect(),
-        (EntryPoints::ExternalTests(_), _) => panic!("encounteref meta-mutant compiled for external tests being run without external test metadata"),
+        (EntryPoints::ExternalTests(_), _) => panic!("encountered meta-mutant compiled for external tests being run without external test metadata"),
     }
 }
 
@@ -40,7 +40,7 @@ pub fn reachable_tests_count(mutation: &MutationMeta, external_tests_extra: Opti
         (EntryPoints::InternalTests(_), _) => panic!("encountered meta-mutant compiled for internal tests being run against external tests"),
 
         (EntryPoints::ExternalTests(reachable_from), Some(_external_tests_extra)) => reachable_from.len(),
-        (EntryPoints::ExternalTests(_), _) => panic!("encounteref meta-mutant compiled for external tests being run without external test metadata"),
+        (EntryPoints::ExternalTests(_), _) => panic!("encountered meta-mutant compiled for external tests being run without external test metadata"),
     }
 }
 
@@ -50,7 +50,7 @@ pub fn test_reachability(mutation: &MutationMeta, test_path: &str, external_test
         (EntryPoints::InternalTests(_), _) => panic!("encountered meta-mutant compiled for internal tests being run against external tests"),
 
         (EntryPoints::ExternalTests(reachable_from), Some(_external_tests_extra)) => reachable_from.get(test_path).copied(),
-        (EntryPoints::ExternalTests(_), _) => panic!("encounteref meta-mutant compiled for external tests being run without external test metadata"),
+        (EntryPoints::ExternalTests(_), _) => panic!("encountered meta-mutant compiled for external tests being run without external test metadata"),
     }
 }
 

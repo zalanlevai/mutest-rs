@@ -72,7 +72,7 @@ pub fn raw_output_full<G: EmissionGuarantee>(
 
     let shared_buffer = SharedBuffer { data: output.clone() };
     // NOTE: Cargo always requests colored JSON output, and pipes both stdout and stderr.
-    //       This effectively disallows us from determining support for colored output automatically.
+    //       This effectively prevents us from determining support for colored output automatically.
     //       Because of this, we can only respect the explicit `--color=never` flag, and
     //       print colors when the default `--color=auto` is specified.
     // NOTE: Similar to Cargo, we could always embed colors, and strip them during printing,

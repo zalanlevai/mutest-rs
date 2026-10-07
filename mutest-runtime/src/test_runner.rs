@@ -255,7 +255,7 @@ fn run_test_in_process(
         Ok(()) => {}
         // Send errors will only occur if the test execution outlives the test run, closing the receiver early. This
         // happens if the test runner was stopped early, leaving already running tests lingering until completion. This
-        // behaviour is considered intended and so send errors are explicitly ignored.
+        // behavior is considered intended and so send errors are explicitly ignored.
         Err(mpsc::SendError(_)) => {}
     };
 }

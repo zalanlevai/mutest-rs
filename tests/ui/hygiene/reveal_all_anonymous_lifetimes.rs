@@ -26,7 +26,7 @@ macro m() {
         fn assoc_fn() -> Self::AssocTy {}
     }
 
-    // TEST: Name anonyous lifetimes introduced by lifetime-generic trait in impl.
+    // TEST: Name anonymous lifetimes introduced by lifetime-generic trait in impl.
     trait GenericTrait<'a, 'b, 'c> {
         type AssocTy;
         fn assoc_fn() -> Self::AssocTy;
