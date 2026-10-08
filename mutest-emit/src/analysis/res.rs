@@ -10,14 +10,14 @@ use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::ExternLocation;
+use rustc_span::{ExpnKind, DUMMY_SP, Ident, Span, Symbol, sym, kw};
+use rustc_span::hygiene::AstPass;
 
 use crate::analysis::call_graph::{Call, CallKind};
 use crate::analysis::hir::{self, CRATE_DEF_ID, CRATE_MOD_ID, LOCAL_CRATE, DefKind, Res};
 use crate::analysis::hir::intravisit::Visitor;
 use crate::analysis::ty::{self, Ty};
 use crate::codegen::ast;
-use crate::codegen::symbols::{ExpnKind, DUMMY_SP, Ident, Span, Symbol, sym, kw};
-use crate::codegen::symbols::hygiene::AstPass;
 
 pub struct CrateResolutions<'tcx> {
     tcx: TyCtxt<'tcx>,
