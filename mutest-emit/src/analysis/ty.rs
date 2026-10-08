@@ -57,6 +57,59 @@ pub mod print {
 
     use super::SpanFromGenericsExt;
 
+    fn mk_ty_ast(sp: Span, kind: ast::TyKind) -> Box<ast::Ty> {
+        Box::new(ast::Ty { id: ast::DUMMY_NODE_ID, span: sp, kind })
+    }
+
+    pub fn mk_ty_path_ast(q_self: Option<Box<ast::QSelf>>, path: ast::Path) -> Box<ast::Ty> {
+        mk_ty_ast(path.span, ast::TyKind::Path(q_self, path))
+    }
+
+    pub fn mk_ty_ident_ast(sp: Span, q_self: Option<Box<ast::QSelf>>, ident: Ident) -> Box<ast::Ty> {
+        mk_ty_path_ast(q_self, ast::Path {
+            span: sp,
+            segments: thin_vec![
+                ast::PathSegment {
+                    id: ast::DUMMY_NODE_ID,
+                    ident: ident.with_span_pos(sp),
+                    args: None,
+                },
+            ],
+        })
+    }
+
+    fn mk_expr_kind_int_ast(sp: Span, i: isize, suffix: Symbol) -> ast::ExprKind {
+        let abs_symbol = Symbol::intern(&i.abs().to_string());
+        let abs_lit_expr_kind = ast::ExprKind::Lit(ast::token::Lit::new(ast::token::LitKind::Integer, abs_symbol, Some(suffix)));
+
+        match i {
+            0.. => abs_lit_expr_kind,
+            _ => ast::ExprKind::Unary(ast::UnOp::Neg, Box::new(ast::Expr {
+                id: ast::DUMMY_NODE_ID,
+                span: sp,
+                attrs: ast::AttrVec::new(),
+                kind: abs_lit_expr_kind,
+                tokens: None,
+            })),
+        }
+    }
+
+    fn mk_expr_kind_float_ast(sp: Span, v: f64, suffix: Symbol) -> ast::ExprKind {
+        let abs_symbol = Symbol::intern(&v.abs().to_string());
+        let abs_lit_expr_kind = ast::ExprKind::Lit(ast::token::Lit::new(ast::token::LitKind::Float, abs_symbol, Some(suffix)));
+
+        match v {
+            0_f64.. => abs_lit_expr_kind,
+            _ => ast::ExprKind::Unary(ast::UnOp::Neg, Box::new(ast::Expr {
+                id: ast::DUMMY_NODE_ID,
+                span: sp,
+                attrs: ast::AttrVec::new(),
+                kind: abs_lit_expr_kind,
+                tokens: None,
+            })),
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum OpaqueTyHandling {
         Keep,
@@ -97,7 +150,7 @@ pub mod print {
                                     diagnostic.span_label(sp, error);
                                     diagnostic.emit();
 
-                                    ast::mk::ty(sp, ast::TyKind::Infer)
+                                    mk_ty_ast(sp, ast::TyKind::Infer)
                                 }
                             };
                             Ok(Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ty_ast))))
@@ -192,7 +245,7 @@ pub mod print {
             let sp = self.sp;
 
             match region.kind() {
-                ty::RegionKind::ReStatic => Ok(Some(ast::mk::lifetime(sp, Ident::new(kw::StaticLifetime, sp)))),
+                ty::RegionKind::ReStatic => Ok(Some(ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::StaticLifetime, sp) })),
 
                 ty::RegionKind::ReEarlyParam(early_param_region) => {
                     if early_param_region.name == sym::empty { return Ok(None); }
@@ -207,7 +260,7 @@ pub mod print {
                         hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
                     }
 
-                    Ok(Some(ast::mk::lifetime(sp, ident)))
+                    Ok(Some(ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: ident.with_span_pos(sp) }))
                 }
 
                 | ty::RegionKind::ReBound(_, ty::BoundRegion { kind: bound_region_kind, .. })
@@ -222,7 +275,7 @@ pub mod print {
                     let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
                     hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
 
-                    Ok(Some(ast::mk::lifetime(sp, ident)))
+                    Ok(Some(ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: ident.with_span_pos(sp) }))
                 }
 
                 ty::RegionKind::ReLateParam(ty::LateParamRegion { kind: late_param_region_kind, .. }) => {
@@ -235,12 +288,12 @@ pub mod print {
                     let def_ident_span = self.tcx.def_ident_span(def_id).unwrap_or(DUMMY_SP);
                     hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
 
-                    Ok(Some(ast::mk::lifetime(sp, ident)))
+                    Ok(Some(ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: ident.with_span_pos(sp) }))
                 }
 
                 ty::RegionKind::ReVar(_) => Ok(None),
 
-                ty::RegionKind::ReErased => Ok(Some(ast::mk::lifetime(sp, Ident::new(kw::UnderscoreLifetime, sp)))),
+                ty::RegionKind::ReErased => Ok(Some(ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::UnderscoreLifetime, sp) })),
 
                 ty::RegionKind::ReError(_) => Err("encountered region error".to_owned()),
             }
@@ -254,74 +307,85 @@ pub mod print {
 
                 match val {
                     mir::ConstValue::Scalar(scalar) => {
-                        let lit_expr = match value.ty.kind() {
+                        let lit_expr_kind = match value.ty.kind() {
                             ty::TyKind::Bool => {
-                                scalar.to_bool().map(|v| ast::mk::expr_bool(sp, v))
+                                scalar.to_bool()
+                                    .map(|v| {
+                                        let symbol = match v {
+                                            true => kw::True,
+                                            false => kw::False,
+                                        };
+                                        ast::ExprKind::Lit(ast::token::Lit::new(ast::token::LitKind::Bool, symbol, None))
+                                    })
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid bool const: {e:?}"))
                             }
                             ty::TyKind::Char => {
-                                scalar.to_char().map(|v| ast::mk::expr_lit(sp, ast::token::LitKind::Char, Symbol::intern(&v.to_string()), None))
+                                scalar.to_char()
+                                    .map(|v| {
+                                        let symbol = Symbol::intern(&v.to_string());
+                                        ast::ExprKind::Lit(ast::token::Lit::new(ast::token::LitKind::Char, symbol, None))
+                                    })
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid char const: {e:?}"))
                             }
                             ty::TyKind::Int(ty::IntTy::I8) => {
-                                scalar.to_i8().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i8))
+                                scalar.to_i8().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::i8))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid i8 const: {e:?}"))
                             }
                             ty::TyKind::Int(ty::IntTy::I16) => {
-                                scalar.to_i16().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i16))
+                                scalar.to_i16().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::i16))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid i16 const: {e:?}"))
                             }
                             ty::TyKind::Int(ty::IntTy::I32) => {
-                                scalar.to_i32().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i32))
+                                scalar.to_i32().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::i32))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid i32 const: {e:?}"))
                             }
                             ty::TyKind::Int(ty::IntTy::I64) => {
-                                scalar.to_i64().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i64))
+                                scalar.to_i64().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::i64))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid i64 const: {e:?}"))
                             }
                             ty::TyKind::Int(ty::IntTy::I128) => {
-                                scalar.to_i128().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::i128))
+                                scalar.to_i128().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::i128))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid i128 const: {e:?}"))
                             }
                             ty::TyKind::Int(ty::IntTy::Isize) => {
-                                scalar.to_target_isize(&tcx).map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::isize))
+                                scalar.to_target_isize(&tcx).map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::isize))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid isize const: {e:?}"))
                             }
                             ty::TyKind::Uint(ty::UintTy::U8) => {
-                                scalar.to_u8().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u8))
+                                scalar.to_u8().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::u8))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid u8 const: {e:?}"))
                             }
                             ty::TyKind::Uint(ty::UintTy::U16) => {
-                                scalar.to_u16().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u16))
+                                scalar.to_u16().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::u16))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid u16 const: {e:?}"))
                             }
                             ty::TyKind::Uint(ty::UintTy::U32) => {
-                                scalar.to_u32().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u32))
+                                scalar.to_u32().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::u32))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid u32 const: {e:?}"))
                             }
                             ty::TyKind::Uint(ty::UintTy::U64) => {
-                                scalar.to_u64().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u64))
+                                scalar.to_u64().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::u64))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid u64 const: {e:?}"))
                             }
                             ty::TyKind::Uint(ty::UintTy::U128) => {
-                                scalar.to_u128().map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::u128))
+                                scalar.to_u128().map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::u128))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid u128 const: {e:?}"))
                             }
                             ty::TyKind::Uint(ty::UintTy::Usize) => {
-                                scalar.to_target_usize(&tcx).map(|v| ast::mk::expr_int_exact(sp, v as isize, sym::usize))
+                                scalar.to_target_usize(&tcx).map(|v| mk_expr_kind_int_ast(sp, v as isize, sym::usize))
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid usize const: {e:?}"))
                             }
@@ -329,7 +393,7 @@ pub mod print {
                                 scalar.to_f16()
                                     .map(|v| {
                                         let v = f16::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u16);
-                                        ast::mk::expr_float_exact(sp, v as f64, sym::f16)
+                                        mk_expr_kind_float_ast(sp, v as f64, sym::f16)
                                     })
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid f16 const: {e:?}"))
@@ -338,7 +402,7 @@ pub mod print {
                                 scalar.to_f32()
                                     .map(|v| {
                                         let v = f32::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u32);
-                                        ast::mk::expr_float_exact(sp, v as f64, sym::f32)
+                                        mk_expr_kind_float_ast(sp, v as f64, sym::f32)
                                     })
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid f32 const: {e:?}"))
@@ -347,7 +411,7 @@ pub mod print {
                                 scalar.to_f64()
                                     .map(|v| {
                                         let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(v) as u64);
-                                        ast::mk::expr_float_exact(sp, v, sym::f64)
+                                        mk_expr_kind_float_ast(sp, v, sym::f64)
                                     })
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid f64 const: {e:?}"))
@@ -357,7 +421,7 @@ pub mod print {
                                     .map(|v| {
                                         let rounded_v: rustc_apfloat::ieee::Double = rustc_apfloat::FloatConvert::convert(v, &mut false).value;
                                         let v = f64::from_bits(rustc_apfloat::ieee::Semantics::to_bits(rounded_v) as u64);
-                                        ast::mk::expr_float_exact(sp, v, sym::f128)
+                                        mk_expr_kind_float_ast(sp, v, sym::f128)
                                     })
                                     .report_err()
                                     .map_err(|e| format!("encountered invalid f128 const: {e:?}"))
@@ -365,7 +429,16 @@ pub mod print {
                             _ => Err("encountered unknown constant scalar value".to_owned())
                         }?;
 
-                        Ok(ast::mk::anon_const(sp, lit_expr.kind))
+                        Ok(ast::AnonConst {
+                            id: ast::DUMMY_NODE_ID,
+                            value: Box::new(ast::Expr {
+                                id: ast::DUMMY_NODE_ID,
+                                span: sp,
+                                attrs: ast::AttrVec::new(),
+                                kind: lit_expr_kind,
+                                tokens: None,
+                            }),
+                        })
                     }
 
                     mir::ConstValue::ZeroSized => Err("encountered zero-sized const".to_owned()),
@@ -385,7 +458,25 @@ pub mod print {
                         hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
                     }
 
-                    Ok(ast::mk::anon_const(sp, ast::mk::expr_ident(sp, ident).kind))
+                    Ok(ast::AnonConst {
+                        id: ast::DUMMY_NODE_ID,
+                        value: Box::new(ast::Expr {
+                            id: ast::DUMMY_NODE_ID,
+                            span: sp,
+                            attrs: ast::AttrVec::new(),
+                            kind: ast::ExprKind::Path(None, ast::Path {
+                                span: sp,
+                                segments: thin_vec![
+                                    ast::PathSegment {
+                                        id: ast::DUMMY_NODE_ID,
+                                        ident: ident.with_span_pos(sp),
+                                        args: None,
+                                    },
+                                ],
+                            }),
+                            tokens: None,
+                        }),
+                    })
                 }
 
                 ty::ConstKind::Alias(_, alias_const) => {
@@ -401,11 +492,29 @@ pub mod print {
                                 position: def_path.segments.len() - 1,
                             });
 
-                            Ok(ast::mk::const_path(Some(qself), def_path))
+                            Ok(ast::AnonConst {
+                                id: ast::DUMMY_NODE_ID,
+                                value: Box::new(ast::Expr {
+                                    id: ast::DUMMY_NODE_ID,
+                                    span: sp,
+                                    attrs: ast::AttrVec::new(),
+                                    kind: ast::ExprKind::Path(Some(qself), def_path),
+                                    tokens: None,
+                                }),
+                            })
                         }
                         ty::AliasConstKind::Inherent { def_id } | ty::AliasConstKind::Free { def_id } => {
                             let def_path = self.print_def_path(def_id, alias_const.args)?;
-                            Ok(ast::mk::const_path(None, def_path))
+                            Ok(ast::AnonConst {
+                                id: ast::DUMMY_NODE_ID,
+                                value: Box::new(ast::Expr {
+                                    id: ast::DUMMY_NODE_ID,
+                                    span: sp,
+                                    attrs: ast::AttrVec::new(),
+                                    kind: ast::ExprKind::Path(None, def_path),
+                                    tokens: None,
+                                }),
+                            })
                         }
                         ty::AliasConstKind::Anon { def_id: _ } => {
                             eval_const(self.tcx, ct, self.sp)
@@ -432,7 +541,7 @@ pub mod print {
             let principal = predicates.principal().map_or(Ok(None), |principal| -> Result<_, String> {
                 let principal = principal.skip_binder();
 
-                let def_path = self.print_def_path(principal.def_id, &[])?;
+                let mut def_path = self.print_def_path(principal.def_id, &[])?;
 
                 // Fn(...) -> ...
                 if let Some(_) = self.tcx.fn_trait_kind_from_def_id(principal.def_id)
@@ -444,9 +553,23 @@ pub mod print {
 
                     let input_tys_ast = input_tys.iter().map(|ty| self.print_ty(ty)).try_collect()?;
                     let output_ty_ast = output_ty.map_or(Result::<_, String>::Ok(None), |ty| Ok(Some(self.print_ty(ty)?)))?;
-                    let args = ast::mk::parenthesized_args(sp, input_tys_ast, output_ty_ast);
-                    let path = ast::mk::pathx_raw(sp, def_path, vec![], Some(args));
-                    return Ok(Some(ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, path)));
+                    let args = Box::new(ast::GenericArgs::Parenthesized(ast::ParenthesizedArgs {
+                        span: sp,
+                        inputs: input_tys_ast,
+                        inputs_span: sp,
+                        output: match output_ty_ast {
+                            Some(ty) => ast::FnRetTy::Ty(ty),
+                            None => ast::FnRetTy::Default(sp),
+                        },
+                    }));
+                    def_path.segments.last_mut().unwrap().args = Some(args);
+                    return Ok(Some(ast::GenericBound::Trait(ast::PolyTraitRef {
+                        span: sp,
+                        parens: ast::Parens::No,
+                        bound_generic_params: ThinVec::new(),
+                        modifiers: ast::TraitBoundModifiers::NONE,
+                        trait_ref: ast::TraitRef { ref_id: ast::DUMMY_NODE_ID, path: def_path },
+                    })));
                 }
 
                 let dummy_self_ty = Ty::new_fresh(self.tcx, 0);
@@ -455,13 +578,25 @@ pub mod print {
                 let args = self.tcx.generics_of(principal.def_id).own_args_no_defaults(self.tcx, principal.args);
                 let assoc_constraints = predicates.projection_bounds().map(|bounds| bounds.skip_binder());
                 let path = self.path_generic_args(def_path, args, assoc_constraints)?;
-                Ok(Some(ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, path)))
+                Ok(Some(ast::GenericBound::Trait(ast::PolyTraitRef {
+                    span: sp,
+                    parens: ast::Parens::No,
+                    bound_generic_params: ThinVec::new(),
+                    modifiers: ast::TraitBoundModifiers::NONE,
+                    trait_ref: ast::TraitRef { ref_id: ast::DUMMY_NODE_ID, path },
+                })))
             })?;
 
             let auto_traits = predicates.auto_traits()
                 .map(|def_id| -> Result<_, String> {
                     let def_path = self.print_def_path(def_id, &[])?;
-                    Ok(ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, def_path))
+                    Ok(ast::GenericBound::Trait(ast::PolyTraitRef {
+                        span: sp,
+                        parens: ast::Parens::No,
+                        bound_generic_params: ThinVec::new(),
+                        modifiers: ast::TraitBoundModifiers::NONE,
+                        trait_ref: ast::TraitRef { ref_id: ast::DUMMY_NODE_ID, path: def_path },
+                    }))
                 })
                 .try_collect::<Vec<_>>()?;
 
@@ -469,76 +604,76 @@ pub mod print {
                 .chain(auto_traits.into_iter())
                 .collect::<ThinVec<_>>();
 
-            Ok(ast::mk::ty(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn)))
+            Ok(mk_ty_ast(sp, ast::TyKind::TraitObject(bounds, ast::TraitObjectSyntax::Dyn)))
         }
 
         pub fn print_ty(&mut self, ty: Ty<'tcx>) -> Result<Box<ast::Ty>, String> {
             let sp = self.sp;
 
             match *ty.kind() {
-                ty::TyKind::Bool => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::bool, sp))),
-                ty::TyKind::Char => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::char, sp))),
-                ty::TyKind::Int(ty::IntTy::I8) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::i8, sp))),
-                ty::TyKind::Int(ty::IntTy::I16) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::i16, sp))),
-                ty::TyKind::Int(ty::IntTy::I32) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::i32, sp))),
-                ty::TyKind::Int(ty::IntTy::I64) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::i64, sp))),
-                ty::TyKind::Int(ty::IntTy::I128) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::i128, sp))),
-                ty::TyKind::Int(ty::IntTy::Isize) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::isize, sp))),
-                ty::TyKind::Uint(ty::UintTy::U8) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::u8, sp))),
-                ty::TyKind::Uint(ty::UintTy::U16) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::u16, sp))),
-                ty::TyKind::Uint(ty::UintTy::U32) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::u32, sp))),
-                ty::TyKind::Uint(ty::UintTy::U64) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::u64, sp))),
-                ty::TyKind::Uint(ty::UintTy::U128) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::u128, sp))),
-                ty::TyKind::Uint(ty::UintTy::Usize) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::usize, sp))),
-                ty::TyKind::Float(ty::FloatTy::F16) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::f16, sp))),
-                ty::TyKind::Float(ty::FloatTy::F32) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::f32, sp))),
-                ty::TyKind::Float(ty::FloatTy::F64) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::f64, sp))),
-                ty::TyKind::Float(ty::FloatTy::F128) => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::f128, sp))),
-                ty::TyKind::Str => Ok(ast::mk::ty_ident(sp, None, Ident::new(sym::str, sp))),
-                ty::TyKind::Never => Ok(ast::mk::ty(sp, ast::TyKind::Never)),
+                ty::TyKind::Bool => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::bool, sp))),
+                ty::TyKind::Char => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::char, sp))),
+                ty::TyKind::Int(ty::IntTy::I8) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::i8, sp))),
+                ty::TyKind::Int(ty::IntTy::I16) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::i16, sp))),
+                ty::TyKind::Int(ty::IntTy::I32) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::i32, sp))),
+                ty::TyKind::Int(ty::IntTy::I64) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::i64, sp))),
+                ty::TyKind::Int(ty::IntTy::I128) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::i128, sp))),
+                ty::TyKind::Int(ty::IntTy::Isize) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::isize, sp))),
+                ty::TyKind::Uint(ty::UintTy::U8) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::u8, sp))),
+                ty::TyKind::Uint(ty::UintTy::U16) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::u16, sp))),
+                ty::TyKind::Uint(ty::UintTy::U32) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::u32, sp))),
+                ty::TyKind::Uint(ty::UintTy::U64) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::u64, sp))),
+                ty::TyKind::Uint(ty::UintTy::U128) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::u128, sp))),
+                ty::TyKind::Uint(ty::UintTy::Usize) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::usize, sp))),
+                ty::TyKind::Float(ty::FloatTy::F16) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::f16, sp))),
+                ty::TyKind::Float(ty::FloatTy::F32) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::f32, sp))),
+                ty::TyKind::Float(ty::FloatTy::F64) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::f64, sp))),
+                ty::TyKind::Float(ty::FloatTy::F128) => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::f128, sp))),
+                ty::TyKind::Str => Ok(mk_ty_ident_ast(sp, None, Ident::new(sym::str, sp))),
+                ty::TyKind::Never => Ok(mk_ty_ast(sp, ast::TyKind::Never)),
 
                 ty::TyKind::RawPtr(ty, mutbl) => {
                     let inner_ty = self.print_ty(ty)?;
-                    Ok(ast::mk::ty_ptr(sp, inner_ty, mutbl))
+                    Ok(mk_ty_ast(sp, ast::TyKind::Ptr(ast::MutTy { ty: inner_ty, mutbl })))
                 }
                 ty::TyKind::Ref(region, ty, mutbl) => {
                     let inner_ty = self.print_ty(ty)?;
                     let lifetime = self.print_region(region)?;
-                    Ok(ast::mk::ty_rptr(sp, inner_ty, lifetime, mutbl))
+                    Ok(mk_ty_ast(sp, ast::TyKind::Ref(lifetime, ast::MutTy { ty: inner_ty, mutbl })))
                 }
                 ty::TyKind::Tuple(tys) => {
                     let inner_tys = tys.iter().map(|ty| self.print_ty(ty)).try_collect()?;
-                    Ok(ast::mk::ty_tuple(sp, inner_tys))
+                    Ok(mk_ty_ast(sp, ast::TyKind::Tup(inner_tys)))
                 }
                 ty::TyKind::Slice(ty) => {
                     let inner_ty = self.print_ty(ty)?;
-                    Ok(ast::mk::ty_slice(sp, inner_ty))
+                    Ok(mk_ty_ast(sp, ast::TyKind::Slice(inner_ty)))
                 }
                 ty::TyKind::Array(ty, size) => {
                     let inner_ty = self.print_ty(ty)?;
                     let size_const = self.print_const(size)?;
-                    Ok(ast::mk::ty_array(sp, inner_ty, size_const))
+                    Ok(mk_ty_ast(sp, ast::TyKind::Array(inner_ty, size_const)))
                 }
 
                 ty::TyKind::Adt(def, args) => {
                     let def_path = self.print_def_path(def.did(), args)?;
-                    Ok(ast::mk::ty_path(None, def_path))
+                    Ok(mk_ty_path_ast(None, def_path))
                 }
                 ty::TyKind::Foreign(def_id) => {
                     // TODO
                     let def_path = self.print_def_path(def_id, &[])?;
-                    Ok(ast::mk::ty_path(None, def_path))
+                    Ok(mk_ty_path_ast(None, def_path))
                 }
                 ty::TyKind::Dynamic(predicates, region) => {
                     let mut dyn_existential = self.print_dyn_existential(predicates)?;
                     let ast::TyKind::TraitObject(bounds, _syntax) = &mut dyn_existential.kind else { unreachable!() };
                     if let Some(lifetime) = self.print_region(region)? {
-                        bounds.push(ast::mk::lifetime_bound(lifetime));
+                        bounds.push(ast::GenericBound::Outlives(lifetime));
                     }
                     // NOTE: `dyn` trait objects of multiple bounds are syntactically ambiguous in some positions
                     //       unless surrounded by parens.
                     if bounds.len() > 1 {
-                        dyn_existential = ast::mk::ty(sp, ast::TyKind::Paren(dyn_existential));
+                        dyn_existential = mk_ty_ast(sp, ast::TyKind::Paren(dyn_existential));
                     }
                     Ok(dyn_existential)
                 }
@@ -546,11 +681,17 @@ pub mod print {
                     match alias_ty.kind {
                         ty::AliasTyKind::Opaque { def_id } => {
                             match self.opaque_ty_handling {
-                                OpaqueTyHandling::Infer => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                                OpaqueTyHandling::Infer => Ok(mk_ty_ast(sp, ast::TyKind::Infer)),
                                 OpaqueTyHandling::Keep => {
                                     let def_path = self.print_def_path(def_id, alias_ty.args)?;
-                                    Ok(ast::mk::ty(sp, ast::TyKind::ImplTrait(ast::DUMMY_NODE_ID, thin_vec![
-                                        ast::mk::trait_bound(ast::TraitBoundModifiers::NONE, def_path)
+                                    Ok(mk_ty_ast(sp, ast::TyKind::ImplTrait(ast::DUMMY_NODE_ID, thin_vec![
+                                        ast::GenericBound::Trait(ast::PolyTraitRef {
+                                            span: def_path.span,
+                                            parens: ast::Parens::No,
+                                            bound_generic_params: ThinVec::new(),
+                                            modifiers: ast::TraitBoundModifiers::NONE,
+                                            trait_ref: ast::TraitRef { ref_id: ast::DUMMY_NODE_ID, path: def_path },
+                                        }),
                                     ])))
                                 }
                                 OpaqueTyHandling::Resolve => {
@@ -569,18 +710,18 @@ pub mod print {
                                 position: def_path.segments.len() - 1,
                             });
 
-                            Ok(ast::mk::ty_path(Some(qself), def_path))
+                            Ok(mk_ty_path_ast(Some(qself), def_path))
                         }
                         ty::AliasTyKind::Inherent { def_id } | ty::AliasTyKind::Free { def_id } => {
                             let def_path = self.print_def_path(def_id, alias_ty.args)?;
-                            Ok(ast::mk::ty_path(None, def_path))
+                            Ok(mk_ty_path_ast(None, def_path))
                         }
                     }
                 }
                 ty::TyKind::Param(param_ty) => {
                     // Avoid naming synthetic generic params from `impl Trait` function parameters.
                     if param_ty.name.as_str().starts_with("impl ") {
-                        return Ok(ast::mk::ty(sp, ast::TyKind::Infer));
+                        return Ok(mk_ty_ast(sp, ast::TyKind::Infer));
                     }
 
                     let mut ident = Ident::new(param_ty.name, sp);
@@ -590,7 +731,7 @@ pub mod print {
                         let def_ident_span = param_ty.span_from_generics(self.tcx, scope);
                         hygiene::sanitize_ident_if_def_from_expansion(&mut ident, def_ident_span);
                     }
-                    Ok(ast::mk::ty_ident(sp, None, ident))
+                    Ok(mk_ty_ident_ast(sp, None, ident))
                 }
 
                 ty::TyKind::FnPtr(fn_sig_tys, fn_header) => {
@@ -599,8 +740,17 @@ pub mod print {
                     let input_tys_ast = fn_sig_tys.inputs().iter().copied().map(|ty| self.print_ty(ty)).try_collect::<Vec<_>>()?;
                     let output_ty_ast = self.print_ty(fn_sig_tys.output())?;
 
-                    let input_params = input_tys_ast.into_iter().map(|ty| ast::mk::param(sp, ast::mk::pat_wild(sp), ty)).collect();
-                    Ok(ast::mk::ty(sp, ast::TyKind::FnPtr(Box::new(ast::FnPtrTy {
+                    let input_params = input_tys_ast.into_iter()
+                        .map(|ty| ast::Param {
+                            id: ast::DUMMY_NODE_ID,
+                            span: sp,
+                            attrs: ast::AttrVec::new(),
+                            pat: Box::new(ast::Pat { id: ast::DUMMY_NODE_ID, span: sp, kind: ast::PatKind::Wild }),
+                            ty,
+                            is_placeholder: false,
+                        })
+                        .collect();
+                    Ok(mk_ty_ast(sp, ast::TyKind::FnPtr(Box::new(ast::FnPtrTy {
                         safety: match fn_header.safety() {
                             hir::Safety::Safe => ast::Safety::Default,
                             hir::Safety::Unsafe => ast::Safety::Unsafe(sp),
@@ -613,17 +763,17 @@ pub mod print {
                             suffix: None,
                         }, DUMMY_SP),
                         generic_params: ThinVec::new(),
-                        decl: ast::mk::fn_decl(input_params, ast::FnRetTy::Ty(output_ty_ast)),
+                        decl: Box::new(ast::FnDecl { inputs: input_params, output: ast::FnRetTy::Ty(output_ty_ast) }),
                         decl_span: DUMMY_SP,
                     }))))
                 }
 
                 // NOTE: These types cannot be represented directly in the AST, so we must replace them with inference holes.
-                ty::TyKind::FnDef(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
-                ty::TyKind::Closure(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
-                ty::TyKind::Coroutine(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
-                ty::TyKind::CoroutineClosure(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
-                ty::TyKind::CoroutineWitness(_, _) => Ok(ast::mk::ty(sp, ast::TyKind::Infer)),
+                ty::TyKind::FnDef(_, _) => Ok(mk_ty_ast(sp, ast::TyKind::Infer)),
+                ty::TyKind::Closure(_, _) => Ok(mk_ty_ast(sp, ast::TyKind::Infer)),
+                ty::TyKind::Coroutine(_, _) => Ok(mk_ty_ast(sp, ast::TyKind::Infer)),
+                ty::TyKind::CoroutineClosure(_, _) => Ok(mk_ty_ast(sp, ast::TyKind::Infer)),
+                ty::TyKind::CoroutineWitness(_, _) => Ok(mk_ty_ast(sp, ast::TyKind::Infer)),
 
                 ty::TyKind::Bound(_, _) => Err("encountered bound type variable".to_owned()),
                 ty::TyKind::UnsafeBinder(_) => Err("encountered unsafe binder".to_owned()),
