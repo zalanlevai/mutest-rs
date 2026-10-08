@@ -603,7 +603,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                 let generic_param_def = generics.param_at(param_index as usize, self.tcx);
 
                 if generic_param_def.is_anonymous_lifetime() {
-                    let mut revealed_lifetime_ast = lifetime_ast.unwrap_or_else(|| ast::mk::lifetime(DUMMY_SP, Ident::dummy()));
+                    let mut revealed_lifetime_ast = lifetime_ast.unwrap_or_else(|| ast::Lifetime { id: ast::DUMMY_NODE_ID, ident: Ident::dummy() });
                     generate_revealed_name_for_anonymous_region(&mut revealed_lifetime_ast.ident, generic_param_def);
                     *lifetime_ast = Some(revealed_lifetime_ast);
                 } else {
@@ -729,7 +729,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                             }
                         }
                         diagnostic.emit();
-                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(ast::mk::ty(span, ast::TyKind::Infer))))
+                        Some(ast::AngleBracketedArg::Arg(ast::GenericArg::Type(Box::new(ast::Ty { id: ast::DUMMY_NODE_ID, span, kind: ast::TyKind::Infer }))))
                     }
                     None => {
                         let mut diagnostic = self.tcx.dcx().struct_span_fatal(span, format!("cannot represent generic argument `{} = {:?}` after expansion", self.tcx.def_path_str(generic_param.def_id), generic_arg));
@@ -1514,7 +1514,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     self.visit_vis(&mut item.vis);
 
                     // FIXME: Resolutions for the prelude import path are missing; ignore.
-                    if !item.attrs.iter().any(|attr| ast::inspect::is_word_attr(attr, None, sym::prelude_import)) {
+                    if !item.attrs.iter().any(|attr| attr.is_word() && attr.has_name(sym::prelude_import)) {
                         self.sanitize_use_tree(use_tree, id, span);
                     }
                     return smallvec![item];
@@ -1996,13 +1996,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
 
     for &allow_internal_unstable in &sanitizer.allow_internal_unstables {
         // #![feature($allow_internal_unstable)]
-        if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::feature, allow_internal_unstable)) {
-            let feature_allow_internal_unstable_attr = ast::mk::attr_inner(g, DUMMY_SP,
-                Ident::new(sym::feature, DUMMY_SP),
-                ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                    ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(allow_internal_unstable, ast::token::IdentIsRaw::No)),
-                ])),
-            );
+        if !krate.attrs.iter().any(|attr| attr.has_name(sym::feature) && attr.meta_item_list().is_some_and(|items| items.iter().any(|item| item.is_word() && item.has_name(allow_internal_unstable)))) {
+            let feature_allow_internal_unstable_attr = ast::attr::mk_attr_nested_word(g, ast::AttrStyle::Inner, ast::Safety::Default, sym::feature, allow_internal_unstable, DUMMY_SP);
             krate.attrs.push(feature_allow_internal_unstable_attr);
         }
     }
@@ -2013,13 +2008,8 @@ pub fn sanitize_macro_expansions<'tcx>(tcx: TyCtxt<'tcx>, crate_res: &res::Crate
     macro ensure_attrs($(#![$meta:ident($kind:ident)])+) {
         $(
             let kind = Symbol::intern(stringify!($kind));
-            if !krate.attrs.iter().any(|attr| ast::inspect::is_list_attr_with_ident(attr, None, sym::$meta, kind)) {
-                let attr = ast::mk::attr_inner(g, DUMMY_SP,
-                    Ident::new(sym::$meta, DUMMY_SP),
-                    ast::mk::attr_args_delimited(DUMMY_SP, ast::token::Delimiter::Parenthesis, ast::mk::token_stream(vec![
-                        ast::mk::tt_token_joint(DUMMY_SP, ast::TokenKind::Ident(kind, ast::token::IdentIsRaw::No)),
-                    ])),
-                );
+            if !krate.attrs.iter().any(|attr| attr.has_name(sym::$meta) && attr.meta_item_list().is_some_and(|items| items.iter().any(|item| item.is_word() && item.has_name(kind)))) {
+                let attr = ast::attr::mk_attr_nested_word(g, ast::AttrStyle::Inner, ast::Safety::Default, sym::$meta, kind, DUMMY_SP);
                 krate.attrs.push(attr);
             }
         )+
