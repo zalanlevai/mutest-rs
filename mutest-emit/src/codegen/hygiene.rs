@@ -3,6 +3,8 @@ use std::mem;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
+use rustc_ast::DUMMY_NODE_ID;
+use rustc_ast_pretty::pprust::{expr_to_string, path_to_string, ty_to_string};
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
 use rustc_data_structures::fx::{FxHashSet, FxIndexSet};
 use rustc_data_structures::smallvec::{SmallVec, smallvec};
@@ -12,17 +14,67 @@ use rustc_infer::infer::TyCtxtInferExt;
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::span_bug;
 use rustc_middle::ty::{TyCtxt, TypingMode};
+use rustc_span::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
 use rustc_span::edition::Edition;
+use rustc_span::hygiene::{ExpnData, ExpnId, MacroKind, Transparency};
 use rustc_trait_selection::traits::{ImplSource, Obligation, ObligationCause, SelectionContext};
 
 use crate::analysis::ast_lowering;
-use crate::analysis::hir::{self, LOCAL_CRATE, NodeExt};
+use crate::analysis::hir::{self, LOCAL_CRATE};
 use crate::analysis::res;
 use crate::analysis::ty::{self, Ty};
 use crate::codegen::ast;
 use crate::codegen::ast::mut_visit::MutVisitor;
-use crate::codegen::symbols::{DUMMY_SP, ExpnKind, Ident, Span, Symbol, sym, kw};
-use crate::codegen::symbols::hygiene::{ExpnData, ExpnId, MacroKind, Transparency};
+
+pub trait HirNodeExt<'hir> {
+    fn qpath(&self) -> Option<&'hir hir::QPath<'hir>>;
+}
+
+impl<'hir> HirNodeExt<'hir> for hir::Node<'hir> {
+    fn qpath(&self) -> Option<&'hir hir::QPath<'hir>> {
+        match self {
+            hir::Node::Expr(expr_hir) => {
+                match &expr_hir.kind {
+                    hir::ExprKind::Path(qpath_hir) => Some(qpath_hir),
+                    hir::ExprKind::Struct(qpath_hir, _, _) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            hir::Node::Pat(pat_hir) => {
+                match &pat_hir.kind {
+                    hir::PatKind::Expr(hir::PatExpr { kind: hir::PatExprKind::Path(qpath_hir), .. }) => Some(qpath_hir),
+                    hir::PatKind::Struct(qpath_hir, _, _) => Some(qpath_hir),
+                    hir::PatKind::TupleStruct(qpath_hir, _, _) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            hir::Node::PatExpr(pat_expr_hir) => {
+                match &pat_expr_hir.kind {
+                    hir::PatExprKind::Path(qpath_hir) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            hir::Node::Ty(ty_hir) => {
+                match &ty_hir.kind {
+                    hir::TyKind::Path(qpath_hir) => Some(qpath_hir),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+fn qpath_to_string(qself: Option<&ast::QSelf>, path: &ast::Path) -> String {
+    match qself {
+        Some(qself) => {
+            // HACK: Workaround, because `print_qpath` is private.
+            let dummy_ty = ast::Ty { id: DUMMY_NODE_ID, span: DUMMY_SP, kind: ast::TyKind::Path(Some(Box::new(qself.clone())), path.clone()) };
+            ty_to_string(&dummy_ty)
+        },
+        None => path_to_string(path),
+    }
+}
 
 fn is_macro_expn(expn: &ExpnData) -> bool {
     match expn.kind {
@@ -380,7 +432,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
         match res {
             hir::Res::Local(node_id) => {
                 let Some(hir_id) = self.body_res.hir_id(node_id) else {
-                    self.bug_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", ast::print::path_to_string(path)));
+                    self.bug_unmatched_ast_node(path.span, || format!("unable to resolve local `{}` for sanitization", path_to_string(path)));
                 };
                 let def_ident = self.tcx.hir_ident(hir_id);
 
@@ -779,7 +831,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // Otherwise, resolve it with the help of the corresponding HIR QPath.
             (qself @ _, _) => {
                 let Some(node_hir_id) = self.body_res.hir_id(node_id) else {
-                    self.bug_unmatched_ast_node(path.span, || format!("unable to resolve path `{}` for sanitization", ast::print::qpath_to_string(qself.as_deref(), path)));
+                    self.bug_unmatched_ast_node(path.span, || format!("unable to resolve path `{}` for sanitization", qpath_to_string(qself.as_deref(), path)));
                 };
 
                 let Some(qpath_hir) = self.tcx.hir_node(node_hir_id).qpath() else { span_bug!(path.span, "no corresponding qualified path in HIR") };
@@ -825,7 +877,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                                         qres = hir::Res::Def(trait_item_def_kind, trait_item_def_id);
                                     }
 
-                                    _ => span_bug!(path.span, "path `{}` cannot be resolved", ast::print::qpath_to_string(qself.as_deref(), path)),
+                                    _ => span_bug!(path.span, "path `{}` cannot be resolved", qpath_to_string(qself.as_deref(), path)),
                                 }
                             }
                         }
@@ -1592,7 +1644,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_ty` call
                 //       because of the `&mut ty.kind` partial borrow above.
                 let Some(ty_hir) = self.body_res.hir_node(ty_id).map(|hir_node| hir_node.expect_ty()) else {
-                    self.bug_unmatched_ast_node(ty.span, || format!("unable to resolve type `{}` for sanitization", ast::print::ty_to_string(ty)));
+                    self.bug_unmatched_ast_node(ty.span, || format!("unable to resolve type `{}` for sanitization", ty_to_string(ty)));
                 };
 
                 let lifetime_hir = match ty_hir.kind {
@@ -1676,12 +1728,12 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 }
 
                 let Some(base_expr_hir) = self.body_res.hir_expr(base_expr.peel_parens()) else {
-                    self.bug_unmatched_ast_node(base_expr.span, || format!("unable to resolve field base expr `{}` for sanitization", ast::print::expr_to_string(expr)));
+                    self.bug_unmatched_ast_node(base_expr.span, || format!("unable to resolve field base expr `{}` for sanitization", expr_to_string(expr)));
                 };
                 // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_expr` call
                 //       because of the `&mut expr.kind` partial borrow above.
                 let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else {
-                    self.bug_unmatched_ast_node(expr_span, || format!("unable to resolve field expr `{}` for sanitization", ast::print::expr_to_string(expr)));
+                    self.bug_unmatched_ast_node(expr_span, || format!("unable to resolve field expr `{}` for sanitization", expr_to_string(expr)));
                 };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { break 'arm; };
@@ -1699,7 +1751,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 // HACK: The borrow checker does not allow for immutably referencing the expression for the `hir_expr` call
                 //       because of the `&mut expr.kind` partial borrow above.
                 let Some(expr_hir) = self.body_res.hir_node(expr_id).map(|hir_node| hir_node.expect_expr()) else {
-                    self.bug_unmatched_ast_node(expr_span, || format!("unable to resolve method call expr `{}` for sanitization", ast::print::expr_to_string(expr)));
+                    self.bug_unmatched_ast_node(expr_span, || format!("unable to resolve method call expr `{}` for sanitization", expr_to_string(expr)));
                 };
 
                 let Some(typeck) = self.typeck_for(expr_hir.hir_id.owner) else { unreachable!() };
@@ -1806,7 +1858,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
     fn visit_path(&mut self, path: &mut ast::Path) {
         let Some(last_segment) = path.segments.last() else { unreachable!(); };
         let Some(res) = self.def_res.node_res(last_segment.id) else {
-            span_bug!(path.span, "path `{}` cannot be resolved by generic path handler", ast::print::path_to_string(path));
+            span_bug!(path.span, "path `{}` cannot be resolved by generic path handler", path_to_string(path));
         };
         let None = self.sanitize_path(path, res, None) else {
             span_bug!(path.span, "produced type-relative path in context which disallows qualified paths");
@@ -1848,7 +1900,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                 //       only in error cases. See https://github.com/rust-lang/rust/pull/158689.
                 //       The computed visibilities can still be queried however.
                 let ty::Visibility::Restricted(mod_id) = self.tcx.visibility(owner_def_id) else {
-                    span_bug!(vis.span, "restricted visibility path `{}` cannot be resolved", ast::print::path_to_string(path));
+                    span_bug!(vis.span, "restricted visibility path `{}` cannot be resolved", path_to_string(path));
                 };
                 let res = hir::Res::Def(self.tcx.def_kind(mod_id), mod_id.to_def_id());
                 let None = self.adjust_path_from_expansion(path, res, None) else {

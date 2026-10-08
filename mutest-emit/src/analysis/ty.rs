@@ -47,13 +47,13 @@ pub mod print {
     use rustc_infer::infer::TyCtxtInferExt;
     use rustc_middle::mir;
     use rustc_middle::ty::{self, Ty, TyCtxt};
+    use rustc_span::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
     use crate::analysis::ast_lowering;
     use crate::analysis::hir;
     use crate::analysis::res;
     use crate::codegen::ast;
     use crate::codegen::hygiene;
-    use crate::codegen::symbols::{DUMMY_SP, Ident, Span, Symbol, sym, kw};
 
     use super::SpanFromGenericsExt;
 
