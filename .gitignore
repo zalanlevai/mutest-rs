@@ -15,6 +15,9 @@ target
 logs
 *.log
 
+## ICE reports
+rustc-ice-*.txt
+
 # OS / Filesystem Metadata
 
 ## macOS
