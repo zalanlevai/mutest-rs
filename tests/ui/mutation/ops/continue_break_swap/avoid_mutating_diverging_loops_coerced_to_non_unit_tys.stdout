@@ -1,0 +1,7 @@
+[continue_break_swap] swap continue for break in skip_evens at tests/ui/mutation/ops/continue_break_swap/avoid_mutating_diverging_loops_coerced_to_non_unit_tys.rs:37:13: 37:21
+  <-(0)- test
+
+[continue_break_swap] swap continue for break in skip_odds at tests/ui/mutation/ops/continue_break_swap/avoid_mutating_diverging_loops_coerced_to_non_unit_tys.rs:47:13: 47:21
+  <-(0)- test
+
+2 mutations; 2 safe; 0 unsafe (0 tainted)

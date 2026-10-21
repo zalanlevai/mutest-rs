@@ -75,6 +75,13 @@ impl<'a> Operator<'a> for ContinueBreakSwap {
         let target_ty = typeck.node_type(target_hir_id);
         if target_ty != tcx.types.unit && target_ty != tcx.types.never { return Mutations::none(); }
 
+        // A diverging loop may be coerced to any type, which a `break` would turn into `()`.
+        if target_ty == tcx.types.never {
+            let target_expr_hir = tcx.hir_expect_expr(target_hir_id);
+            let in_semi_stmt = matches!(tcx.parent_hir_node(target_hir_id), hir::Node::Stmt(hir::Stmt { kind: hir::StmtKind::Semi(_), .. }));
+            if typeck.expr_ty_adjusted(target_expr_hir) != tcx.types.unit && !in_semi_stmt { return Mutations::none(); }
+        }
+
         let mutation = Self::Mutation {
             original_expr: expr.kind.clone(),
             replacement_expr: swapped_expr.kind.clone(),
