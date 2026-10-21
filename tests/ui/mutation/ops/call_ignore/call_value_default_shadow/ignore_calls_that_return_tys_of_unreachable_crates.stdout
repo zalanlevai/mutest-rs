@@ -1,0 +1,4 @@
+[call_value_default_shadow] ignore return value of call to `non_reexporting_proxy::proxy_struct` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_value_default_shadow/ignore_calls_that_return_tys_of_unreachable_crates.rs:14:13: 14:51
+  <-(0)- test
+
+1 mutations; 1 safe; 0 unsafe (0 tainted)

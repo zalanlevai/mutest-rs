@@ -210,7 +210,7 @@ pub mod print {
         }
 
         fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<ast::Path, String> {
-            let Ok(def_path) = res::visible_def_path(self.tcx, self.crate_res, res::DefPathRequestKind::Def(def_id), self.scope, None, self.sp) else {
+            let Ok(def_path) = res::visible_def_path(self.tcx, self.crate_res, res::DefPathRequestKind::Def(def_id), self.scope, None) else {
                 return Err(format!("encountered definition `{}` with no visible path", self.tcx.def_path_str(def_id)));
             };
             let (None, mut path) = def_path.unhygienic_ast_path(self.crate_res, self) else {

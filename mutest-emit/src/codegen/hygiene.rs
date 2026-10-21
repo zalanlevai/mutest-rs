@@ -395,7 +395,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn expect_visible_def_path(&self, request: res::DefPathRequestKind, ignore_reexport: Option<hir::DefId>, span: Span) -> res::DefPath<'tcx> {
-        match res::visible_def_path(self.tcx, self.crate_res, request, self.current_scope, ignore_reexport, span) {
+        match res::visible_def_path(self.tcx, self.crate_res, request, self.current_scope, ignore_reexport) {
             Ok(def_path) => def_path,
             // NOTE: `TyCtxt::def_path_str` prints implicit tuple/unit variant constructors
             //       the same way as the variant itself (i.e., without `::{{constructor}}`),

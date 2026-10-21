@@ -10,7 +10,7 @@ use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::ExternLocation;
-use rustc_span::{ExpnKind, DUMMY_SP, Ident, Span, Symbol, sym, kw};
+use rustc_span::{ExpnKind, DUMMY_SP, Ident, Symbol, sym, kw};
 use rustc_span::hygiene::AstPass;
 
 use crate::analysis::call_graph::{Call, CallKind};
@@ -660,7 +660,6 @@ fn absolute_def_paths<'tcx>(
     def_id: hir::DefId,
     scope: Option<hir::DefId>,
     ignore_reexport: Option<hir::DefId>,
-    span: Span,
     limit: Option<NonZeroUsize>,
 ) -> SmallVec<[DefPath<'tcx>; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|&(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
@@ -759,7 +758,9 @@ fn absolute_def_paths<'tcx>(
                 }
             }
 
-            span_bug!(span, "expected `{}` to be reached through another crate either through the extern prelude or an `extern crate` item", tcx.def_path_str(def_id));
+            // The definition's crate is neither a direct dependency nor reachable through one,
+            // e.g. a type of a transitive dependency that is not re-exported.
+            return smallvec![];
         }
     };
 
@@ -825,9 +826,8 @@ fn absolute_def_path<'tcx>(
     def_id: hir::DefId,
     scope: Option<hir::DefId>,
     ignore_reexport: Option<hir::DefId>,
-    span: Span,
 ) -> Option<DefPath<'tcx>> {
-    absolute_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, span, NonZeroUsize::new(1)).into_iter().next()
+    absolute_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, NonZeroUsize::new(1)).into_iter().next()
 }
 
 #[derive(Clone, Copy)]
@@ -852,7 +852,6 @@ pub fn visible_def_path<'tcx>(
     request: DefPathRequestKind,
     scope: Option<hir::DefId>,
     ignore_reexport: Option<hir::DefId>,
-    span: Span,
 ) -> Result<DefPath<'tcx>, Option<hir::DefId>> {
     let mut def_id = request.def_id();
     if let hir::DefKind::Ctor(..) = tcx.def_kind(def_id) {
@@ -933,7 +932,7 @@ pub fn visible_def_path<'tcx>(
         }
     }
 
-    if let Some(visible_path) = absolute_def_path(tcx, crate_res, def_id, scope, ignore_reexport, span) {
+    if let Some(visible_path) = absolute_def_path(tcx, crate_res, def_id, scope, ignore_reexport) {
         return Ok(visible_path);
     }
 
