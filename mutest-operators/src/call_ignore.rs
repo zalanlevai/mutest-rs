@@ -26,6 +26,9 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::LocalDefId, body: hir::Body
     let expr_ty = typeck.expr_ty(expr);
     if expr_ty == tcx.types.unit || expr_ty == tcx.types.never { return None; }
     if !ty::impls_trait(tcx, f, expr_ty, res::traits::Default(tcx), vec![]) { return None; }
+    // The replacement `Default::default()` is inferred to the type the expression is coerced to (e.g. `Box<dyn Trait>`).
+    let expr_ty_adjusted = typeck.expr_ty_adjusted(expr);
+    if expr_ty_adjusted != expr_ty && !ty::impls_trait(tcx, f, expr_ty_adjusted, res::traits::Default(tcx), vec![]) { return None; }
 
     let Some((callee, _)) = res::callee(typeck, expr) else { return None; };
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
