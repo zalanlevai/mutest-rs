@@ -860,7 +860,13 @@ pub fn visible_def_path<'tcx>(
     // NOTE: This helps avoid visibility-related resolution issues in local items, see
     //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`, and
     //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_child_scope_through_reexport`.
-    if let Some(scope) = scope && let Some(local_def_id) = def_id.as_local() && def_id != scope {
+    // NOTE: A non-root module can also be named from within itself, e.g. by `use super::$mod`.
+    //       Its path must be built the same way as the paths of same-named items in the parent module,
+    //       otherwise an import of both resolutions introduces the name twice.
+    let is_def_path_to_enclosing_mod = |scope: hir::DefId| {
+        matches!(request, DefPathRequestKind::Def(_)) && def_id == scope && tcx.def_kind(def_id) == hir::DefKind::Mod && !def_id.is_crate_root()
+    };
+    if let Some(scope) = scope && let Some(local_def_id) = def_id.as_local() && (def_id != scope || is_def_path_to_enclosing_mod(scope)) {
         let mod_scope = match tcx.def_kind(scope) {
             hir::DefKind::Mod => scope,
             _ => tcx.parent_module_from_def_id(scope.expect_local()).to_def_id(),
