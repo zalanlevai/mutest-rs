@@ -464,6 +464,10 @@ impl<'tcx> DefPath<'tcx> {
             // Local path, no special prefix.
             DefPathRootKind::Local => {}
 
+            // `self::..` paths.
+            DefPathRootKind::Parent { supers: 0 } => {
+                segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::SelfLower, DUMMY_SP), args: None });
+            }
             // `super::..` paths.
             DefPathRootKind::Parent { supers } => {
                 segments.splice(0..0, (0..*supers).map(|_| ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Super, DUMMY_SP), args: None }));
@@ -877,7 +881,18 @@ pub fn visible_def_path<'tcx>(
         };
 
         if containing_mod == mod_scope {
-            if let Ok(visible_path) = lexical_def_path(tcx, def_id, scope) {
+            if let Ok(mut visible_path) = lexical_def_path(tcx, def_id, scope) {
+                // Root paths to items of the module at `self`, so that the first path segment
+                // cannot be shadowed by a local binding or generic param of the same name,
+                // e.g. `let f = f(); let g = self::f();`.
+                if let DefPathRootKind::Local = visible_path.root
+                    && let [first_segment, ..] = &visible_path.segments[..]
+                    && tcx.opt_parent(first_segment.def_id) == Some(mod_scope)
+                    && !matches!(tcx.def_kind(first_segment.def_id), hir::DefKind::Macro(_))
+                {
+                    visible_path.root = DefPathRootKind::Parent { supers: 0 };
+                }
+
                 return Ok(visible_path);
             }
         } else if !containing_mod.is_crate_root() {

@@ -375,6 +375,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // Local path, no special prefix.
             res::DefPathRootKind::Local => {}
 
+            // `self::..` paths.
+            res::DefPathRootKind::Parent { supers: 0 } => {
+                segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::SelfLower, DUMMY_SP), args: None });
+            }
             // `super::..` paths.
             res::DefPathRootKind::Parent { supers } => {
                 segments.splice(0..0, (0..*supers).map(|_| ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Super, DUMMY_SP), args: None }));
