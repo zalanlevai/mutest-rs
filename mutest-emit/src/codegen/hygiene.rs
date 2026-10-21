@@ -375,6 +375,10 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
             // Local path, no special prefix.
             res::DefPathRootKind::Local => {}
 
+            // `self::..` paths.
+            res::DefPathRootKind::Parent { supers: 0 } => {
+                segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::SelfLower, DUMMY_SP), args: None });
+            }
             // `super::..` paths.
             res::DefPathRootKind::Parent { supers } => {
                 segments.splice(0..0, (0..*supers).map(|_| ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Super, DUMMY_SP), args: None }));
@@ -391,7 +395,7 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
     }
 
     fn expect_visible_def_path(&self, request: res::DefPathRequestKind, ignore_reexport: Option<hir::DefId>, span: Span) -> res::DefPath<'tcx> {
-        match res::visible_def_path(self.tcx, self.crate_res, request, self.current_scope, ignore_reexport, span) {
+        match res::visible_def_path(self.tcx, self.crate_res, request, self.current_scope, ignore_reexport) {
             Ok(def_path) => def_path,
             // NOTE: `TyCtxt::def_path_str` prints implicit tuple/unit variant constructors
             //       the same way as the variant itself (i.e., without `::{{constructor}}`),
@@ -1358,6 +1362,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     // NOTE: Duplicate glob imports of the same module are already invalid before sanitization.
                     ((_, UseKind::Glob), (_, UseKind::Glob)) => false,
 
+                    // NOTE: Underscore imports do not introduce names, so they never conflict.
+                    ((_, UseKind::Single { ident, .. }), _) if ident.name == kw::Underscore => false,
+
                     ((path, UseKind::Single { ident, namespace, .. }), (next_path, UseKind::Single{ ident: next_ident, namespace: next_namespace, .. })) => {
                         #[inline]
                         fn matching_paths(path: &ast::Path, next_path: &ast::Path) -> bool {
@@ -1514,7 +1521,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     self.visit_vis(&mut item.vis);
 
                     // FIXME: Resolutions for the prelude import path are missing; ignore.
-                    if !item.attrs.iter().any(|attr| attr.is_word() && attr.has_name(sym::prelude_import)) {
+                    if !item.attrs.iter().any(|attr| attr.has_name(sym::prelude_import) && attr.is_word()) {
                         self.sanitize_use_tree(use_tree, id, span);
                     }
                     return smallvec![item];

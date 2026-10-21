@@ -1,0 +1,13 @@
+[call_delete] delete call to `count` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_coerced_to_tys_without_default.rs:28:13: 28:35
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `count` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_coerced_to_tys_without_default.rs:28:13: 28:35
+  <-(0)- test
+
+[call_delete] delete call to `boxed_square` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_coerced_to_tys_without_default.rs:31:13: 31:28
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `boxed_square` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_coerced_to_tys_without_default.rs:31:13: 31:28
+  <-(0)- test
+
+4 mutations; 4 safe; 0 unsafe (0 tainted)

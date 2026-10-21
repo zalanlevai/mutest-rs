@@ -1,0 +1,7 @@
+[call_value_default_shadow] ignore return value of call to `handler` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_value_default_shadow/shadow_calls_returning_dyn_tys_in_fn_sigs.rs:23:13: 23:24
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `handler_ptr` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/call_value_default_shadow/shadow_calls_returning_dyn_tys_in_fn_sigs.rs:24:13: 24:28
+  <-(0)- test
+
+2 mutations; 2 safe; 0 unsafe (0 tainted)

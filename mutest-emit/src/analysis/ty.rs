@@ -126,6 +126,9 @@ pub mod print {
         sp: Span,
         opaque_ty_handling: OpaqueTyHandling,
         binding_item_def_id: hir::DefId,
+        /// Number of `Fn(..)` sugar and fn pointer signatures the printer is currently inside of,
+        /// in which elided lifetimes (including `'_`) introduce new higher-ranked lifetimes.
+        fn_sig_binder_depth: usize,
     }
 
     impl<'tcx, 'op> AstTyPrinter<'tcx, 'op> {
@@ -210,7 +213,7 @@ pub mod print {
         }
 
         fn print_def_path(&mut self, def_id: hir::DefId, args: &'tcx [ty::GenericArg<'tcx>]) -> Result<ast::Path, String> {
-            let Ok(def_path) = res::visible_def_path(self.tcx, self.crate_res, res::DefPathRequestKind::Def(def_id), self.scope, None, self.sp) else {
+            let Ok(def_path) = res::visible_def_path(self.tcx, self.crate_res, res::DefPathRequestKind::Def(def_id), self.scope, None) else {
                 return Err(format!("encountered definition `{}` with no visible path", self.tcx.def_path_str(def_id)));
             };
             let (None, mut path) = def_path.unhygienic_ast_path(self.crate_res, self) else {
@@ -551,8 +554,11 @@ pub mod print {
                 {
                     let output_ty = projection.skip_binder().term.as_type();
 
-                    let input_tys_ast = input_tys.iter().map(|ty| self.print_ty(ty)).try_collect()?;
-                    let output_ty_ast = output_ty.map_or(Result::<_, String>::Ok(None), |ty| Ok(Some(self.print_ty(ty)?)))?;
+                    self.fn_sig_binder_depth += 1;
+                    let input_tys_ast = input_tys.iter().map(|ty| self.print_ty(ty)).try_collect();
+                    let output_ty_ast = output_ty.map_or(Result::<_, String>::Ok(None), |ty| Ok(Some(self.print_ty(ty)?)));
+                    self.fn_sig_binder_depth -= 1;
+                    let (input_tys_ast, output_ty_ast) = (input_tys_ast?, output_ty_ast?);
                     let args = Box::new(ast::GenericArgs::Parenthesized(ast::ParenthesizedArgs {
                         span: sp,
                         inputs: input_tys_ast,
@@ -667,7 +673,10 @@ pub mod print {
                 ty::TyKind::Dynamic(predicates, region) => {
                     let mut dyn_existential = self.print_dyn_existential(predicates)?;
                     let ast::TyKind::TraitObject(bounds, _syntax) = &mut dyn_existential.kind else { unreachable!() };
-                    if let Some(lifetime) = self.print_region(region)? {
+                    // NOTE: An erased object lifetime bound printed as `'_` inside a fn signature would be a new higher-ranked lifetime,
+                    //       which no longer matches the original type. Omitting the bound falls back to the default object lifetime bound.
+                    let is_erased_in_fn_sig = matches!(region.kind(), ty::RegionKind::ReErased) && self.fn_sig_binder_depth > 0;
+                    if !is_erased_in_fn_sig && let Some(lifetime) = self.print_region(region)? {
                         bounds.push(ast::GenericBound::Outlives(lifetime));
                     }
                     // NOTE: `dyn` trait objects of multiple bounds are syntactically ambiguous in some positions
@@ -737,8 +746,11 @@ pub mod print {
                 ty::TyKind::FnPtr(fn_sig_tys, fn_header) => {
                     let fn_sig_tys = fn_sig_tys.skip_binder();
 
-                    let input_tys_ast = fn_sig_tys.inputs().iter().copied().map(|ty| self.print_ty(ty)).try_collect::<Vec<_>>()?;
-                    let output_ty_ast = self.print_ty(fn_sig_tys.output())?;
+                    self.fn_sig_binder_depth += 1;
+                    let input_tys_ast = fn_sig_tys.inputs().iter().copied().map(|ty| self.print_ty(ty)).try_collect::<Vec<_>>();
+                    let output_ty_ast = self.print_ty(fn_sig_tys.output());
+                    self.fn_sig_binder_depth -= 1;
+                    let (input_tys_ast, output_ty_ast) = (input_tys_ast?, output_ty_ast?);
 
                     let input_params = input_tys_ast.into_iter()
                         .map(|ty| ast::Param {
@@ -804,6 +816,7 @@ pub mod print {
             sp,
             opaque_ty_handling,
             binding_item_def_id,
+            fn_sig_binder_depth: 0,
         };
         printer.print_ty(ty).ok()
     }
@@ -823,6 +836,7 @@ pub mod print {
             sp,
             opaque_ty_handling: OpaqueTyHandling::Infer,
             binding_item_def_id,
+            fn_sig_binder_depth: 0,
         };
         printer.print_region(region).ok().flatten()
     }
@@ -844,6 +858,7 @@ pub mod print {
             sp,
             opaque_ty_handling: OpaqueTyHandling::Infer,
             binding_item_def_id,
+            fn_sig_binder_depth: 0,
         };
         printer.print_const(ct).ok()
     }

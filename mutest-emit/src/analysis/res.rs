@@ -10,7 +10,7 @@ use rustc_middle::span_bug;
 use rustc_middle::metadata::{ModChild, Reexport};
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::ExternLocation;
-use rustc_span::{ExpnKind, DUMMY_SP, Ident, Span, Symbol, sym, kw};
+use rustc_span::{ExpnKind, DUMMY_SP, Ident, Symbol, sym, kw};
 use rustc_span::hygiene::AstPass;
 
 use crate::analysis::call_graph::{Call, CallKind};
@@ -464,6 +464,10 @@ impl<'tcx> DefPath<'tcx> {
             // Local path, no special prefix.
             DefPathRootKind::Local => {}
 
+            // `self::..` paths.
+            DefPathRootKind::Parent { supers: 0 } => {
+                segments.insert(0, ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::SelfLower, DUMMY_SP), args: None });
+            }
             // `super::..` paths.
             DefPathRootKind::Parent { supers } => {
                 segments.splice(0..0, (0..*supers).map(|_| ast::PathSegment { id: ast::DUMMY_NODE_ID, ident: Ident::new(kw::Super, DUMMY_SP), args: None }));
@@ -656,7 +660,6 @@ fn absolute_def_paths<'tcx>(
     def_id: hir::DefId,
     scope: Option<hir::DefId>,
     ignore_reexport: Option<hir::DefId>,
-    span: Span,
     limit: Option<NonZeroUsize>,
 ) -> SmallVec<[DefPath<'tcx>; 1]> {
     let mut impl_parents = parent_iter(tcx, def_id).enumerate().filter(|&(_, def_id)| matches!(tcx.def_kind(def_id), hir::DefKind::Impl { of_trait: _ }));
@@ -755,7 +758,9 @@ fn absolute_def_paths<'tcx>(
                 }
             }
 
-            span_bug!(span, "expected `{}` to be reached through another crate either through the extern prelude or an `extern crate` item", tcx.def_path_str(def_id));
+            // The definition's crate is neither a direct dependency nor reachable through one,
+            // e.g. a type of a transitive dependency that is not re-exported.
+            return smallvec![];
         }
     };
 
@@ -821,9 +826,8 @@ fn absolute_def_path<'tcx>(
     def_id: hir::DefId,
     scope: Option<hir::DefId>,
     ignore_reexport: Option<hir::DefId>,
-    span: Span,
 ) -> Option<DefPath<'tcx>> {
-    absolute_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, span, NonZeroUsize::new(1)).into_iter().next()
+    absolute_def_paths(tcx, crate_res, def_id, scope, ignore_reexport, NonZeroUsize::new(1)).into_iter().next()
 }
 
 #[derive(Clone, Copy)]
@@ -848,7 +852,6 @@ pub fn visible_def_path<'tcx>(
     request: DefPathRequestKind,
     scope: Option<hir::DefId>,
     ignore_reexport: Option<hir::DefId>,
-    span: Span,
 ) -> Result<DefPath<'tcx>, Option<hir::DefId>> {
     let mut def_id = request.def_id();
     if let hir::DefKind::Ctor(..) = tcx.def_kind(def_id) {
@@ -860,7 +863,13 @@ pub fn visible_def_path<'tcx>(
     // NOTE: This helps avoid visibility-related resolution issues in local items, see
     //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_same_scope_through_reexport`, and
     //       `tests/ui/hygiene/rustc_res/private_ctor_not_available_in_child_scope_through_reexport`.
-    if let Some(scope) = scope && let Some(local_def_id) = def_id.as_local() && def_id != scope {
+    // NOTE: A non-root module can also be named from within itself, e.g. by `use super::$mod`.
+    //       Its path must be built the same way as the paths of same-named items in the parent module,
+    //       otherwise an import of both resolutions introduces the name twice.
+    let is_def_path_to_enclosing_mod = |scope: hir::DefId| {
+        matches!(request, DefPathRequestKind::Def(_)) && def_id == scope && tcx.def_kind(def_id) == hir::DefKind::Mod && !def_id.is_crate_root()
+    };
+    if let Some(scope) = scope && let Some(local_def_id) = def_id.as_local() && (def_id != scope || is_def_path_to_enclosing_mod(scope)) {
         let mod_scope = match tcx.def_kind(scope) {
             hir::DefKind::Mod => scope,
             _ => tcx.parent_module_from_def_id(scope.expect_local()).to_def_id(),
@@ -871,7 +880,18 @@ pub fn visible_def_path<'tcx>(
         };
 
         if containing_mod == mod_scope {
-            if let Ok(visible_path) = lexical_def_path(tcx, def_id, scope) {
+            if let Ok(mut visible_path) = lexical_def_path(tcx, def_id, scope) {
+                // Root paths to items of the module at `self`, so that the first path segment
+                // cannot be shadowed by a local binding or generic param of the same name,
+                // e.g. `let f = f(); let g = self::f();`.
+                if let DefPathRootKind::Local = visible_path.root
+                    && let [first_segment, ..] = &visible_path.segments[..]
+                    && tcx.opt_parent(first_segment.def_id) == Some(mod_scope)
+                    && !matches!(tcx.def_kind(first_segment.def_id), hir::DefKind::Macro(_))
+                {
+                    visible_path.root = DefPathRootKind::Parent { supers: 0 };
+                }
+
                 return Ok(visible_path);
             }
         } else if !containing_mod.is_crate_root() {
@@ -912,7 +932,7 @@ pub fn visible_def_path<'tcx>(
         }
     }
 
-    if let Some(visible_path) = absolute_def_path(tcx, crate_res, def_id, scope, ignore_reexport, span) {
+    if let Some(visible_path) = absolute_def_path(tcx, crate_res, def_id, scope, ignore_reexport) {
         return Ok(visible_path);
     }
 

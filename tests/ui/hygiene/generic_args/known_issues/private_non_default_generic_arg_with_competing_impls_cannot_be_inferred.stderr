@@ -31,11 +31,11 @@ error[E0283]: type annotations needed
 note: multiple `impl`s satisfying `u8: traits::Trait<_>` found
   --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:40:5
    |
-40 |     impl Trait<crate::traits::private::A> for u8 {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+40 |     impl self::Trait<crate::traits::private::A> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ...
-44 |     impl Trait<crate::traits::private::B> for u8 {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+44 |     impl self::Trait<crate::traits::private::B> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0283]: type annotations needed
   --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:62:20
@@ -46,11 +46,11 @@ error[E0283]: type annotations needed
 note: multiple `impl`s satisfying `u8: traits::Trait<_>` found
   --> tests/ui/hygiene/generic_args/known_issues/private_non_default_generic_arg_with_competing_impls_cannot_be_inferred.rs:40:5
    |
-40 |     impl Trait<crate::traits::private::A> for u8 {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+40 |     impl self::Trait<crate::traits::private::A> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ...
-44 |     impl Trait<crate::traits::private::B> for u8 {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+44 |     impl self::Trait<crate::traits::private::B> for u8 {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: associated constants cannot be accessed directly on a `trait`, they can only be accessed through a specific `impl`
 help: use the fully qualified path to an implementation
    |
