@@ -1358,6 +1358,9 @@ impl<'tcx, 'op> MacroExpansionSanitizer<'tcx, 'op> {
                     // NOTE: Duplicate glob imports of the same module are already invalid before sanitization.
                     ((_, UseKind::Glob), (_, UseKind::Glob)) => false,
 
+                    // NOTE: Underscore imports do not introduce names, so they never conflict.
+                    ((_, UseKind::Single { ident, .. }), _) if ident.name == kw::Underscore => false,
+
                     ((path, UseKind::Single { ident, namespace, .. }), (next_path, UseKind::Single{ ident: next_ident, namespace: next_namespace, .. })) => {
                         #[inline]
                         fn matching_paths(path: &ast::Path, next_path: &ast::Path) -> bool {
