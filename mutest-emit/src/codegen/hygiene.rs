@@ -1514,7 +1514,7 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     self.visit_vis(&mut item.vis);
 
                     // FIXME: Resolutions for the prelude import path are missing; ignore.
-                    if !item.attrs.iter().any(|attr| attr.is_word() && attr.has_name(sym::prelude_import)) {
+                    if !item.attrs.iter().any(|attr| attr.has_name(sym::prelude_import) && attr.is_word()) {
                         self.sanitize_use_tree(use_tree, id, span);
                     }
                     return smallvec![item];
