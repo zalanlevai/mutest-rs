@@ -1,0 +1,127 @@
+[call_delete] delete call to `std::string::String::as_str` and replace it with `Default::default()` in first at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:29:5: 29:15
+  <-(1)- test
+
+[call_value_default_shadow] ignore return value of call to `std::string::String::as_str` by shadowing it with `Default::default()` in first at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:29:5: 29:15
+  <-(1)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:34:13: 34:56
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:34:13: 34:56
+  <-(0)- test
+
+[call_delete] delete call to `std::string::String::from_utf8_lossy` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:34:13: 34:43
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `std::string::String::from_utf8_lossy` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:34:13: 34:43
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:35:13: 35:36
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:35:13: 35:36
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:36:13: 36:44
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:36:13: 36:44
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:38:13: 38:42
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:38:13: 38:42
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:39:13: 39:39
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:39:13: 39:39
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:41:13: 41:36
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:41:13: 41:36
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:42:13: 42:33
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:42:13: 42:33
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:46:13: 46:27
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:46:13: 46:27
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::trim` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:46:13: 46:21
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::trim` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:46:13: 46:21
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:47:13: 47:32
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:47:13: 47:32
+  <-(0)- test
+
+[call_delete] delete call to `first` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:47:13: 47:26
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `first` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:47:13: 47:26
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:49:13: 49:48
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:49:13: 49:48
+  <-(0)- test
+
+[call_delete] delete call to `first` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:49:13: 49:42
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `first` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:49:13: 49:42
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:50:13: 50:45
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:50:13: 50:45
+  <-(0)- test
+
+[call_delete] delete call to `std::string::String::as_str` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:50:13: 50:39
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `std::string::String::as_str` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:50:13: 50:39
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:51:13: 51:43
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:51:13: 51:43
+  <-(0)- test
+
+[call_delete] delete call to `first` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:51:13: 51:37
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `first` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:51:13: 51:37
+  <-(0)- test
+
+[call_delete] delete call to `core::str::<impl str>::len` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:52:13: 52:40
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `core::str::<impl str>::len` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:52:13: 52:40
+  <-(0)- test
+
+[call_delete] delete call to `std::string::String::as_str` and replace it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:52:13: 52:34
+  <-(0)- test
+
+[call_value_default_shadow] ignore return value of call to `std::string::String::as_str` by shadowing it with `Default::default()` in f at tests/ui/mutation/ops/call_ignore/ignore_calls_that_return_borrows_of_temporaries.rs:52:13: 52:34
+  <-(0)- test
+
+42 mutations; 42 safe; 0 unsafe (0 tainted)

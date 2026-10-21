@@ -8,7 +8,69 @@ use mutest_emit::codegen::mutation::{MutCtxt, MutLoc, Mutations, Subst, SubstDef
 use mutest_emit::codegen::symbols::{Ident, path, kw};
 use rustc_data_structures::smallvec::smallvec;
 use rustc_data_structures::thin_vec::thin_vec;
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{TyCtxt, TypeVisitableExt};
+
+/// Whether the place (or value) produced by the expression is rooted in a temporary,
+/// i.e. it is not reached through a local, a static, or a pointer dereference.
+fn is_rooted_in_temporary<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> bool {
+    match expr.kind {
+        hir::ExprKind::Lit(_) => false,
+        // NOTE: Only locals and statics are places. Paths to constants, const params, and unit constructors produce new values.
+        hir::ExprKind::Path(ref qpath) => !matches!(typeck.qpath_res(qpath, expr.hir_id), hir::Res::Local(_) | hir::Res::Def(hir::DefKind::Static { .. }, _)),
+        hir::ExprKind::Unary(hir::UnOp::Deref, base) if typeck.expr_ty_adjusted(base).is_any_ptr() => false,
+        hir::ExprKind::Unary(hir::UnOp::Deref, base) | hir::ExprKind::Field(base, _) | hir::ExprKind::Index(base, _, _) => {
+            adjusted_place_is_rooted_in_temporary(typeck, base)
+        }
+        _ => !expr.is_place_expr(|_| true),
+    }
+}
+
+/// Like `is_rooted_in_temporary`, but for the place the expression is adjusted to,
+/// e.g. by autoderef of a field access or method receiver.
+fn adjusted_place_is_rooted_in_temporary<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> bool {
+    let mut source_ty = typeck.expr_ty(expr);
+    for adjustment in typeck.expr_adjustments(expr) {
+        // Places behind a pointer are not owned by the temporary pointer itself.
+        if let ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Builtin) = adjustment.kind && source_ty.is_any_ptr() { return false; }
+        if let ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(_)) = adjustment.kind { break; }
+        source_ty = adjustment.target;
+    }
+    is_rooted_in_temporary(typeck, expr)
+}
+
+/// Whether evaluating the expression borrows a temporary it creates,
+/// e.g. an autoref'd receiver of a method call, or a field of a temporary.
+fn borrows_temporaries<'tcx>(typeck: &'tcx ty::TypeckResults<'tcx>, expr: &'tcx hir::Expr<'tcx>) -> bool {
+    struct TemporaryBorrowFinder<'tcx> {
+        typeck: &'tcx ty::TypeckResults<'tcx>,
+        found: bool,
+    }
+
+    impl<'tcx> hir::intravisit::Visitor<'tcx> for TemporaryBorrowFinder<'tcx> {
+        fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
+            if self.found { return; }
+
+            let explicitly_borrows_temporary = matches!(expr.kind, hir::ExprKind::AddrOf(_, _, inner) if is_rooted_in_temporary(self.typeck, inner));
+            let adjustments_borrow_temporary = self.typeck.expr_adjustments(expr).iter().any(|adjustment| matches!(adjustment.kind,
+                | ty::adjustment::Adjust::Borrow(_)
+                | ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(_))
+            )) && adjusted_place_is_rooted_in_temporary(self.typeck, expr);
+            if explicitly_borrows_temporary || adjustments_borrow_temporary {
+                self.found = true;
+                return;
+            }
+
+            // NOTE: Closure bodies are evaluated separately.
+            if let hir::ExprKind::Closure(_) = expr.kind { return; }
+
+            hir::intravisit::walk_expr(self, expr);
+        }
+    }
+
+    let mut finder = TemporaryBorrowFinder { typeck, found: false };
+    hir::intravisit::walk_expr(&mut finder, expr);
+    finder.found
+}
 
 fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::LocalDefId, body: hir::BodyId, expr: &'tcx hir::Expr<'tcx>, limit_scope_to_local_callees: bool) -> Option<(hir::DefId, Ty<'tcx>)> {
     // Calls to functions that take no arguments (including self) are ignored, because they are likely
@@ -29,6 +91,10 @@ fn non_default_call<'tcx>(tcx: TyCtxt<'tcx>, f: hir::LocalDefId, body: hir::Body
     // The replacement `Default::default()` is inferred to the type the expression is coerced to (e.g. `Box<dyn Trait>`).
     let expr_ty_adjusted = typeck.expr_ty_adjusted(expr);
     if expr_ty_adjusted != expr_ty && !ty::impls_trait(tcx, f, expr_ty_adjusted, res::traits::Default(tcx), vec![]) { return None; }
+
+    // The original call is moved into an arm of the substitution `match`, which drops the temporaries of the call
+    // at the end of the arm, so a returned borrow of such a temporary would not live long enough.
+    if (expr_ty.has_erased_regions() || expr_ty.has_free_regions()) && borrows_temporaries(typeck, expr) { return None; }
 
     let Some((callee, _)) = res::callee(typeck, expr) else { return None; };
     if limit_scope_to_local_callees && !callee.is_local() { return None; }
