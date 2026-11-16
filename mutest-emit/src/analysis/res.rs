@@ -755,7 +755,10 @@ fn absolute_def_paths<'tcx>(
                 }
             }
 
-            span_bug!(span, "expected `{}` to be reached through another crate either through the extern prelude or an `extern crate` item", tcx.def_path_str(def_id));
+            // A transitive-dependency definition surfaced through macro-generated generics
+            // (e.g. `tokio::future::maybe_done::MaybeDone` reached via tokio::join!) need not be
+            // nameable from this crate. Treat it like the unnameable cases above (empty path).
+            return smallvec![];
         }
     };
 
