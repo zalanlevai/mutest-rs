@@ -1514,7 +1514,12 @@ impl<'tcx, 'op> ast::mut_visit::MutVisitor for MacroExpansionSanitizer<'tcx, 'op
                     self.visit_vis(&mut item.vis);
 
                     // FIXME: Resolutions for the prelude import path are missing; ignore.
-                    if !item.attrs.iter().any(|attr| attr.is_word() && attr.has_name(sym::prelude_import)) {
+                    // Note: `Attribute::is_word` panics on `AttrKind::Synthetic`, and a cfg-gated
+                    // `use` item that was included (e.g. `#[cfg(test)] use foo::bar;` in the test
+                    // profile) carries a synthetic cfg-trace attribute. `has_name` alone is false
+                    // for synthetic attributes and doc comments, and `prelude_import` is always a
+                    // word attribute, so the check stays equivalent.
+                    if !item.attrs.iter().any(|attr| attr.has_name(sym::prelude_import)) {
                         self.sanitize_use_tree(use_tree, id, span);
                     }
                     return smallvec![item];
